@@ -3,6 +3,7 @@
 // TUG-9: Bon Pemakaian + Surat Jalan + BAST
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -18,6 +19,19 @@ const UPT = "UPT Surabaya";
 const WAREHOUSE = "Gudang Ketintang";
 const DOC_CODE = "LOG.00.02";
 const APP_VERSION = "v3.0.0";
+
+// ─── SUPABASE CLIENT ────────────────────────────────────────────────
+// Satu client dipakai untuk auth (login/sesi/logout) maupun REST sync
+// (tug15_history, stock_current, dst — lihat fungsi sync di bawah).
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// Supabase Auth butuh format email; akun PLN login pakai username pendek
+// seperti sebelumnya, jadi kita tempelkan domain sintetis di belakangnya.
+// Tidak perlu domain ini benar-benar bisa terima email (Fase 1 belum pakai
+// fitur reset password lewat email — Admin reset manual via Dashboard).
+const AUTH_EMAIL_DOMAIN = "@warnoto.pln.local";
+function usernameToAuthEmail(username) { return `${(username||"").trim().toLowerCase()}${AUTH_EMAIL_DOMAIN}`; }
 
 const JENIS_BARANG = ["Pre Memory", "Cadang", "Persediaan", "Persediaan Bursa", "ATTB", "Non-Stock", "Bongkaran"];
 const STATUS_MATERIAL_RETUR = ["Material Sisa Baru", "Bongkaran", "Bongkaran ATTB (MTU)"]; // used in TUG-10 returns
@@ -58,16 +72,9 @@ const CLOUD = {
 };
 
 // ─── DEFAULT DATA ────────────────────────────────────────────────────
-const DEFAULT_USERS = [
-  { id:"U001", name:"Fajar Sutomo", username:"admin.ketintang", password:"pln2024", role:"ADMIN", jabatan:"Administrasi Gudang", avatar:"FS" },
-  { id:"U002", name:"Widi Ferdian R", username:"tl.ketintang", password:"pln2024", role:"TL", jabatan:"TL Logistik UPT Surabaya", avatar:"WF" },
-  { id:"U004", name:"Abdul Ro'uuf", username:"asman.ketintang", password:"pln2024", role:"ASMAN", jabatan:"Asman Konstruksi UPT Surabaya", avatar:"AR" },
-  { id:"U005", name:"Yaya Supriman", username:"manager.ketintang", password:"pln2024", role:"MANAGER", jabatan:"Manager", avatar:"YS" },
-  { id:"U006", name:"Admin UIT JBM", username:"admin.uit", password:"pln2024", role:"ADMIN_UIT", jabatan:"Admin Logistik UIT-JBM", avatar:"AU" },
-  { id:"U007", name:"Yayat Gunawan", username:"mgrlog.uit", password:"pln2024", role:"MGR_LOGISTIK_UIT", jabatan:"Manajer Manajemen Material & Logistik UIT-JBM", avatar:"YG" },
-  { id:"U008", name:"Budi Santoso", username:"pengadaan.ketintang", password:"pln2024", role:"PENGADAAN", jabatan:"Tim Pengadaan UPT Surabaya", avatar:"BS" },
-  { id:"U003", name:"Sari Dewi", username:"viewer", password:"pln2024", role:"VIEWER", jabatan:"Viewer", avatar:"SD" },
-];
+// User & password TIDAK lagi disimpan di source code (lihat Supabase Auth +
+// tabel "profiles" di supabase/schema.sql) — daftar user kini di-fetch dari
+// Supabase setelah login, bukan array statis seperti sebelumnya.
 
 // ─── MASTER UIT (Unit Induk Transmisi) ─────────────────────────────────
 const DEFAULT_UIT = [
@@ -1703,10 +1710,12 @@ function BarcodeScanner({ onDetect, onClose }) {
 // ════════════════════════════════════════════════════════════════════
 export default function PLNWarehouse() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); // true selama cek sesi Supabase Auth yang tersimpan
   const [loginForm, setLoginForm] = useState({ username:"", password:"" });
   const [loginErr, setLoginErr] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
 
-  const [users] = useState(DEFAULT_USERS);
+  const [users, setUsers] = useState([]); // di-fetch dari tabel "profiles" Supabase setelah login (lihat effect onAuthStateChange)
   const [stocks, setStocks] = useState([]); // junction rows: katalogId + lokasiId + qty/price/jenis
   const [katalogList, setKatalogList] = useState([]); // Master Katalog Barang
   const [lokasiList, setLokasiList] = useState([]); // Master Lokasi Gudang
@@ -1808,7 +1817,6 @@ export default function PLNWarehouse() {
   const chatEndRef = useRef(null);
   const petaWilayahDivRef = useRef(null);
   const petaWilayahMapRef = useRef(null);
-  const [aiSubTab, setAiSubTab] = useState("forecast"); // "forecast" | "chat"
   const [forecastDetail, setForecastDetail] = useState(null); // katalog object for drill-down
   const [forecastDetailResult, setForecastDetailResult] = useState(null);
   const [forecastDetailLoading, setForecastDetailLoading] = useState(false);
@@ -1959,10 +1967,51 @@ export default function PLNWarehouse() {
   function showToast(msg, type="success") { setToast({msg,type}); setTimeout(()=>setToast(null), type==="error"?5500:3500); }
   showToastRef.current = showToast;
 
-  function handleLogin() {
-    const u = users.find(u=>u.username===loginForm.username && u.password===loginForm.password);
-    if (u) { setCurrentUser(u); setLoginErr(""); } else setLoginErr("Username atau password salah.");
+  async function handleLogin() {
+    if (!supabase) { setLoginErr("Supabase belum dikonfigurasi."); return; }
+    if (!loginForm.username.trim() || !loginForm.password) { setLoginErr("Username dan password wajib diisi."); return; }
+    setLoginBusy(true); setLoginErr("");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: usernameToAuthEmail(loginForm.username),
+      password: loginForm.password,
+    });
+    setLoginBusy(false);
+    // currentUser di-set oleh listener onAuthStateChange (lihat effect di bawah),
+    // bukan di sini — supaya restore sesi (reload halaman) dan login manual
+    // lewat jalur yang sama persis, tidak ada logic yang didobel.
+    if (error) setLoginErr("Username atau password salah.");
   }
+
+  async function handleLogout() {
+    if (supabase) await supabase.auth.signOut();
+    setCurrentUser(null); setUsers([]);
+  }
+
+  // Pulihkan sesi Supabase Auth yang tersimpan saat app dibuka (reload, buka
+  // tab baru, dst), dan dengarkan event login/logout — satu listener ini
+  // menangani SEMUA transisi auth (initial load, login manual, logout),
+  // supaya currentUser & users selalu konsisten dari satu sumber.
+  useEffect(() => {
+    if (!supabase) { setAuthLoading(false); return; }
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const { data: profile, error: profErr } = await supabase.from("profiles").select("*").eq("id", session.user.id).single();
+        if (profErr || !profile) {
+          setLoginErr("Akun ini belum punya profil (hubungi Admin). Logout otomatis.");
+          await supabase.auth.signOut();
+          setCurrentUser(null); setUsers([]);
+        } else {
+          setCurrentUser({ id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar });
+          const { data: allProfiles } = await supabase.from("profiles").select("*");
+          setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar })));
+        }
+      } else {
+        setCurrentUser(null); setUsers([]);
+      }
+      setAuthLoading(false);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   // ── Stock CRUD ──
   // ── MASTER KATALOG BARANG CRUD ──
@@ -3573,6 +3622,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   if (scanKatalogId) return <ScanPublicView katalogId={scanKatalogId} />;
 
   // ══════════════════════ LOGIN ══════════════════════
+  // Selama authLoading, jangan tampilkan form login dulu — supaya tidak kedip
+  // ke layar login sesaat sebelum sesi Supabase Auth yang tersimpan terdeteksi.
+  if (authLoading) return (
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif",color:"white",fontSize:13}}>
+      Memuat sesi...
+    </div>
+  );
+
   if (!currentUser) return (
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:"white",borderRadius:20,padding:40,width:400,boxShadow:"0 25px 60px rgba(0,0,0,0.35)"}}>
@@ -3591,14 +3648,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <input style={sty.input} type="password" placeholder="Masukkan password..." value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
         </div>
         {loginErr && <div style={{color:C.red,fontSize:12,marginBottom:12,padding:"8px 12px",background:"#fee2e2",borderRadius:8}}>{loginErr}</div>}
-        <button style={{...sty.btn("primary"),width:"100%",padding:"12px",fontSize:15,marginTop:8}} onClick={handleLogin}>Masuk ke Sistem</button>
-        <div style={{marginTop:20,padding:14,background:"#f0f4ff",borderRadius:10,fontSize:11,color:C.muted}}>
-          <div style={{fontWeight:700,color:"#003087",marginBottom:6}}>Demo Accounts:</div>
-          <div>👷 <b>admin.ketintang</b> / pln2024 → Admin Gudang</div>
-          <div>👔 <b>tl.ketintang</b> / pln2024 → TL Logistik</div>
-          <div>🏗️ <b>asman.ketintang</b> / pln2024 → Asman Konstruksi</div>
-          <div>👁 <b>viewer</b> / pln2024 → Viewer</div>
-        </div>
+        <button style={{...sty.btn("primary"),width:"100%",padding:"12px",fontSize:15,marginTop:8,opacity:loginBusy?0.6:1,cursor:loginBusy?"default":"pointer"}} onClick={handleLogin} disabled={loginBusy}>{loginBusy?"Memeriksa...":"Masuk ke Sistem"}</button>
+        <div style={{marginTop:16,fontSize:11,color:C.muted,textAlign:"center"}}>Lupa password? Hubungi Admin untuk reset manual.</div>
       </div>
     </div>
   );
@@ -3624,6 +3675,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"peta",icon:"🗺️",label:"Peta Gudang"},
     {id:"opname",icon:"📋",label:"Stock Opname"},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
+    {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
     {id:"ai",icon:"🤖",label:"AI Agent"},
   ];
 
@@ -3819,7 +3871,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{color:"white",fontWeight:600,fontSize:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{currentUser.name}</div>
             <div style={{color:"rgba(255,255,255,0.5)",fontSize:10}}>{ROLES[currentUser.role]}</div>
           </div>
-          <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:16}} onClick={()=>setCurrentUser(null)} title="Logout">⬅</button>
+          <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:16}} onClick={handleLogout} title="Logout">⬅</button>
         </div>
       </div>
 
@@ -4757,12 +4809,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           </div>
         )}
 
-        {/* FORECAST */}
-        {/* AI AGENT + FORECAST — Terintegrasi */}
-        {(tab==="forecast"||tab==="ai") && (
+        {/* AI AGENT — chat AI murni, terpisah dari Forecast Stok */}
+        {tab==="ai" && (
           <AIAgentPage
-            aiSubTab={tab==="ai"?"chat":"forecast"}
-            setAiSubTab={(t)=>setTab(t==="chat"?"ai":"forecast")}
             enrichedStocks={enrichedStocks}
             katalogList={katalogList}
             stocks={stocks}
@@ -4775,12 +4824,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             chatLoading={chatLoading}
             chatEndRef={chatEndRef}
             sendChat={sendChat}
+            C={C} sty={sty}
+          />
+        )}
+
+        {/* FORECAST STOK — halaman sendiri, gabungkan heuristik lokal + AI Groq + ML Prophet berdampingan */}
+        {tab==="forecastStok" && (
+          <ForecastStokPage
+            katalogList={katalogList}
+            stocks={stocks}
+            txns={txns}
             forecastDetail={forecastDetail}
             setForecastDetail={setForecastDetail}
             forecastDetailResult={forecastDetailResult}
             setForecastDetailResult={setForecastDetailResult}
             forecastDetailLoading={forecastDetailLoading}
             forecastDrillDown={forecastDrillDown}
+            setTab={setTab}
+            sendChat={sendChat}
             C={C} sty={sty}
           />
         )}
@@ -6002,8 +6063,7 @@ function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
 // Push approved mutasi rows ke Supabase supaya bisa dipakai job ML forecast.
 // Pakai anon/publishable key (write diizinkan lewat RLS policy "Public insert"
 // yang scope-nya cuma ke tabel katalog & tug15_history — lihat supabase/schema.sql).
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// (SUPABASE_URL/SUPABASE_KEY/supabase client didefinisikan di dekat awal file.)
 const SYNCED_KEYS_STORAGE = "warnoto_synced_tug15_keys";
 
 function rowSyncKey(r) {
@@ -6700,11 +6760,9 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
 }
 
 // ─── AI AGENT PAGE (Forecast + Chat terintegrasi) ────────────────────────
-function AIAgentPage({ aiSubTab, setAiSubTab, enrichedStocks, katalogList, stocks, txns,
+function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
   rencanaKedatanganList, chatHistory, setChatHistory, chatInput, setChatInput,
-  chatLoading, chatEndRef, sendChat, forecastDetail, setForecastDetail,
-  forecastDetailResult, setForecastDetailResult, forecastDetailLoading,
-  forecastDrillDown, C, sty }) {
+  chatLoading, chatEndRef, sendChat, C, sty }) {
 
   const SUGGESTED = [
     "Analisa kondisi stok sekarang dan material yang perlu perhatian",
@@ -6715,144 +6773,15 @@ function AIAgentPage({ aiSubTab, setAiSubTab, enrichedStocks, katalogList, stock
     "Kapan terakhir kita terima material dari rencana kedatangan?",
   ];
 
-  // Compute risk badge per katalog
-  function getRiskBadge(katalog) {
-    const stockRows = stocks.filter(s=>s.katalogId===katalog.id);
-    const totalQty = stockRows.reduce((a,s)=>a+(s.qty||0),0);
-    const minQty = stockRows.reduce((a,s)=>Math.max(a,s.minQty||0),0);
-
-    // Avg monthly usage from history
-    const usageItems = [];
-    txns.filter(t=>["TUG9","TUG8"].includes(t.docType)&&t.status==="APPROVED").forEach(t=>{
-      (t.stockItems||[]).forEach(si=>{
-        const s = stocks.find(x=>x.id===si.stockId);
-        if(s?.katalogId===katalog.id) usageItems.push({qty:si.qty||0,ts:t.approvedAt||t.createdAt});
-      });
-    });
-    const totalUsage = usageItems.reduce((a,i)=>a+i.qty,0);
-    const oldest = usageItems.length?Math.min(...usageItems.map(i=>i.ts)):Date.now();
-    const bulan = Math.max(1,(Date.now()-oldest)/(30*24*60*60*1000));
-    const avgPerBulan = totalUsage/bulan;
-    const estimasiHari = avgPerBulan>0?Math.round(totalQty/(avgPerBulan/30)):Infinity;
-
-    const isKritis = minQty>0&&totalQty<=minQty;
-    if(isKritis||estimasiHari<=30) return {label:"🔴 KRITIS",color:"#dc2626",bg:"#fee2e2",hari:estimasiHari};
-    if(estimasiHari<=90) return {label:"🟡 PERHATIAN",color:"#d97706",bg:"#fef3c7",hari:estimasiHari};
-    if(estimasiHari<=180) return {label:"🟠 WASPADA",color:"#ea580c",bg:"#fff7ed",hari:estimasiHari};
-    return {label:"🟢 AMAN",color:"#16a34a",bg:"#f0fdf4",hari:estimasiHari};
-  }
-
-  // Only katalogs with stocks
-  const katalogWithStock = katalogList.filter(k=>stocks.some(s=>s.katalogId===k.id));
-
   return (
     <div>
-      {/* Header + Tab switcher */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
-        <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🤖 AI Agent & Forecasting</h1>
-          <p style={{color:C.muted,fontSize:13}}>Powered by Claude AI • Data real-time {WAREHOUSE}</p>
-        </div>
-        <div style={{display:"flex",gap:4,background:"#f1f5f9",borderRadius:10,padding:4}}>
-          {[{id:"forecast",icon:"🔮",label:"Forecast Stok"},{id:"chat",icon:"💬",label:"Tanya AI"}].map(t=>(
-            <button key={t.id} onClick={()=>setAiSubTab(t.id)}
-              style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:12,
-                background:aiSubTab===t.id?"white":"transparent",
-                color:aiSubTab===t.id?C.accent:C.muted,
-                boxShadow:aiSubTab===t.id?"0 1px 4px rgba(0,0,0,0.12)":"none",transition:"all 0.2s"}}>
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
+      <div style={{marginBottom:16}}>
+        <h1 style={{fontSize:22,fontWeight:900}}>🤖 AI Agent</h1>
+        <p style={{color:C.muted,fontSize:13}}>Powered by Claude AI • Data real-time {WAREHOUSE} • Untuk prediksi stok/forecast, lihat menu "📈 Forecast Stok"</p>
       </div>
 
-      {/* ── TAB FORECAST ── */}
-      {aiSubTab==="forecast" && !forecastDetail && (
-        <div>
-          <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#1d4ed8"}}>
-            ℹ️ Badge risiko dihitung dari rata-rata pemakaian historis TUG-9/8 vs stok saat ini. Klik "Analisis AI Detail" untuk prediksi mendalam per material.
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
-            {katalogWithStock.map(kat=>{
-              const stockRows = stocks.filter(s=>s.katalogId===kat.id);
-              const totalQty = stockRows.reduce((a,s)=>a+(s.qty||0),0);
-              const risk = getRiskBadge(kat);
-              return (
-                <div key={kat.id} style={{...sty.card,borderLeft:`4px solid ${risk.color}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{kat.name}</div>
-                      <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{kat.katalog}</div>
-                    </div>
-                    <span style={{padding:"3px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:risk.bg,color:risk.color,marginLeft:8,flexShrink:0}}>{risk.label}</span>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:10}}>
-                    <div style={{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}}>
-                      <div style={{fontSize:9,color:C.muted,fontWeight:700}}>STOK SAAT INI</div>
-                      <div style={{fontSize:14,fontWeight:800,color:C.text}}>{fmtNum(totalQty)} <span style={{fontSize:10,fontWeight:400}}>{kat.satuan}</span></div>
-                    </div>
-                    <div style={{background:"#f9fafb",borderRadius:6,padding:"6px 8px"}}>
-                      <div style={{fontSize:9,color:C.muted,fontWeight:700}}>EST. HABIS</div>
-                      <div style={{fontSize:14,fontWeight:800,color:risk.color}}>
-                        {risk.hari===Infinity?"Tdk ada data":risk.hari>365?">1 thn":`~${risk.hari} hr`}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:6}}>
-                    <button style={{...sty.btn("primary","sm"),flex:2}}
-                      onClick={()=>{setForecastDetail({kat,stockRows});setForecastDetailResult(null);forecastDrillDown(kat,stockRows);}}>
-                      🔮 Analisis AI Detail
-                    </button>
-                    <button style={{...sty.btn("ghost","sm"),flex:1}}
-                      onClick={()=>{setAiSubTab("chat");setTimeout(()=>{sendChat(`Analisis dan forecast stok untuk material: ${kat.name} [${kat.katalog}]`);},100);}}>
-                      💬 Tanya AI
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {katalogWithStock.length===0 && (
-            <div style={{...sty.card,textAlign:"center",padding:50,color:C.muted}}>
-              <div style={{fontSize:40,marginBottom:12}}>🔮</div>
-              <div style={{fontSize:14,fontWeight:700}}>Belum ada data stok untuk dianalisis</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── FORECAST DRILL-DOWN ── */}
-      {aiSubTab==="forecast" && forecastDetail && (
-        <div>
-          <button style={{...sty.btn("ghost","sm"),marginBottom:14}} onClick={()=>{setForecastDetail(null);setForecastDetailResult(null);}}>← Kembali ke Semua Material</button>
-          <div style={{...sty.card,marginBottom:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-              <div>
-                <div style={{fontSize:18,fontWeight:900}}>{forecastDetail.kat.name}</div>
-                <div style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{forecastDetail.kat.katalog} • {forecastDetail.kat.satuan}</div>
-              </div>
-              <button style={sty.btn("ghost","sm")} onClick={()=>{setAiSubTab("chat");setTimeout(()=>sendChat(`Berikan saran pengadaan untuk material: ${forecastDetail.kat.name}`),100);}}>💬 Lanjutkan di Chat AI</button>
-            </div>
-          </div>
-          {forecastDetailLoading && (
-            <div style={{...sty.card,textAlign:"center",padding:40}}>
-              <div style={{fontSize:32,marginBottom:12}}>⏳</div>
-              <div style={{fontSize:14,fontWeight:700,color:C.accent}}>AI sedang menganalisis data historis...</div>
-              <div style={{fontSize:12,color:C.muted,marginTop:4}}>Biasanya 5-10 detik</div>
-            </div>
-          )}
-          {forecastDetailResult && !forecastDetailLoading && (
-            <div style={{...sty.card}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.accent,marginBottom:12}}>🤖 Analisis AI — {forecastDetail.kat.name}</div>
-              <div style={{fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap",color:C.text}}>{forecastDetailResult}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── TAB CHAT AI ── */}
-      {aiSubTab==="chat" && (
-        <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
+      {/* ── CHAT AI ── */}
+      <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
           {/* Suggested questions */}
           {chatHistory.length<=1 && (
             <div style={{marginBottom:12}}>
@@ -6907,6 +6836,229 @@ function AIAgentPage({ aiSubTab, setAiSubTab, enrichedStocks, katalogList, stock
               {chatLoading?"...":"Kirim 🚀"}
             </button>
           </div>
+        </div>
+    </div>
+  );
+}
+
+// ─── FORECAST STOK PAGE — heuristik lokal + AI Groq (kiri) vs ML Prophet (kanan), berdampingan ──
+function ForecastStokPage({ katalogList, stocks, txns, forecastDetail, setForecastDetail,
+  forecastDetailResult, setForecastDetailResult, forecastDetailLoading, forecastDrillDown,
+  setTab, sendChat, C, sty }) {
+
+  // Prediksi ML (Prophet, dihitung tiap malam via GitHub Actions job
+  // ml/train_forecast.py) — diambil dari forecast_predictions, terpisah dari
+  // heuristik lokal getRiskBadge() di bawah. Cuma terisi untuk katalog yang
+  // sudah punya >=10 baris histori KELUAR (lihat MIN_DATA_POINTS di skrip);
+  // katalog lain akan tampil "Belum cukup data historis" sampai cukup.
+  const [mlForecasts, setMlForecasts] = useState({}); // katalogId -> {estimasiHari, avgQtyPrediksiHarian, modelVersion, updatedAt, series:[qty,...]}
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.from("forecast_predictions").select("katalog_id,tanggal_prediksi,qty_prediksi,estimasi_hari_sampai_habis,model_version,updated_at").order("tanggal_prediksi", { ascending: true });
+      if (cancelled || error || !data) return;
+      const grouped = {};
+      data.forEach(row => {
+        if (!grouped[row.katalog_id]) grouped[row.katalog_id] = { qtySum:0, qtyCount:0, estimasiHari:row.estimasi_hari_sampai_habis, modelVersion:row.model_version, updatedAt:row.updated_at, series:[] };
+        const g = grouped[row.katalog_id];
+        g.qtySum += row.qty_prediksi||0; g.qtyCount += 1;
+        g.series.push(row.qty_prediksi||0);
+        if (row.estimasi_hari_sampai_habis != null) g.estimasiHari = row.estimasi_hari_sampai_habis;
+      });
+      const result = {};
+      Object.entries(grouped).forEach(([kid,g]) => { result[kid] = { estimasiHari:g.estimasiHari, avgQtyPrediksiHarian:g.qtyCount>0?g.qtySum/g.qtyCount:0, modelVersion:g.modelVersion, updatedAt:g.updatedAt, series:g.series }; });
+      setMlForecasts(result);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Heuristik lokal: rata-rata pemakaian historis TUG-9/8 vs stok saat ini
+  function getRiskBadge(katalog) {
+    const stockRows = stocks.filter(s=>s.katalogId===katalog.id);
+    const totalQty = stockRows.reduce((a,s)=>a+(s.qty||0),0);
+    const minQty = stockRows.reduce((a,s)=>Math.max(a,s.minQty||0),0);
+
+    const usageItems = [];
+    txns.filter(t=>["TUG9","TUG8"].includes(t.docType)&&t.status==="APPROVED").forEach(t=>{
+      (t.stockItems||[]).forEach(si=>{
+        const s = stocks.find(x=>x.id===si.stockId);
+        if(s?.katalogId===katalog.id) usageItems.push({qty:si.qty||0,ts:t.approvedAt||t.createdAt});
+      });
+    });
+    const totalUsage = usageItems.reduce((a,i)=>a+i.qty,0);
+    const oldest = usageItems.length?Math.min(...usageItems.map(i=>i.ts)):Date.now();
+    const bulan = Math.max(1,(Date.now()-oldest)/(30*24*60*60*1000));
+    const avgPerBulan = totalUsage/bulan;
+    const estimasiHari = avgPerBulan>0?Math.round(totalQty/(avgPerBulan/30)):Infinity;
+
+    const isKritis = minQty>0&&totalQty<=minQty;
+    if(isKritis||estimasiHari<=30) return {label:"🔴 KRITIS",color:"#dc2626",bg:"#fee2e2",hari:estimasiHari};
+    if(estimasiHari<=90) return {label:"🟡 PERHATIAN",color:"#d97706",bg:"#fef3c7",hari:estimasiHari};
+    if(estimasiHari<=180) return {label:"🟠 WASPADA",color:"#ea580c",bg:"#fff7ed",hari:estimasiHari};
+    return {label:"🟢 AMAN",color:"#16a34a",bg:"#f0fdf4",hari:estimasiHari};
+  }
+
+  function lanjutkanDiChat(prompt) {
+    setTab("ai");
+    setTimeout(()=>sendChat(prompt), 100);
+  }
+
+  const [statusFilter, setStatusFilter] = useState("ALL"); // "ALL" | label risk (cth "🔴 KRITIS")
+
+  const katalogWithStock = katalogList.filter(k=>stocks.some(s=>s.katalogId===k.id));
+
+  // Hitung risk sekali per katalog (dipakai untuk render kartu + filter + counter)
+  const enriched = katalogWithStock.map(kat => {
+    const stockRows = stocks.filter(s=>s.katalogId===kat.id);
+    return { kat, stockRows, risk: getRiskBadge(kat), ml: mlForecasts[kat.id] };
+  });
+  const STATUS_FILTERS = ["🔴 KRITIS","🟡 PERHATIAN","🟠 WASPADA","🟢 AMAN"];
+  const statusCounts = STATUS_FILTERS.reduce((acc,label) => { acc[label] = enriched.filter(e=>e.risk.label===label).length; return acc; }, {});
+  const visibleList = statusFilter==="ALL" ? enriched : enriched.filter(e=>e.risk.label===statusFilter);
+
+  // ── DETAIL DRILL-DOWN ──
+  if (forecastDetail) {
+    const kat = forecastDetail.kat;
+    const ml = mlForecasts[kat.id];
+    return (
+      <div>
+        <button style={{...sty.btn("ghost","sm"),marginBottom:14}} onClick={()=>{setForecastDetail(null);setForecastDetailResult(null);}}>← Kembali ke Semua Material</button>
+        <div style={{...sty.card,marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            <div>
+              <div style={{fontSize:18,fontWeight:900}}>{kat.name}</div>
+              <div style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{kat.katalog} • {kat.satuan}</div>
+            </div>
+            <button style={sty.btn("ghost","sm")} onClick={()=>lanjutkanDiChat(`Berikan saran pengadaan untuk material: ${kat.name}`)}>💬 Lanjutkan di Chat AI</button>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16}}>
+          {/* KIRI: Heuristik + AI Groq */}
+          <div style={{...sty.card,borderTop:"4px solid #2563eb"}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#2563eb",marginBottom:10}}>📊 Analisis Cepat (Heuristik + AI)</div>
+            {forecastDetailLoading && (
+              <div style={{textAlign:"center",padding:30}}>
+                <div style={{fontSize:28,marginBottom:10}}>⏳</div>
+                <div style={{fontSize:13,fontWeight:700,color:C.accent}}>AI sedang menganalisis...</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:4}}>Biasanya 5-10 detik</div>
+              </div>
+            )}
+            {forecastDetailResult && !forecastDetailLoading && (
+              <div style={{fontSize:12.5,lineHeight:1.8,whiteSpace:"pre-wrap",color:C.text}}>{forecastDetailResult}</div>
+            )}
+          </div>
+
+          {/* KANAN: ML Prophet */}
+          <div style={{...sty.card,borderTop:"4px solid #7c3aed"}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#7c3aed",marginBottom:10}}>🧠 Prediksi ML (Prophet)</div>
+            {ml ? (
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  <div style={{background:"#f5f3ff",borderRadius:6,padding:"8px 10px"}}>
+                    <div style={{fontSize:9,color:C.muted,fontWeight:700}}>ESTIMASI HABIS</div>
+                    <div style={{fontSize:16,fontWeight:800,color:"#7c3aed"}}>{ml.estimasiHari!=null ? `~${fmtNum(ml.estimasiHari)} hari` : "Tdk ada data"}</div>
+                  </div>
+                  <div style={{background:"#f5f3ff",borderRadius:6,padding:"8px 10px"}}>
+                    <div style={{fontSize:9,color:C.muted,fontWeight:700}}>RATA² PREDIKSI/HARI</div>
+                    <div style={{fontSize:16,fontWeight:800,color:"#7c3aed"}}>{fmtNum(Math.round(ml.avgQtyPrediksiHarian))} {kat.satuan}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:9,color:C.muted,fontWeight:700,marginBottom:4}}>TREN PREDIKSI 30 HARI KE DEPAN</div>
+                <div style={{background:"#f5f3ff",borderRadius:8,padding:"10px 10px 4px"}}>
+                  <Sparkline data={ml.series} color="#7c3aed" w={280} h={50}/>
+                </div>
+                <div style={{fontSize:10,color:C.muted,marginTop:8}}>
+                  Model: {ml.modelVersion||"-"} • Update terakhir: {fmtDate(new Date(ml.updatedAt).getTime())}
+                </div>
+              </>
+            ) : (
+              <div style={{fontSize:12,color:C.muted}}>Belum cukup histori transaksi KELUAR (minimal 10 baris) untuk material ini — prediksi ML akan otomatis muncul begitu data historisnya cukup, tanpa perlu konfigurasi tambahan.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── LIST SEMUA MATERIAL ──
+  return (
+    <div>
+      <div style={{marginBottom:16}}>
+        <h1 style={{fontSize:22,fontWeight:900}}>📈 Forecast Stok</h1>
+        <p style={{color:C.muted,fontSize:13}}>Perbandingan 2 metode: heuristik pemakaian historis vs ML Prophet • {WAREHOUSE}</p>
+      </div>
+      <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#1d4ed8"}}>
+        ℹ️ <b>📊 Heuristik</b> = rata-rata pemakaian historis TUG-9/8 vs stok saat ini (selalu tersedia). <b>🧠 ML Prophet</b> = model statistik dari histori TUG-15, lebih presisi tapi butuh minimal 10 transaksi keluar per material. Klik kartu untuk analisis AI mendalam + tren prediksi.
+      </div>
+
+      {/* Filter status — klik buat menyaring list di bawah */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+        <button onClick={()=>setStatusFilter("ALL")}
+          style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${statusFilter==="ALL"?C.accent:C.border}`,background:statusFilter==="ALL"?C.accent:"white",color:statusFilter==="ALL"?"white":C.muted,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+          Semua ({enriched.length})
+        </button>
+        {STATUS_FILTERS.map(label=>(
+          <button key={label} onClick={()=>setStatusFilter(statusFilter===label?"ALL":label)}
+            style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${statusFilter===label?C.accent:C.border}`,background:statusFilter===label?C.accent:"white",color:statusFilter===label?"white":C.muted,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+            {label} ({statusCounts[label]})
+          </button>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(310px,1fr))",gap:14}}>
+        {visibleList.map(({kat,stockRows,risk,ml})=>{
+          const totalQty = stockRows.reduce((a,s)=>a+(s.qty||0),0);
+          // Tandai kalau heuristik & ML berbeda jauh (>40% relatif) — sinyal buat ditelusuri lebih lanjut
+          const divergent = ml?.estimasiHari!=null && risk.hari!==Infinity && Math.abs(ml.estimasiHari-risk.hari) / Math.max(risk.hari,1) > 0.4;
+          return (
+            <div key={kat.id} style={{...sty.card,borderLeft:`4px solid ${risk.color}`,cursor:"pointer"}}
+              onClick={()=>{setForecastDetail({kat,stockRows});setForecastDetailResult(null);forecastDrillDown(kat,stockRows);}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:700,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{kat.name}</div>
+                  <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{kat.katalog}</div>
+                </div>
+                <span style={{padding:"3px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:risk.bg,color:risk.color,marginLeft:8,flexShrink:0}}>{risk.label}</span>
+              </div>
+              <div style={{background:"#f9fafb",borderRadius:6,padding:"6px 8px",marginBottom:8}}>
+                <div style={{fontSize:9,color:C.muted,fontWeight:700}}>STOK SAAT INI</div>
+                <div style={{fontSize:14,fontWeight:800,color:C.text}}>{fmtNum(totalQty)} <span style={{fontSize:10,fontWeight:400}}>{kat.satuan}</span></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                <div style={{background:"#eff6ff",borderRadius:6,padding:"6px 8px"}}>
+                  <div style={{fontSize:8.5,color:"#1d4ed8",fontWeight:700}}>📊 HEURISTIK</div>
+                  <div style={{fontSize:12.5,fontWeight:800,color:"#1d4ed8"}}>{risk.hari===Infinity?"Tdk ada data":risk.hari>365?">1 thn":`~${risk.hari} hr`}</div>
+                </div>
+                <div style={{background:"#f5f3ff",borderRadius:6,padding:"6px 8px"}}>
+                  <div style={{fontSize:8.5,color:"#7c3aed",fontWeight:700}}>🧠 ML PROPHET</div>
+                  <div style={{fontSize:12.5,fontWeight:800,color:"#7c3aed"}}>{ml?.estimasiHari!=null?`~${fmtNum(ml.estimasiHari)} hr`:"Data kurang"}</div>
+                </div>
+              </div>
+              {divergent && <div style={{fontSize:10,color:"#b45309",background:"#fef3c7",borderRadius:6,padding:"4px 8px",marginBottom:8}}>⚠️ Heuristik & ML beda jauh — perlu ditelusuri</div>}
+              <div style={{display:"flex",gap:6}}>
+                <button style={{...sty.btn("primary","sm"),flex:2}} onClick={e=>{e.stopPropagation();setForecastDetail({kat,stockRows});setForecastDetailResult(null);forecastDrillDown(kat,stockRows);}}>
+                  🔮 Analisis AI Detail
+                </button>
+                <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={e=>{e.stopPropagation();lanjutkanDiChat(`Analisis dan forecast stok untuk material: ${kat.name} [${kat.katalog}]`);}}>
+                  💬 Tanya AI
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {katalogWithStock.length===0 && (
+        <div style={{...sty.card,textAlign:"center",padding:50,color:C.muted}}>
+          <div style={{fontSize:40,marginBottom:12}}>📈</div>
+          <div style={{fontSize:14,fontWeight:700}}>Belum ada data stok untuk dianalisis</div>
+        </div>
+      )}
+      {katalogWithStock.length>0 && visibleList.length===0 && (
+        <div style={{...sty.card,textAlign:"center",padding:50,color:C.muted}}>
+          <div style={{fontSize:40,marginBottom:12}}>🔍</div>
+          <div style={{fontSize:14,fontWeight:700}}>Tidak ada material dengan status "{statusFilter}"</div>
         </div>
       )}
     </div>

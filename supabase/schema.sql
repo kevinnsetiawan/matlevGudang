@@ -166,3 +166,50 @@ create policy "Public upload material-photos" on storage.objects
   for insert with check (bucket_id = 'material-photos');
 create policy "Public update material-photos" on storage.objects
   for update using (bucket_id = 'material-photos');
+
+-- ────────────────────────────────────────────────────────────
+-- 7. PROFILES — data user aplikasi (cerminan dari currentUser di App.jsx).
+--    Login sekarang lewat Supabase Auth (auth.users), bukan array password
+--    polos di App.jsx lagi. Tabel ini cuma menyimpan data tampilan/role,
+--    dihubungkan 1:1 ke auth.users lewat id (uuid) yang sama.
+-- ────────────────────────────────────────────────────────────
+create table if not exists profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text unique not null,
+  name text not null,
+  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / PENGADAAN / VIEWER
+  jabatan text,
+  avatar text,
+  created_at timestamptz default now()
+);
+
+alter table profiles enable row level security;
+drop policy if exists "Authenticated read profiles" on profiles;
+-- Semua user yang sudah login boleh baca SEMUA profil (bukan cuma punya
+-- sendiri) — App.jsx butuh ini untuk menampilkan nama "dibuat oleh"/
+-- "disetujui oleh" pengguna lain di dokumen TUG, daftar approval, dst.
+create policy "Authenticated read profiles" on profiles for select using (auth.role() = 'authenticated');
+-- SENGAJA tidak ada policy insert/update untuk role authenticated biasa —
+-- supaya user tidak bisa menaikkan role-nya sendiri lewat console browser.
+-- Pembuatan/ubah profil Fase 1 lewat SQL manual (lihat instruksi migrasi),
+-- Fase 2 nanti lewat Edge Function dengan service_role.
+
+-- Trigger: begitu ada user baru terdaftar di Supabase Auth (lewat Dashboard
+-- "Add user" atau nanti Edge Function), otomatis bikin baris stub di
+-- profiles (role default VIEWER, paling rendah aksesnya) — supaya Admin
+-- tinggal jalankan UPDATE untuk isi detail (name/role/jabatan/avatar)
+-- sesudahnya, tidak perlu INSERT manual yang harus mencocokkan uuid sendiri.
+create or replace function public.handle_new_auth_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, username, name, role)
+  values (new.id, split_part(new.email, '@', 1), split_part(new.email, '@', 1), 'VIEWER')
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_auth_user();
