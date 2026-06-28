@@ -1,0 +1,26 @@
+name: Train Forecast (ML nightly)
+
+on:
+  schedule:
+    # 02:00 WIB = 19:00 UTC hari sebelumnya
+    - cron: "0 19 * * *"
+  workflow_dispatch: {} # boleh dipicu manual juga dari tab Actions di GitHub
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r ml/requirements.txt
+
+      - name: Run training job
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python ml/train_forecast.py

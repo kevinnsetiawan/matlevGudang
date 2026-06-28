@@ -1764,6 +1764,8 @@ export default function PLNWarehouse() {
   const [kartuGantungDetail, setKartuGantungDetail] = useState(null);
   const [petaMiniDetail, setPetaMiniDetail] = useState(null); // {stock, lokasi, gudang}
   const [stockDetailId, setStockDetailId] = useState(null); // id stok yang dibuka detailnya (klik baris Data Stok)
+  const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
+  const [lightboxImg, setLightboxImg] = useState(null); // src foto yang sedang di-overview full-screen
   const [scannerTarget, setScannerTarget] = useState(null); // "stockForm" | {index}
   const [stockForm, setStockForm] = useState({});
   const [txnForm, setTxnForm] = useState(null);
@@ -2134,11 +2136,30 @@ export default function PLNWarehouse() {
     const dup = stocks.find(s => s.katalogId===stockForm.katalogId && s.lokasiId===stockForm.lokasiId && s.id!==stockForm.id);
     if (dup) { showToast("Kombinasi barang + lokasi ini sudah ada! Edit baris yang sudah ada saja.","error"); return; }
     let ns;
-    if (stockModal==="edit") ns = stocks.map(s=>s.id===stockForm.id?{...stockForm}:s);
+    let wentToApproval = false;
+    if (stockModal==="edit") {
+      const original = stocks.find(s=>s.id===stockForm.id) || {};
+      const isTL = currentUser.role === "TL";
+      const fieldsChanged = original.qty!==stockForm.qty || original.price!==stockForm.price || original.jenisBarang!==stockForm.jenisBarang;
+      if (fieldsChanged && !isTL) {
+        wentToApproval = true;
+        // qty/harga/jenis butuh approval TL — field lain (lokasi, minQty, foto) tetap langsung tersimpan
+        const updated = {
+          ...stockForm,
+          qty: original.qty, price: original.price, jenisBarang: original.jenisBarang,
+          editPending: true,
+          pendingEditData: { qty: stockForm.qty, price: stockForm.price, jenisBarang: stockForm.jenisBarang },
+          editRequestedBy: currentUser.id, editRequestedAt: Date.now(),
+        };
+        ns = stocks.map(s=>s.id===stockForm.id?updated:s);
+      } else {
+        ns = stocks.map(s=>s.id===stockForm.id?{...stockForm, editPending:false, pendingEditData:null}:s);
+      }
+    }
     else ns = [...stocks, {...stockForm, createdAt:Date.now()}];
     setStocks(ns); setStockModal(null);
     await saveToCloud({stocks: ns});
-    showToast(stockModal==="edit" ? "Data Stok diupdate!" : "Data Stok baru ditambahkan!");
+    showToast(wentToApproval ? "📨 Perubahan qty/harga/jenis diajukan! Menunggu approval TL." : (stockModal==="edit" ? "Data Stok diupdate!" : "Data Stok baru ditambahkan!"));
   }
   // Upload langsung foto Nameplate/Keseluruhan dari modal detail (klik baris Data Stok) — khusus Admin/TL
   async function updateStockFoto(id, field, img) {
@@ -2149,8 +2170,52 @@ export default function PLNWarehouse() {
   }
   async function deleteStock(id) {
     if (!window.confirm("Hapus baris stok ini?")) return;
+    const isTL = currentUser.role === "TL";
+    if (isTL) {
+      const ns = stocks.filter(s=>s.id!==id);
+      setStocks(ns); await saveToCloud({stocks: ns}); showToast("Data Stok dihapus.");
+    } else {
+      const st = stocks.find(s=>s.id===id);
+      const ns = stocks.map(s=>s.id===id ? {...s, deletePending:true, deleteRequestedBy:currentUser.id, deleteRequestedAt:Date.now()} : s);
+      setStocks(ns); await saveToCloud({stocks: ns});
+      showToast(`📨 Penghapusan ${st?.name||""} diajukan! Menunggu approval TL.`);
+    }
+  }
+
+  // Approve/reject pengajuan Edit (qty/harga/jenis) Data Stok — khusus TL
+  async function approveStockEdit(id) {
+    const st = stocks.find(s=>s.id===id);
+    if (!st || !st.editPending) return;
+    const ns = stocks.map(s=>s.id===id ? {...s, ...s.pendingEditData, editPending:false, pendingEditData:null, editApprovedBy:currentUser.id, editApprovedAt:Date.now()} : s);
+    setStocks(ns); await saveToCloud({stocks: ns});
+    await logApprovalHistory({type:"STOCK_EDIT", decision:"APPROVED", title:`Edit ${st.name}: qty ${fmtNum(st.qty)}→${fmtNum(st.pendingEditData.qty)}, harga Rp${fmtNum(st.price)}→Rp${fmtNum(st.pendingEditData.price)}, jenis ${st.jenisBarang}→${st.pendingEditData.jenisBarang}`, requestedBy:st.editRequestedBy, requestedAt:st.editRequestedAt});
+    showToast(`✅ Perubahan ${st.name} disetujui.`);
+  }
+  async function rejectStockEdit(id) {
+    const st = stocks.find(s=>s.id===id);
+    if (!st || !st.editPending) return;
+    const ns = stocks.map(s=>s.id===id ? {...s, editPending:false, pendingEditData:null} : s);
+    setStocks(ns); await saveToCloud({stocks: ns});
+    await logApprovalHistory({type:"STOCK_EDIT", decision:"REJECTED", title:`Edit ${st.name} ditolak`, requestedBy:st.editRequestedBy, requestedAt:st.editRequestedAt});
+    showToast(`❌ Perubahan ${st.name} ditolak.`);
+  }
+
+  // Approve/reject pengajuan Hapus Data Stok — khusus TL
+  async function approveStockDelete(id) {
+    const st = stocks.find(s=>s.id===id);
+    if (!st || !st.deletePending) return;
     const ns = stocks.filter(s=>s.id!==id);
-    setStocks(ns); await saveToCloud({stocks: ns}); showToast("Data Stok dihapus.");
+    setStocks(ns); await saveToCloud({stocks: ns});
+    await logApprovalHistory({type:"STOCK_DELETE", decision:"APPROVED", title:`Hapus ${st.name}`, requestedBy:st.deleteRequestedBy, requestedAt:st.deleteRequestedAt});
+    showToast(`✅ Penghapusan ${st.name} disetujui.`);
+  }
+  async function rejectStockDelete(id) {
+    const st = stocks.find(s=>s.id===id);
+    if (!st || !st.deletePending) return;
+    const ns = stocks.map(s=>s.id===id ? {...s, deletePending:false, deleteRequestedBy:null, deleteRequestedAt:null} : s);
+    setStocks(ns); await saveToCloud({stocks: ns});
+    await logApprovalHistory({type:"STOCK_DELETE", decision:"REJECTED", title:`Hapus ${st.name} ditolak`, requestedBy:st.deleteRequestedBy, requestedAt:st.deleteRequestedAt});
+    showToast(`❌ Penghapusan ${st.name} ditolak.`);
   }
 
   // ── Satpam CRUD ──
@@ -3956,14 +4021,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
                     const canLihatPeta = lok && gdg && gdg.denahImageData && lok.mapX!=null;
                     return (
-                      <tr key={st.id} onClick={()=>setStockDetailId(st.id)} style={{cursor:"pointer",borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
-                        <td style={{padding:"8px 10px",textAlign:"center"}}>
+                      <tr key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
+                        <td onClick={e=>{ if(st.img){e.stopPropagation(); setLightboxImg(st.img);} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.img?"zoom-in":"default"}}>
                           {st.img ? <img src={st.img} alt={st.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                             : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
                         </td>
                         <td style={{padding:"8px 10px",minWidth:200}}>
                           <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
                           <div style={{fontSize:10,color:"#0098da",fontWeight:700,marginTop:1}}>📑 {st.katalog||"-"}</div>
+                          {st.deletePending && <div style={{fontSize:9,color:"#dc2626",fontWeight:700,marginTop:2}}>⏳ Menunggu approval Hapus</div>}
+                          {st.editPending && <div style={{fontSize:9,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Ada perubahan menunggu approval TL</div>}
                         </td>
                         <td style={{padding:"8px 10px"}}>
                           <div style={{display:"flex",gap:4,flexWrap:"wrap",maxWidth:160}}>
@@ -4041,8 +4108,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           <div style={{display:"flex",gap:4,justifyContent:"center"}}>
                             {currentUser.role==="ADMIN" && (
                               <>
-                                <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"6px 8px"}} onClick={()=>openEditStock(st)}>✏️</button>
-                                <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"6px 8px"}} onClick={()=>deleteStock(st.id)}>🗑️</button>
+                                <button title="Edit" disabled={st.deletePending} style={{...sty.btn("ghost","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>openEditStock(st)}>✏️</button>
+                                <button title="Hapus" disabled={st.deletePending} style={{...sty.btn("danger","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>deleteStock(st.id)}>🗑️</button>
                               </>
                             )}
                             <button title="Kartu Gantung TUG-2" style={{...sty.btn("ghost","sm"),padding:"6px 8px",borderColor:"#e0f2fe",color:"#0369a1"}}
@@ -4559,6 +4626,53 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
 
+            {/* ── BAGIAN: Edit Data Stok (qty/harga/jenis) — khusus TL ── */}
+            {currentUser.role==="TL" && stocks.some(s=>s.editPending) && (
+              <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
+                <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>✏️ Edit Data Stok ({stocks.filter(s=>s.editPending).length})</div>
+                {stocks.filter(s=>s.editPending).map(s=>{
+                  const pemohon = users.find(u=>u.id===s.editRequestedBy);
+                  return (
+                    <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700}}>{s.name}</div>
+                        <div style={{fontSize:11,color:C.muted}}>
+                          Qty {fmtNum(s.qty)}→{fmtNum(s.pendingEditData.qty)} • Harga Rp{fmtNum(s.price)}→Rp{fmtNum(s.pendingEditData.price)} • Jenis {s.jenisBarang}→{s.pendingEditData.jenisBarang}<br/>
+                          Diajukan oleh {pemohon?.name||"?"} • {fmtDate(s.editRequestedAt)}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button style={sty.btn("primary","sm")} onClick={()=>approveStockEdit(s.id)}>✓ Setuju</button>
+                        <button style={sty.btn("danger","sm")} onClick={()=>rejectStockEdit(s.id)}>✕ Tolak</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── BAGIAN: Hapus Data Stok — khusus TL ── */}
+            {currentUser.role==="TL" && stocks.some(s=>s.deletePending) && (
+              <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.red}`}}>
+                <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>🗑️ Hapus Data Stok ({stocks.filter(s=>s.deletePending).length})</div>
+                {stocks.filter(s=>s.deletePending).map(s=>{
+                  const pemohon = users.find(u=>u.id===s.deleteRequestedBy);
+                  return (
+                    <div key={s.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700}}>{s.name}</div>
+                        <div style={{fontSize:11,color:C.muted}}>Diajukan oleh {pemohon?.name||"?"} • {fmtDate(s.deleteRequestedAt)}</div>
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button style={sty.btn("primary","sm")} onClick={()=>approveStockDelete(s.id)}>✓ Setuju</button>
+                        <button style={sty.btn("danger","sm")} onClick={()=>rejectStockDelete(s.id)}>✕ Tolak</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ── BAGIAN: Transaksi TUG (TUG-3/4/5/7/8/9/10, dkk) ── */}
             <div style={{fontWeight:800,fontSize:14,margin:"4px 0 10px"}}>🔄 Transaksi TUG</div>
             <ApprovalTab
@@ -4581,7 +4695,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 decidedAt: t.status==="REJECTED" ? t.rejectedAt : t.approvedAt,
               }));
               const combined = [...approvalHistoryList, ...histTUG].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt).slice(0,40);
-              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", TUG:"🔄 TUG"};
+              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", TUG:"🔄 TUG"};
               return (
                 <div style={{...sty.card,marginTop:16}}>
                   <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📜 Riwayat Approval</div>
@@ -4669,18 +4783,27 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Foto Kondisi Barang (opsional)</label>
-                <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,img})))} style={{fontSize:12,color:C.muted}}/>
-                {stockForm.img && <img src={stockForm.img} alt="prev" style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginTop:8,border:`1px solid ${C.border}`}}/>}
+                {stockForm.img && <img src={stockForm.img} alt="prev" onClick={()=>setLightboxImg(stockForm.img)} style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`,display:"block",cursor:"zoom-in"}}/>}
+                <label style={{...sty.btn("ghost","sm"),display:"inline-block",cursor:"pointer"}}>
+                  🔄 Update Gambar
+                  <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,img})))} style={{display:"none"}}/>
+                </label>
               </div>
               <div>
                 <label style={sty.label}>Foto Nameplate {!stockForm.id?.startsWith("STK-SAP-") && "*"}</label>
-                <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,fotoNameplate:img})))} style={{fontSize:12,color:C.muted}}/>
-                {stockForm.fotoNameplate && <img src={stockForm.fotoNameplate} alt="prev" style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginTop:8,border:`1px solid ${C.border}`}}/>}
+                {stockForm.fotoNameplate && <img src={stockForm.fotoNameplate} alt="prev" onClick={()=>setLightboxImg(stockForm.fotoNameplate)} style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`,display:"block",cursor:"zoom-in"}}/>}
+                <label style={{...sty.btn("ghost","sm"),display:"inline-block",cursor:"pointer"}}>
+                  🔄 Update Gambar
+                  <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,fotoNameplate:img})))} style={{display:"none"}}/>
+                </label>
               </div>
               <div>
                 <label style={sty.label}>Foto Keseluruhan {!stockForm.id?.startsWith("STK-SAP-") && "*"}</label>
-                <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,fotoKeseluruhan:img})))} style={{fontSize:12,color:C.muted}}/>
-                {stockForm.fotoKeseluruhan && <img src={stockForm.fotoKeseluruhan} alt="prev" style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginTop:8,border:`1px solid ${C.border}`}}/>}
+                {stockForm.fotoKeseluruhan && <img src={stockForm.fotoKeseluruhan} alt="prev" onClick={()=>setLightboxImg(stockForm.fotoKeseluruhan)} style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`,display:"block",cursor:"zoom-in"}}/>}
+                <label style={{...sty.btn("ghost","sm"),display:"inline-block",cursor:"pointer"}}>
+                  🔄 Update Gambar
+                  <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setStockForm(sf=>({...sf,fotoKeseluruhan:img})))} style={{display:"none"}}/>
+                </label>
               </div>
               {stockForm.id?.startsWith("STK-SAP-") && (
                 <div style={{gridColumn:"1/-1",fontSize:10,color:C.muted}}>ℹ️ Data hasil import SAP (PEMAT) — foto Nameplate/Keseluruhan akan disinkronkan saat import data PEMAT berikutnya, tidak wajib diisi sekarang.</div>
@@ -4854,31 +4977,50 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         const canUploadFoto = ["ADMIN","TL"].includes(currentUser.role);
         const isSAP = st.id?.startsWith("STK-SAP-");
         const bs = getSAPBadgeStyle(st.katalog);
-        const fotoBox = (label, field) => (
-          <div style={{flex:1,minWidth:160}}>
-            <div style={{fontSize:11,fontWeight:700,marginBottom:6}}>{label} {!isSAP && "*"}</div>
-            {st[field] ? (
-              <img src={st[field]} alt={label} style={{width:"100%",height:140,objectFit:"cover",borderRadius:8,border:`1px solid ${C.border}`}}/>
-            ) : (
-              <div style={{width:"100%",height:140,background:"#f3f4f6",borderRadius:8,border:`1px dashed ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:11,textAlign:"center",padding:8}}>
-                {isSAP ? "Belum ada foto (data SAP — akan disinkronkan saat import PEMAT)" : "⚠️ Belum ada foto"}
-              </div>
-            )}
-            {canUploadFoto && (
-              <input type="file" accept="image/*" capture="environment" style={{fontSize:10,color:C.muted,marginTop:6,width:"100%"}}
-                onChange={e=>handleImg(e, img=>updateStockFoto(st.id, field, img))}/>
-            )}
-          </div>
-        );
+        const fotoBox = (label, field) => {
+          const previewImg = pendingFoto[field] ?? st[field];
+          const hasUnsaved = pendingFoto[field] != null;
+          return (
+            <div style={{flex:1,minWidth:160}}>
+              <div style={{fontSize:11,fontWeight:700,marginBottom:6}}>{label} {!isSAP && "*"}</div>
+              {previewImg ? (
+                <img src={previewImg} alt={label} onClick={()=>setLightboxImg(previewImg)} style={{width:"100%",height:140,objectFit:"cover",borderRadius:8,border:`1px solid ${hasUnsaved?"#f59e0b":C.border}`,cursor:"zoom-in"}}/>
+              ) : (
+                <div style={{width:"100%",height:140,background:"#f3f4f6",borderRadius:8,border:`1px dashed ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:11,textAlign:"center",padding:8}}>
+                  {isSAP ? "Belum ada foto (data SAP — akan disinkronkan saat import PEMAT)" : "⚠️ Belum ada foto"}
+                </div>
+              )}
+              {canUploadFoto && (
+                <>
+                  <label style={{...sty.btn("ghost","sm"),display:"block",textAlign:"center",marginTop:6,cursor:"pointer"}}>
+                    🔄 Update Gambar
+                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
+                      onChange={e=>handleImg(e, img=>setPendingFoto(p=>({...p,[field]:img})))}/>
+                  </label>
+                  {hasUnsaved && (
+                    <div style={{display:"flex",gap:6,marginTop:6}}>
+                      <button style={{...sty.btn("primary","sm"),flex:1}} onClick={async()=>{
+                        await updateStockFoto(st.id, field, pendingFoto[field]);
+                        setPendingFoto(p=>{const n={...p}; delete n[field]; return n;});
+                      }}>💾 Simpan Foto</button>
+                      <button style={{...sty.btn("ghost","sm")}} onClick={()=>setPendingFoto(p=>{const n={...p}; delete n[field]; return n;})}>Batal</button>
+                    </div>
+                  )}
+                  {hasUnsaved && <div style={{fontSize:9,color:"#92400e",marginTop:4}}>⚠️ Belum disimpan — klik "Simpan Foto" untuk memastikan tersimpan di sistem.</div>}
+                </>
+              )}
+            </div>
+          );
+        };
         return (
-          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>setStockDetailId(null)}>
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>
             <div style={{...sty.card,width:560,maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                 <div>
                   <h3 style={{fontSize:16,fontWeight:800}}>{st.name}</h3>
                   <p style={{fontSize:11,color:"#0098da",fontWeight:700,marginTop:2}}>📑 {st.katalog||kat?.katalog||"-"}</p>
                 </div>
-                <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12}} onClick={()=>setStockDetailId(null)}>✕</button>
+                <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>✕</button>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:12}}>
                 <div><b>Kategori:</b> {st.category||"-"}</div>
@@ -4895,10 +5037,22 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 {fotoBox("Foto Keseluruhan", "fotoKeseluruhan")}
               </div>
               {!canUploadFoto && <div style={{fontSize:10,color:C.muted,marginTop:10}}>Hanya Admin/TL yang bisa mengunggah/mengganti foto.</div>}
+              <div style={{marginTop:16,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
+                <button style={{...sty.btn("ghost"),width:"100%",borderColor:"#e0f2fe",color:"#0369a1"}}
+                  onClick={()=>{ if(kat) setKartuGantungDetail(kat); }}>🏷️ Lihat Kartu Gantung (TUG-2)</button>
+              </div>
             </div>
           </div>
         );
       })()}
+
+      {/* LIGHTBOX — overview foto full-screen, klik foto kecil mana saja di Data Stok */}
+      {lightboxImg && (
+        <div onClick={()=>setLightboxImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20,cursor:"zoom-out"}}>
+          <img src={lightboxImg} alt="Overview" style={{maxWidth:"90vw",maxHeight:"90vh",objectFit:"contain",borderRadius:8}}/>
+          <button style={{position:"fixed",top:20,right:20,background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"8px 16px",cursor:"pointer",fontSize:14}} onClick={()=>setLightboxImg(null)}>✕ Tutup</button>
+        </div>
+      )}
 
       {/* PETA MINI MODAL — dari card Data Stok */}
       {petaMiniDetail && (
