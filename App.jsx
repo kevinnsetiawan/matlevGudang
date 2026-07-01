@@ -2001,6 +2001,7 @@ export default function PLNWarehouse() {
   const [maraSearch, setMaraSearch] = useState("");
   const [maraSearchResults, setMaraSearchResults] = useState([]);
   const [maraSearchLoading, setMaraSearchLoading] = useState(false);
+  const [maraSearchError, setMaraSearchError] = useState(null);
   const [maraUploadLoading, setMaraUploadLoading] = useState(false);
   const [maraUploadProgress, setMaraUploadProgress] = useState(null);
   const [catalogMasterRef, setCatalogMasterRef] = useState(null); // session-only hidden cataloger reference
@@ -2357,7 +2358,12 @@ export default function PLNWarehouse() {
       .ilike("nama", `%${q.trim()}%`)
       .limit(20);
     setMaraSearchLoading(false);
-    if (error) { setMaraSearchResults([]); return; }
+    if (error) {
+      setMaraSearchResults([]);
+      setMaraSearchError(error.code==="42P01" ? "Tabel MARA belum dibuat di Supabase. Jalankan SQL create table mara_catalog dulu." : `Error: ${error.message}`);
+      return;
+    }
+    setMaraSearchError(null);
     setMaraSearchResults(data || []);
   }
   function applyMaraToKatalog(item) {
@@ -2371,25 +2377,25 @@ export default function PLNWarehouse() {
     setMaraUploadLoading(true);
     setMaraUploadProgress("Membaca file...");
     try {
-      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, {type:"array"});
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
-      const dataRows = rows.slice(1).filter(r=>r[0]);
-      const total = dataRows.length;
+      // pakai object mode agar mapping kolom by name, bukan index
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+      const total = rows.length;
       const CHUNK = 500;
       let done = 0;
-      for (let i=0; i<dataRows.length; i+=CHUNK) {
-        const chunk = dataRows.slice(i, i+CHUNK).map(r=>({
-          kode_material: String(r[0]||"").trim(),
-          material_type: String(r[1]||"").trim(),
-          material_group: String(r[2]||"").trim(),
-          satuan: String(r[3]||"").trim(),
-          status: String(r[4]||"").trim(),
-          nama: String(r[5]||"").trim(),
+      for (let i=0; i<rows.length; i+=CHUNK) {
+        const chunk = rows.slice(i, i+CHUNK).map(r=>({
+          kode_material: String(r["Material"]||"").trim(),
+          material_type: String(r["Material Type"]||"").trim(),
+          material_group: String(r["Material Group"]||"").trim(),
+          satuan: String(r["Base Unit of Measure"]||"").trim(),
+          status: String(r["X-plant matl status"]||"").trim(),
+          nama: String(r["Material Description"]||"").trim(),
         })).filter(r=>r.kode_material&&r.nama);
-        await supabase.from("mara_catalog").upsert(chunk, {onConflict:"kode_material"});
+        const { error } = await supabase.from("mara_catalog").upsert(chunk, {onConflict:"kode_material"});
+        if (error) { showToast("Error upload chunk: "+error.message,"error"); break; }
         done += chunk.length;
         setMaraUploadProgress(`Mengupload... ${done.toLocaleString()} / ${total.toLocaleString()}`);
       }
@@ -4949,6 +4955,27 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {currentUser.role==="ADMIN" && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang</button>}
             </div>
             {/* ── SUB-TAB: MASTER KATALOG ── */}
+            {stockSubTab==="katalog" && currentUser.role==="ADMIN" && (
+              <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1",padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:800,color:"#0369a1"}}>📚 Referensi Katalog MARA</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>Upload file MARA agar tersedia sebagai referensi saat menambah katalog baru.</div>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    {maraUploadProgress && (
+                      <span style={{fontSize:11,color:"#0369a1",fontWeight:700,padding:"4px 10px",background:"#e0f2fe",borderRadius:6}}>{maraUploadProgress}</span>
+                    )}
+                    <label style={{...sty.btn(maraUploadLoading?"ghost":"ghost","sm"),cursor:"pointer",borderColor:"#0369a1",color:"#0369a1"}}>
+                      {maraUploadLoading ? "⏳ Mengupload..." : "📂 Upload MARA (.xlsx)"}
+                      <input type="file" accept=".xlsx" style={{display:"none"}} disabled={maraUploadLoading}
+                        onChange={e=>{ if(e.target.files?.[0]) uploadMaraToDB(e.target.files[0]); e.target.value=""; }}/>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {stockSubTab==="katalog" && (
               katalogList.length===0
               ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Katalog. {currentUser.role==="ADMIN" && "Klik \"+ Tambah Katalog Barang\" untuk menambahkan."}</div>
@@ -5286,6 +5313,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 setMigratedTug15History={setMigratedTug15History}
                 maraReference={maraReference}
                 setMaraReference={setMaraReference}
+                maraUploadLoading={maraUploadLoading}
+                maraUploadProgress={maraUploadProgress}
+                uploadMaraToDB={uploadMaraToDB}
                 currentUser={currentUser}
                 sty={sty} C={C}
                 saveToCloud={saveToCloud}
@@ -5734,6 +5764,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 {maraSearch && <button style={sty.btn("ghost","sm")} onClick={()=>{setMaraSearch("");setMaraSearchResults([])}}>✕</button>}
               </div>
               {maraSearchLoading && <div style={{fontSize:11,color:"#0369a1",marginTop:6}}>Mencari...</div>}
+              {maraSearchError && <div style={{fontSize:11,color:C.red,marginTop:6,padding:"6px 8px",background:"#fef2f2",borderRadius:6}}>⚠️ {maraSearchError}</div>}
               {maraSearchResults.length>0 && (
                 <div style={{marginTop:8,maxHeight:180,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
                   {maraSearchResults.map(item=>(
@@ -11703,7 +11734,7 @@ function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangC
 // ════════════════════════════════════════════════════════════════════
 // MIGRASI DATA TAB
 // ════════════════════════════════════════════════════════════════════
-function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15History, setMigratedTug15History, maraReference, setMaraReference, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast }) {
+function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15History, setMigratedTug15History, maraReference, setMaraReference, maraUploadLoading, maraUploadProgress, uploadMaraToDB, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast }) {
   const [step, setStep] = useState("upload"); // "upload" | "preview" | "backup" | "done"
   const [sapFile, setSapFile] = useState(null);
   const [sapRows, setSapRows] = useState([]);
@@ -11922,32 +11953,15 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               {sapFile && <span style={{fontSize:12,color:C.green,fontWeight:700}}>✅ {sapFile} ({sapRows.length} baris)</span>}
             </div>
           </div>
-          <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1"}}>
-            <div style={{fontWeight:700,marginBottom:4}}>2. Upload Katalog MARA ke Database</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Upload file MARA (.xlsx) agar tersimpan permanen di database dan bisa digunakan sebagai referensi saat Tambah Katalog Barang.</p>
-            {maraUploadProgress && (
-              <div style={{fontSize:12,color:"#0369a1",fontWeight:700,marginBottom:8,padding:"6px 10px",background:"#e0f2fe",borderRadius:6}}>{maraUploadProgress}</div>
-            )}
-            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-              <label style={{...sty.btn("primary"),cursor:"pointer",background:"#0369a1",borderColor:"#0369a1"}}>
-                {maraUploadLoading?"⏳ Mengupload...":"📂 Upload Katalog MARA (.xlsx)"}
-                <input type="file" accept=".xlsx" style={{display:"none"}} disabled={maraUploadLoading}
-                  onChange={e=>{ if(e.target.files?.[0]) uploadMaraToDB(e.target.files[0]); e.target.value=""; }}/>
-              </label>
-              <span style={{fontSize:11,color:C.muted}}>Format: kolom Material, Material Type, Material Group, Base Unit, Status, Material Description</span>
+          {sapRows.length===0 && (
+            <div style={{fontSize:12,color:"#92400e",background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 12px",marginBottom:8}}>
+              ⚠️ Upload file SAP terlebih dahulu (langkah 1) agar tombol aktif.
             </div>
-            {/* Legacy session-only load — untuk validasi SAP */}
-            <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Load session-only (untuk validasi SAP migration):</div>
-              <label style={{...sty.btn("ghost","sm"),cursor:"pointer"}}>
-                {maraLoading?"⏳ Memuat...":maraReference?`✅ MARA session (${maraReference.length} material)`:"📂 Load MARA session-only"}
-                <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara} disabled={maraLoading}/>
-              </label>
-            </div>
-          </div>
+          )}
           <button style={sty.btn("primary")} disabled={sapRows.length===0||busy} onClick={buildPreview}>
-            Lanjut → Preview Rekonsiliasi
+            {busy ? "⏳ Memproses..." : "Lanjut → Preview Rekonsiliasi"}
           </button>
+          {busy && <button style={{...sty.btn("ghost","sm"),marginLeft:8}} onClick={()=>setBusy(false)}>Reset (jika stuck)</button>}
         </div>
       )}
 
