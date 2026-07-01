@@ -1997,7 +1997,12 @@ export default function PLNWarehouse() {
   const [heavyEquipmentList, setHeavyEquipmentList] = useState([]);
   const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState([]);
   const [materialCadangData, setMaterialCadangData] = useState({ imports:[], analyses:[], applyHistory:[] });
-  const [maraReference, setMaraReference] = useState(null); // session-only, tidak disimpan ke cloud/localStorage
+  const [maraReference, setMaraReference] = useState(null); // legacy — dipertahankan untuk MigrasiDataTab & MaterialCadangTab
+  const [maraSearch, setMaraSearch] = useState("");
+  const [maraSearchResults, setMaraSearchResults] = useState([]);
+  const [maraSearchLoading, setMaraSearchLoading] = useState(false);
+  const [maraUploadLoading, setMaraUploadLoading] = useState(false);
+  const [maraUploadProgress, setMaraUploadProgress] = useState(null);
   const [catalogMasterRef, setCatalogMasterRef] = useState(null); // session-only hidden cataloger reference
   const [gudangCapacityList, setGudangCapacityList] = useState([]);
   const [gudangCapacityImports, setGudangCapacityImports] = useState([]);
@@ -2341,6 +2346,60 @@ export default function PLNWarehouse() {
     setKatalogList(nk); setKatalogModal(null);
     await saveToCloud({katalogList: nk});
     showToast(katalogModal==="edit" ? "Master Katalog diupdate!" : "Katalog barang baru ditambahkan!");
+  }
+  async function searchMaraCatalog(q) {
+    setMaraSearch(q);
+    if (!q || q.trim().length < 2) { setMaraSearchResults([]); return; }
+    if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
+    setMaraSearchLoading(true);
+    const { data, error } = await supabase.from("mara_catalog")
+      .select("kode_material,nama,satuan,material_group")
+      .ilike("nama", `%${q.trim()}%`)
+      .limit(20);
+    setMaraSearchLoading(false);
+    if (error) { setMaraSearchResults([]); return; }
+    setMaraSearchResults(data || []);
+  }
+  function applyMaraToKatalog(item) {
+    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan }));
+    setMaraSearchResults([]);
+    setMaraSearch("");
+  }
+  async function uploadMaraToDB(file) {
+    if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
+    if (!file) return;
+    setMaraUploadLoading(true);
+    setMaraUploadProgress("Membaca file...");
+    try {
+      const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {type:"array"});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:""});
+      const dataRows = rows.slice(1).filter(r=>r[0]);
+      const total = dataRows.length;
+      const CHUNK = 500;
+      let done = 0;
+      for (let i=0; i<dataRows.length; i+=CHUNK) {
+        const chunk = dataRows.slice(i, i+CHUNK).map(r=>({
+          kode_material: String(r[0]||"").trim(),
+          material_type: String(r[1]||"").trim(),
+          material_group: String(r[2]||"").trim(),
+          satuan: String(r[3]||"").trim(),
+          status: String(r[4]||"").trim(),
+          nama: String(r[5]||"").trim(),
+        })).filter(r=>r.kode_material&&r.nama);
+        await supabase.from("mara_catalog").upsert(chunk, {onConflict:"kode_material"});
+        done += chunk.length;
+        setMaraUploadProgress(`Mengupload... ${done.toLocaleString()} / ${total.toLocaleString()}`);
+      }
+      showToast(`✅ ${done.toLocaleString()} material MARA berhasil disimpan ke database.`, "success");
+      setMaraUploadProgress(null);
+    } catch(e) {
+      showToast("Gagal upload MARA: "+e.message, "error");
+      setMaraUploadProgress(null);
+    }
+    setMaraUploadLoading(false);
   }
   async function deleteKatalog(id) {
     if (stocks.some(s=>s.katalogId===id)) { showToast("Tidak bisa hapus: katalog ini masih dipakai di Data Stok!","error"); return; }
@@ -4345,7 +4404,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         {id:"uit",icon:"🏢",label:"Master UIT"},
                         {id:"upt",icon:"📍",label:"Master UPT"},
                         {id:"gudang",icon:"🏭",label:"Master Gudang"},
-                        ...(currentUser.role==="ADMIN" ? [{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
+        ...(currentUser.role==="ADMIN" ? [{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (
@@ -4608,6 +4667,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
             C={C} sty={sty} setTab={setTab} currentUser={currentUser}
             heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
+            materialCadangData={materialCadangData}
           />
         </>
         )}
@@ -4879,7 +4939,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="uit"?"Master UIT (Unit Induk)":stockSubTab==="upt"?"Master UPT (Unit Pelaksana)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
                 </h1>
                 <p style={{color:C.muted,fontSize:13}}>
-                  {stockSubTab==="katalog"?`${katalogList.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="uit"?`${uitList.length} UIT terdaftar`:stockSubTab==="upt"?`${uptList.length} UPT terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${katalogList.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="uit"?`${uitList.length} UIT terdaftar`:stockSubTab==="upt"?`${uptList.length} UPT terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </p>
               </div>
               {currentUser.role==="ADMIN" && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
@@ -5665,6 +5725,36 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:460,maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{katalogModal==="edit"?"Edit Master Katalog":"Tambah Katalog Barang Baru"}</h3>
+            {/* MARA Referensi Search */}
+            <div style={{marginBottom:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#0369a1",marginBottom:8}}>🔍 Cari Referensi MARA</div>
+              <div style={{display:"flex",gap:6}}>
+                <input style={{...sty.input,flex:1}} value={maraSearch} placeholder="Ketik nama material MARA (min. 2 huruf)..."
+                  onChange={e=>searchMaraCatalog(e.target.value)}/>
+                {maraSearch && <button style={sty.btn("ghost","sm")} onClick={()=>{setMaraSearch("");setMaraSearchResults([])}}>✕</button>}
+              </div>
+              {maraSearchLoading && <div style={{fontSize:11,color:"#0369a1",marginTop:6}}>Mencari...</div>}
+              {maraSearchResults.length>0 && (
+                <div style={{marginTop:8,maxHeight:180,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+                  {maraSearchResults.map(item=>(
+                    <div key={item.kode_material} onClick={()=>applyMaraToKatalog(item)}
+                      style={{padding:"6px 10px",borderRadius:7,border:"1px solid #bae6fd",background:"white",cursor:"pointer",fontSize:12,display:"flex",justifyContent:"space-between",gap:8}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#e0f2fe"}
+                      onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                      <div>
+                        <span style={{fontWeight:700,color:"#0369a1"}}>{item.kode_material}</span>
+                        <span style={{color:"#334155",marginLeft:8}}>{item.nama}</span>
+                      </div>
+                      <span style={{color:"#64748b",flexShrink:0}}>{item.satuan}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {maraSearch.length>=2 && !maraSearchLoading && maraSearchResults.length===0 && (
+                <div style={{fontSize:11,color:"#64748b",marginTop:6}}>Tidak ada hasil untuk "{maraSearch}"</div>
+              )}
+              <div style={{fontSize:10,color:"#94a3b8",marginTop:6}}>Klik item untuk auto-fill form. MARA tersimpan di database.</div>
+            </div>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Nomor Katalog PLN</label>
               <div style={{display:"flex",gap:6}}>
@@ -7315,29 +7405,105 @@ function summarizeTxnDashboard(t, stocks, lokasiList) {
 }
 
 // ─── DASHBOARD DEFAULT (Admin, TL, Viewer, Pengadaan) ────────────────────
-function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab }) {
-  const overdueLoans = loans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE");
-  const pendingLoans = loans.filter(isPendingHeavyEquipmentLoan);
-  const borrowedLoans = loans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="DIPINJAM");
-  const availableCount = equipmentList.filter(e=>e.availabilityStatus!=="DIPINJAM").length;
-  const issueCount = equipmentList.filter(e=>["PERLU_SERVICE","BUTUH_PERBAIKAN","BUTUH_PEREMAJAAN"].includes(e.statusAlat)).length;
+function getEquipmentCategory(e) {
+  const n = String(e.nama||"").toUpperCase().replace(/\s+/g," ").trim();
+  if (n.includes("CRANE")) return "crane";
+  if (n.includes("FORKLIFT")) return "forklift";
+  if (n.includes("MANLIFT")) return "manlift";
+  return "pendukung";
+}
+
+function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab, currentUser }) {
+  const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
+  const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
+  const isMSB = ["MSB","Manager UIT"].includes(currentUser?.role);
+  const scopedEquipment = isMSB ? equipmentList : equipmentList.filter(e=>e.upt===myUpt);
+  const scopedLoans = isMSB ? loans : loans.filter(l=>
+    (getHeavyEquipmentLoanOwnerUpt(l)===myUpt)||(getHeavyEquipmentLoanRequesterUpt(l)===myUpt)
+  );
+  const scopeLabel = isMSB ? "Semua UPT" : (myUpt || "UPT");
+  const overdueLoans = scopedLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE");
+  const pendingLoans = scopedLoans.filter(isPendingHeavyEquipmentLoan);
+  const borrowedLoans = scopedLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="DIPINJAM");
+  const availableCount = scopedEquipment.filter(e=>e.availabilityStatus!=="DIPINJAM").length;
+  const issueCount = scopedEquipment.filter(e=>["PERLU_SERVICE","BUTUH_PERBAIKAN","BUTUH_PEREMAJAAN"].includes(e.statusAlat)).length;
+  const catIcons = {
+    crane:(
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="12" y="4" width="2.5" height="18" rx="1" fill="currentColor"/>
+        <rect x="2" y="4" width="12" height="2" rx="1" fill="currentColor" opacity=".85"/>
+        <line x1="12" y1="5" x2="24" y2="22" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <rect x="10" y="20" width="6" height="5" rx="1" fill="currentColor" opacity=".7"/>
+        <rect x="5" y="22" width="16" height="2.5" rx="1" fill="currentColor" opacity=".5"/>
+      </svg>
+    ),
+    forklift:(
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="2" y="10" width="14" height="10" rx="2" fill="currentColor" opacity=".85"/>
+        <rect x="16" y="14" width="8" height="6" rx="1" fill="currentColor" opacity=".6"/>
+        <rect x="2" y="3" width="2.5" height="14" rx="1" fill="currentColor"/>
+        <rect x="6" y="3" width="2.5" height="14" rx="1" fill="currentColor"/>
+        <circle cx="6" cy="23" r="2.5" fill="currentColor"/>
+        <circle cx="18" cy="23" r="2.5" fill="currentColor"/>
+      </svg>
+    ),
+    manlift:(
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="9" y="2" width="10" height="8" rx="1.5" fill="currentColor" opacity=".85"/>
+        <rect x="11" y="10" width="6" height="10" rx="1" fill="currentColor" opacity=".7"/>
+        <rect x="6" y="18" width="16" height="4" rx="1.5" fill="currentColor" opacity=".5"/>
+        <circle cx="9" cy="25" r="2" fill="currentColor"/>
+        <circle cx="19" cy="25" r="2" fill="currentColor"/>
+      </svg>
+    ),
+    pendukung:(
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect x="2" y="12" width="18" height="4" rx="1" fill="currentColor" opacity=".85"/>
+        <path d="M18 14 Q22 14 22 8 L24 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>
+        <rect x="3" y="16" width="6" height="8" rx="0.5" fill="currentColor" opacity=".7"/>
+        <rect x="11" y="16" width="6" height="8" rx="0.5" fill="currentColor" opacity=".7"/>
+        <circle cx="5" cy="25" r="2" fill="currentColor"/>
+        <circle cx="14" cy="25" r="2" fill="currentColor"/>
+      </svg>
+    ),
+  };
+  const catBreakdown = [
+    {key:"crane",    label:"Crane"},
+    {key:"forklift", label:"Forklift"},
+    {key:"manlift",  label:"Manlift"},
+    {key:"pendukung",label:"Alat Pendukung"},
+  ].map(c=>({...c, count:scopedEquipment.filter(e=>getEquipmentCategory(e)===c.key).length}));
+
   if (equipmentList.length === 0 && loans.length === 0) return null;
   return (
     <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${overdueLoans.length?C.red:C.accent}`,cursor:"pointer"}} onClick={()=>setTab("heavyEquipment")}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12}}>
         <div>
           <div style={{fontSize:14,fontWeight:900}}>🚜 Ringkasan Alat Berat</div>
-          <div style={{fontSize:11,color:C.muted}}>Status peminjaman, ketersediaan, dan reminder overdue lintas UPT.</div>
+          <div style={{fontSize:11,color:C.muted}}>Scope: <b>{scopeLabel}</b> — status peminjaman, ketersediaan &amp; kondisi alat.</div>
         </div>
         <button style={sty.btn("ghost","sm")} onClick={(e)=>{e.stopPropagation(); setTab("heavyEquipment");}}>Buka Menu</button>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:8}}>
+
+      {/* Kategori alat dengan icon */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+        {catBreakdown.map(c=>(
+          <div key={c.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 8px",background:"#f0f9ff",border:`1px solid #bae6fd`,borderRadius:10}}>
+            <span style={{color:C.accent}}>{catIcons[c.key]}</span>
+            <span style={{fontSize:20,fontWeight:900,color:C.accent}}>{c.count}</span>
+            <span style={{fontSize:10,fontWeight:700,color:C.muted,textAlign:"center"}}>{c.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* KPI status */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:8}}>
         {[
-          {label:"Total", val:equipmentList.length, color:C.accent},
+          {label:"Total", val:scopedEquipment.length, color:C.accent},
           {label:"Tersedia", val:availableCount, color:C.green},
           {label:"Dipinjam", val:borrowedLoans.length, color:"#c2410c"},
           {label:"Overdue", val:overdueLoans.length, color:overdueLoans.length?C.red:C.green},
-          {label:"Pending", val:pendingLoans.length, color:pendingLoans.length?C.yellow:C.green},
+          {label:"Pending", val:pendingLoans.length, color:pendingLoans.length?"#92400e":C.green},
           {label:"Perlu Tindakan", val:issueCount, color:issueCount?C.red:C.green},
         ].map(k=>(
           <div key={k.label} style={{background:"#f9fafb",border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
@@ -7346,17 +7512,33 @@ function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty
           </div>
         ))}
       </div>
-      {overdueLoans.length > 0 && (
-        <div style={{marginTop:10,fontSize:11,color:C.red,fontWeight:700}}>
-          {overdueLoans.slice(0,2).map(l=>`${getHeavyEquipmentLoanRequesterUpt(l)} - ${getHeavyEquipmentLoanJobName(l) || l.equipmentId}`).join(" • ")}
-          {overdueLoans.length>2 ? ` • +${overdueLoans.length-2} lainnya` : ""}
+      {/* Dipinjam aktif list */}
+      {(borrowedLoans.length > 0 || overdueLoans.length > 0) && (
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {[...overdueLoans, ...borrowedLoans].slice(0,3).map(l=>{
+            const status = getHeavyEquipmentLoanRuntimeStatus(l);
+            const ownerUpt = getHeavyEquipmentLoanOwnerUpt(l);
+            const requesterUpt = getHeavyEquipmentLoanRequesterUpt(l);
+            const returnDate = getHeavyEquipmentLoanReturnDate(l);
+            const jobName = getHeavyEquipmentLoanJobName(l);
+            return (
+              <div key={l.id} style={{fontSize:11,display:"flex",gap:6,alignItems:"center",padding:"4px 8px",borderRadius:6,background:status==="OVERDUE"?"#fef2f2":"#fff7ed"}}>
+                <span style={{fontWeight:700,color:status==="OVERDUE"?C.red:"#c2410c",minWidth:54}}>{status==="OVERDUE"?"⚠ OVERDUE":"📌 Dipinjam"}</span>
+                <span style={{color:C.text}}>{l.equipmentId||"-"}</span>
+                <span style={{color:C.muted}}>→ {requesterUpt}</span>
+                {!isManager && ownerUpt!==myUpt && <span style={{color:C.muted,fontStyle:"italic"}}>dari {ownerUpt}</span>}
+                <span style={{marginLeft:"auto",color:C.muted}}>s/d {returnDate||"-"}</span>
+              </div>
+            );
+          })}
+          {(borrowedLoans.length+overdueLoans.length)>3&&<div style={{fontSize:11,color:C.muted,paddingLeft:8}}>+{borrowedLoans.length+overdueLoans.length-3} peminjaman lainnya</div>}
         </div>
       )}
     </div>
   );
 }
 
-function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans }) {
+function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
 
   const jenisBreakdown = JENIS_BARANG.map(jb => ({
@@ -7390,7 +7572,42 @@ function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedata
         ))}
       </div>
       <KPISaldoCards stocks={stocks} C={C} sty={sty}/>
-      <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab}/>
+      <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+      {(()=>{
+        const results = materialCadangData?.analyses?.slice(-1)[0]?.results || [];
+        if (!results.length) return null;
+        const cadang = results.filter(r=>r.treatment==="Material Cadang");
+        const aman = cadang.filter(r=>r.currentQty>=r.recommendedQty&&r.recommendedQty>0).length;
+        const kurang = cadang.filter(r=>r.currentQty>0&&r.currentQty<r.recommendedQty).length;
+        const kosong = cadang.filter(r=>r.recommendedQty>0&&r.currentQty===0).length;
+        const gapVal = cadang.reduce((s,r)=>s+r.gapQty*(r.harga||0),0);
+        const topGap = [...cadang].filter(r=>r.gapQty>0).sort((a,b)=>b.gapQty*b.harga-a.gapQty*a.harga).slice(0,3);
+        return (
+          <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid #7c3aed`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontWeight:800,fontSize:13,color:"#7c3aed"}}>🔩 Material Cadang — Ringkasan Analisis</div>
+              <button style={{...sty.btn("ghost","sm"),fontSize:11}} onClick={()=>setTab("forecastStok")}>Lihat detail →</button>
+            </div>
+            <div style={{display:"flex",gap:20,flexWrap:"wrap",marginBottom:10}}>
+              {[
+                {label:"Total Analisis",val:cadang.length,color:C.accent},
+                {label:"Aman ✅",val:aman,color:C.green},
+                {label:"Kurang ⚠️",val:kurang,color:"#f59e0b"},
+                {label:"Kosong 🔴",val:kosong,color:C.red},
+                {label:"Est. Gap Nilai",val:"Rp "+fmtNum(gapVal),color:"#7c3aed"},
+              ].map(k=>(
+                <div key={k.label}>
+                  <div style={{fontSize:10,color:C.muted}}>{k.label}</div>
+                  <div style={{fontSize:15,fontWeight:800,color:k.color}}>{k.val}</div>
+                </div>
+              ))}
+            </div>
+            {topGap.length>0 && <div style={{fontSize:11,color:C.muted}}>
+              Prioritas: {topGap.map(r=><span key={r.noKat} style={{marginRight:8}}><b style={{color:C.red}}>{r.noKat}</b> gap {r.gapQty} pcs</span>)}
+            </div>}
+          </div>
+        );
+      })()}
       <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16,marginBottom:20}}>
         <div>
           <PendingWidget myPendingApprovals={myPendingApprovals} C={C} sty={sty} setTab={setTab}/>
@@ -7532,7 +7749,7 @@ function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganList, myPe
       <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16,marginBottom:16}}>
         <div>
           <PendingWidget myPendingApprovals={myPendingApprovals} C={C} sty={sty} setTab={setTab}/>
-          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab}/>
+          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
           {/* Material Kritis */}
           {stokKritis.length>0 && (
             <div style={{...sty.card,borderLeft:`4px solid #dc2626`,marginBottom:16}}>
@@ -7630,7 +7847,7 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
       </div>
 
       <KPISaldoCards stocks={stocks} C={C} sty={sty}/>
-      <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab}/>
+      <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
 
       {/* Tabel per UPT */}
       <div style={{...sty.card,marginBottom:20}}>
@@ -7960,6 +8177,7 @@ function ForecastStokPage({ katalogList, stocks, txns, forecastDetail, setForeca
           catalogMasterRef={catalogMasterRef}
           setCatalogMasterRef={setCatalogMasterRef}
           katalogList={katalogList}
+          setKatalogList={setKatalogList}
           stocks={stocks}
           currentUser={currentUser}
           sty={sty} C={C}
@@ -9297,12 +9515,19 @@ function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasi
 // ─── PETA GUDANG TAB ─────────────────────────────────────────────────────
 function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, savePhoto, createLoan, approveLoan, rejectLoan, completeLoan }) {
   const [activeTab, setActiveTab] = useState("list");
-  // myUpt: UPT user sendiri. Coba dari currentUser, fallback ke UPT konstanta app (strip prefix "UPT ").
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
   const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
-  const [myUptSelected, setMyUptSelected] = useState(myUpt || "");
-  const [uptFilter, setUptFilter] = useState(myUpt || "ALL");
-  const [categoryFilter, setCategoryFilter] = useState("ALL"); // "ALL"|"crane"|"forklift"|"manlift"|"pendukung"
+  const isMSB = ["MSB","Manager UIT"].includes(currentUser?.role);
+  const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
+  const [uptFilter, setUptFilter] = useState("ALL");
+
+  useEffect(() => {
+    if (activeTab === "list") setMyUptSelected(isMSB ? "" : (myUpt || ""));
+    else setMyUptSelected("");
+  }, [activeTab]);
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [kondisiFilter, setKondisiFilter] = useState("ALL");
+  const [loanCategoryFilter, setLoanCategoryFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [loanForm, setLoanForm] = useState({equipmentId:"", requesterUpt:"", namaPekerjaan:"", tanggalAmbil:"", tanggalKembali:"", keperluan:"", catatan:""});
   const [historyFilter, setHistoryFilter] = useState({ownerUpt:"ALL", requesterUpt:"ALL", equipmentId:"ALL", status:"ALL", from:"", to:""});
@@ -9353,13 +9578,6 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
   const loanUserName = userId => users.find(u=>u.id===userId)?.name || "-";
   const latestLoanForEquipment = equipmentId => normalizedLoans.find(l=>l.equipmentId===equipmentId);
   const activeLoanForEquipment = equipmentId => normalizedLoans.find(l=>l.equipmentId===equipmentId && ["DIPINJAM","OVERDUE"].includes(l.runtimeStatus));
-  function getEquipmentCategory(e) {
-    const n = String(e.nama||"").toUpperCase().replace(/\s+/g," ").trim();
-    if (n.includes("CRANE")) return "crane";
-    if (n.includes("FORKLIFT")) return "forklift";
-    if (n.includes("MANLIFT")) return "manlift";
-    return "pendukung";
-  }
 
   const EQUIPMENT_CATEGORIES = [
     { id:"ALL", label:"Semua", icon:(
@@ -9438,104 +9656,108 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
   }, {});
 
   const filteredEquipment = equipmentList.filter(e =>
-    (uptFilter==="ALL" || e.upt===uptFilter) &&
+    (!myUptSelected || e.upt===myUptSelected) &&
     (categoryFilter==="ALL" || getEquipmentCategory(e)===categoryFilter) &&
-    (statusFilter==="ALL" || e.statusAlat===statusFilter || e.availabilityStatus===statusFilter || normalizedLoans.some(l=>l.equipmentId===e.id && l.runtimeStatus===statusFilter))
+    (kondisiFilter==="ALL" || e.statusAlat===kondisiFilter || (kondisiFilter==="DIPINJAM" && !!activeLoanForEquipment(e.id)))
   );
-  const historyRows = normalizedLoans.filter(l=>{
-    const requestMs = l.tanggalAmbil ? new Date(`${l.tanggalAmbil}T00:00:00`).getTime() : (l.requestedAt||0);
-    const fromOk = !historyFilter.from || requestMs >= new Date(`${historyFilter.from}T00:00:00`).getTime();
-    const toOk = !historyFilter.to || requestMs <= new Date(`${historyFilter.to}T23:59:59`).getTime();
-    return (historyFilter.ownerUpt==="ALL" || l.ownerUpt===historyFilter.ownerUpt) &&
-      (historyFilter.requesterUpt==="ALL" || l.requesterUpt===historyFilter.requesterUpt) &&
-      (historyFilter.equipmentId==="ALL" || l.equipmentId===historyFilter.equipmentId) &&
-      (historyFilter.status==="ALL" || l.runtimeStatus===historyFilter.status) &&
-      fromOk && toOk;
-  });
+  const unifiedLoans = normalizedLoans
+    .filter(l=>(loanCategoryFilter==="ALL"||getEquipmentCategory(equipmentList.find(e=>e.id===l.equipmentId)||{})===loanCategoryFilter))
+    .sort((a,b)=>(b.requestedAt||0)-(a.requestedAt||0));
+
 
   async function submitLoan() {
     await createLoan(loanForm);
     setLoanForm({equipmentId:"", requesterUpt:"", namaPekerjaan:"", tanggalAmbil:"", tanggalKembali:"", keperluan:"", catatan:""});
   }
 
+  // Kondisi overview data
+  const kondisiGroups = [
+    {id:"ALL",      label:"Semua Alat",     color:C.accent,   count:equipmentList.filter(e=>!myUptSelected||e.upt===myUptSelected).length},
+    {id:"LAYAK",    label:"Layak",          color:C.green,    count:equipmentList.filter(e=>(!myUptSelected||e.upt===myUptSelected)&&e.statusAlat==="LAYAK").length},
+    {id:"DIPINJAM", label:"Dipinjam",       color:"#c2410c",  count:equipmentList.filter(e=>(!myUptSelected||e.upt===myUptSelected)&&activeLoanForEquipment(e.id)).length},
+    {id:"PERLU_SERVICE",    label:"Perlu Service",    color:"#f59e0b", count:equipmentList.filter(e=>(!myUptSelected||e.upt===myUptSelected)&&e.statusAlat==="PERLU_SERVICE").length},
+    {id:"BUTUH_PERBAIKAN",  label:"Butuh Perbaikan",  color:C.red,     count:equipmentList.filter(e=>(!myUptSelected||e.upt===myUptSelected)&&e.statusAlat==="BUTUH_PERBAIKAN").length},
+    {id:"BUTUH_PEREMAJAAN", label:"Butuh Peremajaan", color:"#7c3aed", count:equipmentList.filter(e=>(!myUptSelected||e.upt===myUptSelected)&&e.statusAlat==="BUTUH_PEREMAJAAN").length},
+  ].filter(g=>g.id==="ALL"||g.count>0);
+
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-        <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🚜 Alat Berat & Peminjaman UPT</h1>
-          <p style={{color:C.muted,fontSize:13}}>Monitoring alat per UPT, approval Asman pemilik, reminder overdue, dan histori peminjaman.</p>
-        </div>
-      </div>
+      {/* Header */}
+      <h1 style={{fontSize:20,fontWeight:900,marginBottom:12}}>🚜 Alat Berat & Peminjaman UPT</h1>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
-        {[
-          {label:"Total Alat", val:equipmentList.length, color:C.accent},
-          {label:"Tersedia", val:availableCount, color:C.green},
-          {label:"Dipinjam", val:dipinjamCount, color:"#c2410c"},
-          {label:"Overdue", val:overdueCount, color:overdueCount?C.red:C.green},
-          {label:"Pending Approval", val:pendingCount, color:pendingCount?C.yellow:C.green},
-          {label:"Perlu Tindakan", val:issueCount, color:issueCount?C.red:C.green},
-        ].map(k=>(
-          <div key={k.label} style={{...sty.card,padding:14}}>
-            <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{k.label}</div>
-            <div style={{fontSize:26,fontWeight:900,color:k.color}}>{k.val}</div>
+      {/* Filter UPT — hanya tampil di tab Peminjaman & Histori */}
+      {activeTab === "loans" ? (
+        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}}>
+          <div style={{minWidth:180}}>
+            <label style={{...sty.label,marginBottom:3}}>Filter UPT</label>
+            <select style={sty.select} value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
+              <option value="">Semua UPT</option>
+              {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
+            </select>
           </div>
-        ))}
+          <div style={{fontSize:12,color:C.muted,paddingBottom:6}}>
+            {myUptSelected ? <><b style={{color:C.accent}}>{myUptSelected}</b></> : "Menampilkan semua UPT"}
+          </div>
+        </div>
+      ) : (
+        <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
+          {isMSB
+            ? <>Menampilkan <b style={{color:C.accent}}>semua UPT</b> — {equipmentList.length} alat</>
+            : <>Menampilkan alat <b style={{color:C.accent}}>UPT {myUpt||"Surabaya"}</b> — {equipmentList.filter(e=>e.upt===(myUpt||"Surabaya")).length} alat</>
+          }
+        </div>
+      )}
+
+      {/* Overview kondisi — clickable chips */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        {kondisiGroups.map(g=>{
+          const active = kondisiFilter===g.id;
+          return (
+            <button key={g.id} onClick={()=>{setKondisiFilter(g.id); if(activeTab!=="list") setActiveTab("list");}}
+              style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,border:`2px solid ${active?g.color:C.border}`,background:active?g.color:"white",color:active?"white":g.color,fontWeight:700,fontSize:12,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,0,0,.12)":"none"}}>
+              <span style={{fontWeight:900,fontSize:14}}>{g.count}</span>
+              <span>{g.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        {[{id:"list",label:"List Alat"},{id:"loans",label:"Peminjaman"},{id:"history",label:"Histori"}].map(t=>(
-          <button key={t.id} style={{padding:"7px 14px",borderRadius:20,border:`1px solid ${activeTab===t.id?C.accent:C.border}`,background:activeTab===t.id?C.accent:"white",color:activeTab===t.id?"white":C.muted,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>{
-            setActiveTab(t.id);
-            // Tab Peminjaman: tampilkan semua UPT agar bisa pinjam dari UPT lain
-            if (t.id==="loans") setUptFilter("ALL");
-            // Tab List: kembali ke UPT sendiri
-            if (t.id==="list") setUptFilter(myUptSelected||"ALL");
-          }}>{t.label}</button>
+      {/* Tab buttons — di bawah overview kondisi */}
+      <div style={{display:"flex",gap:6,marginBottom:14}}>
+        {[{id:"list",label:"List Alat"},{id:"loans",label:"Peminjaman & Histori"}].map(t=>(
+          <button key={t.id} style={{padding:"6px 16px",borderRadius:8,border:`1px solid ${activeTab===t.id?C.accent:C.border}`,background:activeTab===t.id?C.accent:"white",color:activeTab===t.id?"white":C.muted,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setActiveTab(t.id)}>
+            {t.label}{t.id==="loans"&&pendingCount>0&&<span style={{marginLeft:5,background:"#dc2626",color:"white",borderRadius:10,padding:"0 5px",fontSize:10}}>{pendingCount}</span>}
+          </button>
         ))}
       </div>
 
       {activeTab==="list" && (
         <>
-          {/* Filter Kategori Alat */}
-          <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          {/* Filter Kategori — di bawah tab */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
             {EQUIPMENT_CATEGORIES.map(cat=>{
               const active = categoryFilter===cat.id;
-              const count = categoryCounts[cat.id]||0;
+              const count = equipmentList.filter(e=>
+                (!myUptSelected||e.upt===myUptSelected)&&
+                (cat.id==="ALL"||getEquipmentCategory(e)===cat.id)&&
+                (kondisiFilter==="ALL"||e.statusAlat===kondisiFilter||(kondisiFilter==="DIPINJAM"&&!!activeLoanForEquipment(e.id)))
+              ).length;
               return (
-                <button key={cat.id} onClick={()=>setCategoryFilter(cat.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 16px",minWidth:80,borderRadius:12,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
+                <button key={cat.id} onClick={()=>setCategoryFilter(cat.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 12px",minWidth:64,borderRadius:10,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
                   <span style={{color:active?C.accent:"#9ca3af",display:"flex"}}>{cat.icon}</span>
-                  <span style={{fontSize:11,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
+                  <span style={{fontSize:10,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
                   <span style={{fontSize:10,fontWeight:700,color:active?C.accent:C.muted}}>{count}</span>
                 </button>
               );
             })}
           </div>
-
-          <div style={{...sty.card,marginBottom:14,padding:14}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
-              <div>
-                <label style={sty.label}>
-                  UPT Saya
-                  {myUptSelected && uptFilter===myUptSelected && <span style={{color:C.green,fontSize:10,marginLeft:6}}>✓ filter aktif</span>}
-                </label>
-                <select style={sty.select} value={myUptSelected}
-                  onChange={e=>{setMyUptSelected(e.target.value); setUptFilter(e.target.value||"ALL");}}>
-                  <option value="">-- Pilih UPT Saya --</option>
-                  {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={sty.label}>Filter Tampilkan</label>
-                <select style={sty.select} value={uptFilter} onChange={e=>setUptFilter(e.target.value)}>
-                  {myUptSelected && <option value={myUptSelected}>🏠 Hanya {myUptSelected} (UPT Saya)</option>}
-                  <option value="ALL">Semua UPT</option>
-                  {uptOptions.filter(u=>u!==myUptSelected).map(u=><option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <div><label style={sty.label}>Filter Status</label><select style={sty.select} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="ALL">Semua Status</option><option value="LAYAK">Layak</option><option value="PERLU_SERVICE">Perlu Service</option><option value="BUTUH_PERBAIKAN">Butuh Perbaikan</option><option value="BUTUH_PEREMAJAAN">Butuh Peremajaan</option><option value="TERSEDIA">Tersedia</option><option value="DIPINJAM">Dipinjam</option><option value="OVERDUE">Overdue</option></select></div>
-            </div>
+          {/* Keterangan filter aktif */}
+          <div style={{fontSize:11,color:C.muted,marginBottom:10}}>
+            Menampilkan <b style={{color:C.text}}>{filteredEquipment.length}</b> alat
+            {kondisiFilter!=="ALL"&&<span> • Kondisi: <b style={{color:C.accent}}>{kondisiGroups.find(g=>g.id===kondisiFilter)?.label}</b></span>}
+            {categoryFilter!=="ALL"&&<span> • Kategori: <b style={{color:C.accent}}>{EQUIPMENT_CATEGORIES.find(c=>c.id===categoryFilter)?.label}</b></span>}
           </div>
+
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
             {filteredEquipment.map(eq=>{
               const activeLoan = activeLoanForEquipment(eq.id);
@@ -9562,69 +9784,102 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
       )}
 
       {activeTab==="loans" && (
-        <div style={{display:"grid",gridTemplateColumns:canManage?"minmax(280px,380px) 1fr":"1fr",gap:16,alignItems:"start"}}>
-          {canManage && (
-            <div style={sty.card}>
-              <div style={{fontSize:15,fontWeight:900,marginBottom:12}}>Ajukan Peminjaman Alat</div>
-              <div style={{marginBottom:10}}><label style={sty.label}>Alat</label><select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:""}))}><option value="">-- Pilih alat tersedia --</option>{equipmentList.filter(e=>e.availabilityStatus!=="DIPINJAM").map(e=><option key={e.id} value={e.id}>{e.upt} - {e.nama} ({e.kapasitas||"-"}) @ {e.lokasi}</option>)}</select>{selectedEquipment && <div style={{fontSize:11,color:C.muted,marginTop:4}}>UPT pemilik alat: <b>{selectedEquipment.upt}</b></div>}</div>
-              <div style={{marginBottom:10}}><label style={sty.label}>UPT Peminjam</label><select style={sty.select} value={loanForm.requesterUpt} onChange={e=>setLoanForm(f=>({...f,requesterUpt:e.target.value}))}><option value="">-- Pilih UPT --</option>{requesterOptions.map(u=><option key={u} value={u}>{u}</option>)}</select></div>
-              <div style={{marginBottom:10}}><label style={sty.label}>Nama Pekerjaan</label><input style={sty.input} value={loanForm.namaPekerjaan} onChange={e=>setLoanForm(f=>({...f,namaPekerjaan:e.target.value}))} placeholder="Contoh: Penggantian PMT Bay Trafo 1"/></div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}><div><label style={sty.label}>Tanggal Ambil</label><input style={sty.input} type="date" value={loanForm.tanggalAmbil} onChange={e=>setLoanForm(f=>({...f,tanggalAmbil:e.target.value}))}/></div><div><label style={sty.label}>Tanggal Kembali</label><input style={sty.input} type="date" value={loanForm.tanggalKembali} onChange={e=>setLoanForm(f=>({...f,tanggalKembali:e.target.value}))}/></div></div>
-              <div style={{marginBottom:10}}><label style={sty.label}>Keperluan</label><textarea style={{...sty.input,minHeight:70}} value={loanForm.keperluan} onChange={e=>setLoanForm(f=>({...f,keperluan:e.target.value}))}/></div>
-              <div style={{marginBottom:12}}><label style={sty.label}>Catatan</label><input style={sty.input} value={loanForm.catatan} onChange={e=>setLoanForm(f=>({...f,catatan:e.target.value}))}/></div>
-              <button style={{...sty.btn("primary"),width:"100%"}} onClick={submitLoan}>Ajukan ke Asman Pemilik</button>
-            </div>
-          )}
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {normalizedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted}}>Belum ada peminjaman alat.</div>}
-            {normalizedLoans.map(loan=>{
-              const eq = equipmentList.find(e=>e.id===loan.equipmentId);
-              return (
-                <div key={loan.id} style={{...sty.card,padding:14,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontWeight:900,fontSize:14}}>{eq?.nama||loan.equipmentId}</div><div style={{fontSize:11,color:C.muted}}>{loan.ownerUpt} → {loan.requesterUpt} • {loan.tanggalAmbil} s/d {loan.tanggalKembali}</div></div><Badge metaKey={loan.runtimeStatus}/></div>
-                  <div style={{fontSize:12,color:C.text,marginBottom:4,fontWeight:700}}>{loan.namaPekerjaan || "-"}</div>
-                  <div style={{fontSize:12,color:C.text,marginBottom:6}}>{loan.keperluan}</div>
-                  <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Diajukan oleh {loanUserName(loan.requestedBy)} • {fmtDate(loan.requestedAt)}{loan.catatan ? ` • ${loan.catatan}` : ""}</div>
-                  {isPendingHeavyEquipmentLoan(loan) && canApproveHeavyEquipmentLoan(currentUser, loan) && <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>{rejectingId===loan.id ? <><input style={{...sty.input,flex:"1 1 220px"}} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Alasan penolakan"/><button style={sty.btn("danger","sm")} onClick={()=>{rejectLoan(loan.id, reason); setRejectingId(null); setReason("");}}>Konfirmasi Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>{setRejectingId(null); setReason("");}}>Batal</button></> : <><button style={sty.btn("success","sm")} onClick={()=>approveLoan(loan.id)}>Setujui</button><button style={sty.btn("danger","sm")} onClick={()=>setRejectingId(loan.id)}>Tolak</button></>}</div>}
-                  {["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus) && ["ADMIN","TL","ASMAN"].includes(currentUser.role) && <button style={sty.btn("ghost","sm")} onClick={()=>completeLoan(loan.id)}>Tandai Sudah Kembali</button>}
-                  {loan.runtimeStatus==="REJECTED" && <div style={{fontSize:11,color:C.red}}>Alasan: {loan.rejectReason}</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {activeTab==="history" && (
         <div>
-          <div style={{...sty.card,marginBottom:14,padding:14}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
-              <div><label style={sty.label}>UPT Pemilik</label><select style={sty.select} value={historyFilter.ownerUpt} onChange={e=>setHistoryFilter(f=>({...f,ownerUpt:e.target.value}))}><option value="ALL">Semua</option>{uptOptions.map(u=><option key={u} value={u}>{u}</option>)}</select></div>
-              <div><label style={sty.label}>UPT Peminjam</label><select style={sty.select} value={historyFilter.requesterUpt} onChange={e=>setHistoryFilter(f=>({...f,requesterUpt:e.target.value}))}><option value="ALL">Semua</option>{uptOptions.map(u=><option key={u} value={u}>{u}</option>)}</select></div>
-              <div><label style={sty.label}>Alat</label><select style={sty.select} value={historyFilter.equipmentId} onChange={e=>setHistoryFilter(f=>({...f,equipmentId:e.target.value}))}><option value="ALL">Semua Alat</option>{equipmentList.map(e=><option key={e.id} value={e.id}>{e.nama} - {e.upt}</option>)}</select></div>
-              <div><label style={sty.label}>Status</label><select style={sty.select} value={historyFilter.status} onChange={e=>setHistoryFilter(f=>({...f,status:e.target.value}))}><option value="ALL">Semua</option><option value="PENDING_OWNER_ASMAN">Pending</option><option value="DIPINJAM">Dipinjam</option><option value="OVERDUE">Overdue</option><option value="SELESAI">Selesai</option><option value="REJECTED">Ditolak</option></select></div>
-              <div><label style={sty.label}>Dari Tanggal Ambil</label><input style={sty.input} type="date" value={historyFilter.from} onChange={e=>setHistoryFilter(f=>({...f,from:e.target.value}))}/></div>
-              <div><label style={sty.label}>Sampai Tanggal Ambil</label><input style={sty.input} type="date" value={historyFilter.to} onChange={e=>setHistoryFilter(f=>({...f,to:e.target.value}))}/></div>
-            </div>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {historyRows.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted}}>Tidak ada histori sesuai filter.</div>}
-            {historyRows.map(loan=>{
-              const eq = equipmentList.find(e=>e.id===loan.equipmentId);
+          {/* Category filter pills */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {EQUIPMENT_CATEGORIES.map(cat=>{
+              const active = loanCategoryFilter===cat.id;
+              const base = equipmentList.filter(e=>(cat.id==="ALL"||getEquipmentCategory(e)===cat.id));
+              const countActive = base.filter(e=>activeLoanForEquipment(e.id)).length;
+              const countTotal = base.length;
               return (
-                <div key={loan.id} style={{...sty.card,padding:14,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:14,fontWeight:900}}>{eq?.nama || loan.equipmentId}</div><div style={{fontSize:11,color:C.muted}}>{loan.ownerUpt} → {loan.requesterUpt}</div></div><Badge metaKey={loan.runtimeStatus}/></div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8,fontSize:11,lineHeight:1.5}}>
-                    <div><b>Tanggal pinjam:</b><br/>{loan.tanggalAmbil || "-"}</div>
-                    <div><b>Kembali rencana:</b><br/>{loan.tanggalKembali || "-"}</div>
-                    <div><b>Kembali aktual:</b><br/>{loan.returnedAt ? fmtDate(loan.returnedAt) : "-"}</div>
-                    <div><b>Pengaju:</b><br/>{loanUserName(loan.requestedBy)}</div>
-                    <div><b>Pekerjaan:</b><br/>{loan.namaPekerjaan || "-"}</div>
-                    <div><b>Catatan:</b><br/>{loan.rejectReason || loan.catatan || loan.catatanApproval || "-"}</div>
-                  </div>
-                </div>
+                <button key={cat.id} onClick={()=>setLoanCategoryFilter(cat.id)}
+                  style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 12px",minWidth:64,borderRadius:10,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
+                  <span style={{color:active?C.accent:"#9ca3af"}}>{cat.icon}</span>
+                  <span style={{fontSize:10,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
+                  <span style={{fontSize:10,color:active?C.accent:C.muted}}><b>{countActive}</b>/{countTotal}</span>
+                </button>
               );
             })}
+            <div style={{display:"flex",alignItems:"center",fontSize:11,color:C.muted,paddingLeft:4}}>dipinjam/total</div>
+          </div>
+
+          {/* Ringkasan 1 baris */}
+          <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:14,padding:"9px 14px",background:"#f8fafc",borderRadius:10,border:`1px solid ${C.border}`,fontSize:12,alignItems:"center"}}>
+            {(()=>{
+              const base = equipmentList.filter(e=>(loanCategoryFilter==="ALL"||getEquipmentCategory(e)===loanCategoryFilter));
+              const avail = base.filter(e=>!activeLoanForEquipment(e.id)).length;
+              const pinjam = base.filter(e=>{ const l=activeLoanForEquipment(e.id); return l&&l.runtimeStatus==="DIPINJAM"; }).length;
+              const overdue = base.filter(e=>{ const l=activeLoanForEquipment(e.id); return l&&l.runtimeStatus==="OVERDUE"; }).length;
+              return [
+                {label:"Total",val:base.length,color:C.accent},
+                {label:"Tersedia",val:avail,color:C.green},
+                {label:"Dipinjam",val:pinjam,color:"#c2410c"},
+                {label:"Overdue",val:overdue,color:overdue?C.red:C.muted},
+                {label:"Pending",val:pendingCount,color:pendingCount?"#92400e":C.muted},
+              ].map(k=>(
+                <div key={k.label} style={{display:"flex",alignItems:"baseline",gap:4}}>
+                  <span style={{color:C.muted}}>{k.label}:</span>
+                  <span style={{fontWeight:900,fontSize:14,color:k.color}}>{k.val}</span>
+                </div>
+              ));
+            })()}
+          </div>
+
+          {/* 2-column: Form | Unified loan list */}
+          <div style={{display:"grid",gridTemplateColumns:canManage?"minmax(260px,300px) 1fr":"1fr",gap:14,alignItems:"start"}}>
+
+            {/* Form ajukan (Admin/TL only) */}
+            {canManage && (
+              <div style={sty.card}>
+                <div style={{fontSize:13,fontWeight:900,marginBottom:10}}>Ajukan Peminjaman</div>
+                <div style={{marginBottom:8}}><label style={sty.label}>Alat</label><select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:""}))}><option value="">-- Pilih alat --</option>{equipmentList.filter(e=>e.availabilityStatus!=="DIPINJAM").map(e=><option key={e.id} value={e.id}>{e.upt} — {e.nama} ({e.kapasitas||"-"})</option>)}</select>{selectedEquipment&&<div style={{fontSize:10,color:C.muted,marginTop:3}}>Pemilik: <b>{selectedEquipment.upt}</b></div>}</div>
+                <div style={{marginBottom:8}}><label style={sty.label}>UPT Peminjam</label><select style={sty.select} value={loanForm.requesterUpt} onChange={e=>setLoanForm(f=>({...f,requesterUpt:e.target.value}))}><option value="">-- Pilih UPT --</option>{requesterOptions.map(u=><option key={u} value={u}>{u}</option>)}</select></div>
+                <div style={{marginBottom:8}}><label style={sty.label}>Nama Pekerjaan</label><input style={sty.input} value={loanForm.namaPekerjaan} onChange={e=>setLoanForm(f=>({...f,namaPekerjaan:e.target.value}))} placeholder="Contoh: Penggantian PMT Bay Trafo 1"/></div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}><div><label style={sty.label}>Tgl Ambil</label><input style={sty.input} type="date" value={loanForm.tanggalAmbil} onChange={e=>setLoanForm(f=>({...f,tanggalAmbil:e.target.value}))}/></div><div><label style={sty.label}>Tgl Kembali</label><input style={sty.input} type="date" value={loanForm.tanggalKembali} onChange={e=>setLoanForm(f=>({...f,tanggalKembali:e.target.value}))}/></div></div>
+                <div style={{marginBottom:8}}><label style={sty.label}>Keperluan</label><textarea style={{...sty.input,minHeight:60}} value={loanForm.keperluan} onChange={e=>setLoanForm(f=>({...f,keperluan:e.target.value}))}/></div>
+                <div style={{marginBottom:10}}><label style={sty.label}>Catatan</label><input style={sty.input} value={loanForm.catatan} onChange={e=>setLoanForm(f=>({...f,catatan:e.target.value}))}/></div>
+                <button style={{...sty.btn("primary"),width:"100%"}} onClick={submitLoan}>Ajukan Peminjaman</button>
+              </div>
+            )}
+
+            {/* Unified loan list: aktif + histori, Surabaya only, newest first */}
+            <div>
+              <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
+                Peminjaman & Histori — Semua UPT
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
+                {unifiedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,fontSize:13}}>Belum ada data peminjaman.</div>}
+                {unifiedLoans.map(loan=>{
+                  const eq=equipmentList.find(e=>e.id===loan.equipmentId);
+                  const isActive=["PENDING_OWNER_ASMAN","DIPINJAM","OVERDUE"].includes(loan.runtimeStatus);
+                  return (
+                    <div key={loan.id} style={{...sty.card,padding:12,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`,opacity:isActive?1:0.85}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:4}}>
+                        <div>
+                          <div style={{fontWeight:900,fontSize:13}}>{eq?.nama||loan.equipmentId}</div>
+                          <div style={{fontSize:11,color:C.muted}}>{loan.ownerUpt} → {loan.requesterUpt}</div>
+                        </div>
+                        <Badge metaKey={loan.runtimeStatus}/>
+                      </div>
+                      <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{loan.namaPekerjaan||"-"}</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:isActive?6:0}}>{loan.tanggalAmbil} s/d {loan.tanggalKembali}</div>
+                      {isActive&&isPendingHeavyEquipmentLoan(loan)&&canApproveHeavyEquipmentLoan(currentUser,loan)&&(
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+                          {rejectingId===loan.id
+                            ?<><input style={{...sty.input,flex:"1 1 160px"}} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Alasan penolakan"/><button style={sty.btn("danger","sm")} onClick={()=>{rejectLoan(loan.id,reason);setRejectingId(null);setReason("");}}>Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>{setRejectingId(null);setReason("");}}>Batal</button></>
+                            :<><button style={sty.btn("success","sm")} onClick={()=>approveLoan(loan.id)}>Setujui</button><button style={sty.btn("danger","sm")} onClick={()=>setRejectingId(loan.id)}>Tolak</button></>}
+                        </div>
+                      )}
+                      {isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&["ADMIN","TL","ASMAN"].includes(currentUser.role)&&(
+                        <button style={{...sty.btn("ghost","sm"),marginTop:6}} onClick={()=>completeLoan(loan.id)}>Tandai Kembali</button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
         </div>
       )}
@@ -10215,7 +10470,189 @@ function hitungMaterialCadang(rows, stocks, katalogList, params = {}) {
   return results;
 }
 
-function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, stocks, currentUser, sty, C, saveToCloud, showToast }) {
+function UsulanKatalogTab({ maraReference, setMaraReference, katalogList, setKatalogList, currentUser, sty, C, saveToCloud, showToast }) {
+  const [maraLoading, setMaraLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selectedRows, setSelectedRows] = useState([]); // { katalog, description, satuan, materialGroup }
+  const [drafts, setDrafts] = useState([]); // usulan pending approval
+  const [rejectingId, setRejectingId] = useState(null);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const canApprove = ["ASMAN","TL"].includes(currentUser.role);
+  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
+
+  const existingKatalogs = new Set(katalogList.map(k => normalizeKatalog(String(k.katalog||""))));
+
+  async function handleLoadMara(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMaraLoading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const sheet1 = wb.Sheets["Sheet1"] || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet1, { defval:"" });
+      const ref = rows.map(r => {
+        const raw = String(r["Material"]||"").trim();
+        const kat = normalizeKatalog(raw);
+        return { materialRaw:raw, katalog:kat, materialType:String(r["Material Type"]||"").trim(), materialGroup:String(r["Material Group"]||"").trim(), satuan:String(r["Base Unit of Measure"]||"").trim(), description:String(r["Material Description"]||"").trim(), status:String(r["X-plant matl status"]||"").trim() };
+      });
+      setMaraReference(ref);
+      showToast(`MARA dimuat: ${ref.length} material (session-only, tidak disimpan).`, "success");
+    } catch(err) { showToast("Gagal load MARA: "+err.message,"error"); }
+    setMaraLoading(false); e.target.value="";
+  }
+
+  const maraFiltered = (maraReference||[]).filter(r => {
+    if (!search.trim()) return false;
+    const q = search.toLowerCase();
+    return r.description.toLowerCase().includes(q) || r.katalog.includes(q) || r.materialGroup.toLowerCase().includes(q);
+  }).slice(0,100);
+
+  function toggleSelect(row) {
+    setSelectedRows(prev => prev.find(r=>r.katalog===row.katalog) ? prev.filter(r=>r.katalog!==row.katalog) : [...prev, row]);
+  }
+
+  async function ajukanUsulan() {
+    if (!selectedRows.length) return;
+    const newDrafts = selectedRows.map(r => ({
+      id:"UKAT-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),
+      katalog: r.katalog, namaBarang: r.description, satuan: r.satuan,
+      materialGroup: r.materialGroup, materialType: r.materialType,
+      status:"PENDING", requestedBy:currentUser.id, requestedAt:Date.now(),
+    }));
+    const all = [...drafts, ...newDrafts];
+    setDrafts(all); setSelectedRows([]);
+    showToast(`${newDrafts.length} usulan dikirim ke Asman/TL untuk review.`,"success");
+  }
+
+  async function approveUsulan(id) {
+    const d = drafts.find(x=>x.id===id);
+    if (!d) return;
+    const newKatalog = { id:"K-"+Date.now(), katalog:d.katalog, namaBarang:d.namaBarang, satuan:d.satuan, jenisBarang:"Cadang", harga:0, minQty:0, keterangan:"Dari usulan MARA #"+d.id };
+    const updatedList = [...katalogList, newKatalog];
+    setKatalogList(updatedList);
+    setDrafts(prev=>prev.map(x=>x.id===id?{...x,status:"APPROVED",approvedBy:currentUser.id,approvedAt:Date.now()}:x));
+    await saveToCloud({ katalogList: updatedList });
+    showToast(`Katalog ${d.namaBarang} berhasil ditambahkan ke Master Katalog.`,"success");
+  }
+
+  function rejectUsulan(id) {
+    setDrafts(prev=>prev.map(x=>x.id===id?{...x,status:"REJECTED",rejectedBy:currentUser.id,rejectedAt:Date.now(),rejectReason}:x));
+    setRejectingId(null); setRejectReason("");
+  }
+
+  const pendingDrafts = drafts.filter(d=>d.status==="PENDING");
+  const doneDrafts = drafts.filter(d=>d.status!=="PENDING");
+
+  return (
+    <div>
+      <div style={{marginBottom:14}}>
+        <h2 style={{fontSize:16,fontWeight:900,marginBottom:4}}>➕ Usulan Penambahan Katalog</h2>
+        <p style={{fontSize:12,color:C.muted}}>Cari material dari referensi MARA yang belum ada di Master Katalog, lalu usulkan penambahan. Memerlukan persetujuan Asman/TL.</p>
+      </div>
+
+      {/* Load MARA */}
+      {!maraReference?.length ? (
+        <div style={{...sty.card,marginBottom:16,textAlign:"center",padding:28}}>
+          <div style={{fontSize:32,marginBottom:8}}>📂</div>
+          <div style={{fontWeight:700,marginBottom:6}}>Muat file referensi MARA terlebih dahulu</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:14}}>File <b>Katalog MARA (01-2026).xlsx</b> — session only, tidak disimpan ke cloud.</div>
+          <label style={{...sty.btn("primary"),cursor:"pointer"}}>
+            {maraLoading?"⏳ Memuat...":"📂 Upload Katalog MARA (.xlsx)"}
+            <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara} disabled={maraLoading}/>
+          </label>
+        </div>
+      ) : (
+        <div style={{...sty.card,marginBottom:12,padding:12,background:"#f0fdf4",border:`1px solid #bbf7d0`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:C.green,fontWeight:700}}>✅ MARA dimuat: {maraReference.length.toLocaleString()} material (session-only)</span>
+            <label style={{...sty.btn("ghost","sm"),cursor:"pointer",fontSize:11}}>Ganti file<input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara}/></label>
+          </div>
+        </div>
+      )}
+
+      {maraReference?.length>0 && (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 360px",gap:14,alignItems:"start"}}>
+          {/* Kolom kiri: Cari + hasil */}
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              <input style={{...sty.input,flex:1}} placeholder="Cari nama material, no katalog, material group…" value={search} onChange={e=>setSearch(e.target.value)}/>
+              {selectedRows.length>0 && canEdit && (
+                <button style={sty.btn("primary")} onClick={ajukanUsulan}>Usulkan {selectedRows.length} item →</button>
+              )}
+            </div>
+            {search.trim() && (
+              <div style={{...sty.card,padding:0,overflowX:"auto",maxHeight:440,overflowY:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+                    <tr>{["","No Katalog","Nama Material","Group","Satuan","Status di Master"].map(h=><th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {maraFiltered.length===0 && <tr><td colSpan={6} style={{padding:16,textAlign:"center",color:C.muted}}>Tidak ada hasil untuk "{search}"</td></tr>}
+                    {maraFiltered.map(r=>{
+                      const ada = existingKatalogs.has(r.katalog);
+                      const dipilih = !!selectedRows.find(x=>x.katalog===r.katalog);
+                      return (
+                        <tr key={r.katalog} style={{borderBottom:`1px solid ${C.border}`,background:dipilih?"#eff6ff":ada?"#f9fafb":"white",opacity:ada?0.55:1}}>
+                          <td style={{padding:"5px 8px"}}><input type="checkbox" checked={dipilih} disabled={ada} onChange={()=>toggleSelect(r)}/></td>
+                          <td style={{padding:"5px 8px",fontWeight:700,color:C.accent}}>{r.katalog}</td>
+                          <td style={{padding:"5px 8px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description}</td>
+                          <td style={{padding:"5px 8px",fontSize:10,color:C.muted}}>{r.materialGroup}</td>
+                          <td style={{padding:"5px 8px"}}>{r.satuan}</td>
+                          <td style={{padding:"5px 8px"}}>{ada?<span style={{color:C.green,fontWeight:700,fontSize:10}}>✅ Sudah ada</span>:<span style={{fontSize:10,color:C.muted}}>Belum ada</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {!search.trim() && <div style={{...sty.card,textAlign:"center",padding:24,color:C.muted,fontSize:13}}>Ketik nama atau nomor material untuk mulai mencari dari referensi MARA.</div>}
+          </div>
+
+          {/* Kolom kanan: Usulan pending + riwayat */}
+          <div>
+            <div style={{fontWeight:800,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Usulan Menunggu Persetujuan ({pendingDrafts.length})</div>
+            {pendingDrafts.length===0 && <div style={{...sty.card,textAlign:"center",padding:16,color:C.muted,fontSize:12,marginBottom:12}}>Belum ada usulan pending.</div>}
+            {pendingDrafts.map(d=>(
+              <div key={d.id} style={{...sty.card,padding:12,marginBottom:8,borderLeft:`4px solid ${C.yellow}`}}>
+                <div style={{fontWeight:700,fontSize:12}}>{d.namaBarang}</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:6}}>{d.katalog} • {d.satuan}</div>
+                {canApprove && (
+                  rejectingId===d.id
+                    ? <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        <input style={{...sty.input,flex:1,fontSize:11}} value={rejectReason} onChange={e=>setRejectReason(e.target.value)} placeholder="Alasan tolak"/>
+                        <button style={sty.btn("danger","sm")} onClick={()=>rejectUsulan(d.id)}>Tolak</button>
+                        <button style={sty.btn("ghost","sm")} onClick={()=>setRejectingId(null)}>Batal</button>
+                      </div>
+                    : <div style={{display:"flex",gap:6}}>
+                        <button style={sty.btn("success","sm")} onClick={()=>approveUsulan(d.id)}>✅ Setujui & Tambah</button>
+                        <button style={sty.btn("danger","sm")} onClick={()=>setRejectingId(d.id)}>Tolak</button>
+                      </div>
+                )}
+                {!canApprove && <span style={{fontSize:10,color:"#92400e",fontWeight:700}}>⏳ Menunggu Asman/TL</span>}
+              </div>
+            ))}
+            {doneDrafts.length>0 && (
+              <>
+                <div style={{fontWeight:800,fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:8}}>Riwayat ({doneDrafts.length})</div>
+                {doneDrafts.slice(-5).reverse().map(d=>(
+                  <div key={d.id} style={{...sty.card,padding:10,marginBottom:6,borderLeft:`4px solid ${d.status==="APPROVED"?C.green:C.red}`}}>
+                    <div style={{fontSize:11,fontWeight:700}}>{d.namaBarang}</div>
+                    <div style={{fontSize:10,color:C.muted}}>{d.katalog} • <span style={{color:d.status==="APPROVED"?C.green:C.red}}>{d.status}</span></div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, currentUser, sty, C, saveToCloud, showToast }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null); // { rows, stats, fileName }
@@ -10346,10 +10783,21 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraRefe
   async function handleApproveApply(applyId) {
     const entry = materialCadangData.applyHistory.find(h => h.id === applyId);
     if (!entry) return;
-    // Update minQty di stok
-    const katalogStocks = stocks.filter(s => s.katalogId === entry.katalogId).sort((a,b) => (b.qty||0) - (a.qty||0));
-    // hanya update di luar — tidak ada setStocks langsung di sini, harus via saveToCloud
-    showToast("Fitur approve apply minQty memerlukan akses ke state stok. Gunakan menu Approval.", "error");
+    // Update minQty di katalogList
+    const updated = katalogList.map(k =>
+      k.id === entry.katalogId ? { ...k, minQty: entry.recommendedQty, minQtyUpdatedAt: Date.now(), minQtyUpdatedBy: currentUser.id } : k
+    );
+    setKatalogList(updated);
+    // Tandai apply sebagai APPROVED
+    const updatedMC = {
+      ...materialCadangData,
+      applyHistory: materialCadangData.applyHistory.map(h =>
+        h.id===applyId ? {...h, status:"APPROVED", approvedBy:currentUser.id, approvedAt:Date.now()} : h
+      )
+    };
+    setMaterialCadangData(updatedMC);
+    await saveToCloud({ katalogList: updated, materialCadangData: updatedMC });
+    showToast(`Min Qty ${entry.namaBarang} berhasil diperbarui ke ${entry.recommendedQty}.`, "success");
   }
 
   async function handleRejectApply(applyId, reason) {
@@ -10410,7 +10858,6 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraRefe
     {id:"import",label:"📥 Import & Hitung"},
     {id:"hasil",label:"📋 Hasil Analisis"},
     {id:"apply",label:"✅ Apply Min Qty",badge:pendingApply.length},
-    {id:"mara",label:"🔍 MARA Lookup"},
   ];
 
   return (
@@ -10506,6 +10953,47 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraRefe
       {/* IMPORT & HITUNG */}
       {subTab==="import" && (
         <div>
+          {/* Keterangan cara perhitungan */}
+          <div style={{...sty.card,marginBottom:16,background:"#f0f9ff",border:`1px solid #bae6fd`}}>
+            <div style={{fontWeight:800,fontSize:13,color:"#0369a1",marginBottom:10}}>📐 Cara Perhitungan Material Cadang</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:14,fontSize:12}}>
+              <div>
+                <div style={{fontWeight:700,color:"#0369a1",marginBottom:4}}>1. Klasifikasi ABC</div>
+                <div style={{color:"#374151",lineHeight:1.7}}>
+                  <b>A1</b> — Kritis tinggi (failure besar, mahal, lead time panjang) → SL 99%<br/>
+                  <b>A2</b> — Kritis sedang → SL 95%<br/>
+                  <b>B1/B2</b> — Penting → SL 90%<br/>
+                  <b>C</b> — Tidak kritikal → tidak direkomendasikan sebagai cadang<br/>
+                  <span style={{color:C.muted,fontSize:11}}>Skor = (failure rate × 0.4) + (harga × 0.3) + (lead time × 0.3)</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontWeight:700,color:"#0369a1",marginBottom:4}}>2. Policy Inventory</div>
+                <div style={{color:"#374151",lineHeight:1.7}}>
+                  <b>Mandatory</b> — ceil(2% × populasi)<br/>
+                  <b>Economic</b> — ceil(penggantian 5 tahun ÷ 5)<br/>
+                  <b>Optimum</b> — Poisson CDF invers pada service level target<br/>
+                  <span style={{color:C.muted,fontSize:11}}>λ = failure5y/5 × (leadTime/8760)</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontWeight:700,color:"#0369a1",marginBottom:4}}>3. A2 Split Rule</div>
+                <div style={{color:"#374151",lineHeight:1.7}}>
+                  A2 masuk <b>Persediaan</b> jika:<br/>
+                  TTF ≥ Lead Time <b>DAN</b> tidak ada breakdown aktif <b>DAN</b> emergency = 0<br/>
+                  Selain itu → <b>Material Cadang/Optimum</b>
+                </div>
+              </div>
+              <div>
+                <div style={{fontWeight:700,color:"#0369a1",marginBottom:4}}>4. Rekomendasi Min Qty</div>
+                <div style={{color:"#374151",lineHeight:1.7}}>
+                  Hasil akhir = <b>max(Mandatory, Economic, Optimum)</b><br/>
+                  Gap = Rekomendasi − Stok Saat Ini<br/>
+                  Apply ke <b>Min Qty</b> di Master Katalog memerlukan persetujuan Asman.
+                </div>
+              </div>
+            </div>
+          </div>
           <div style={{...sty.card,marginBottom:16}}>
             <div style={{fontWeight:700,fontSize:14,marginBottom:10}}>📥 Upload Data Populasi/Failure Material Cadang</div>
             <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Format: CSV atau XLSX dengan header sesuai <code>TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx</code>. Header XLSX di baris ke-3.</p>
@@ -10663,57 +11151,6 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, maraRefe
       )}
 
       {/* MARA LOOKUP */}
-      {subTab==="mara" && (
-        <div>
-          <div style={{...sty.card,marginBottom:16}}>
-            <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>🔍 Hidden SAP MARA Reference</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Upload file <code>Katalog MARA (01-2026).xlsx</code>. Data hanya tersimpan di session (tidak masuk browser storage) sebagai referensi lookup.</p>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
-              <label style={{...sty.btn(maraReference?"ghost":"primary"),cursor:"pointer"}}>
-                {maraLoading?"⏳ Memuat...":maraReference?`✅ MARA Dimuat (${maraReference.length} material)`:"📂 Load File MARA (.xlsx)"}
-                <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara} disabled={maraLoading}/>
-              </label>
-              {maraReference && <button style={sty.btn("danger","sm")} onClick={()=>{setMaraReference(null); showToast("MARA reference dihapus dari session.", "success");}}>Hapus dari Session</button>}
-            </div>
-          </div>
-          {maraReference && (
-            <div style={{...sty.card}}>
-              <input style={{...sty.input,marginBottom:12}} placeholder="🔍 Cari nomor katalog, deskripsi, prefix..." value={maraSearch} onChange={e=>setMaraSearch(e.target.value)}/>
-              <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
-                    <tr>
-                      {["No Katalog","Deskripsi","Prefix","Tipe","Satuan","SAP Cadang","Unblock"].map(h=>(
-                        <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {maraReference
-                      .filter(r => !maraSearch || r.katalog.includes(maraSearch) || r.description.toLowerCase().includes(maraSearch.toLowerCase()) || r.prefix.toLowerCase().includes(maraSearch.toLowerCase()))
-                      .slice(0,200)
-                      .map((r,i)=>(
-                        <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
-                          <td style={{padding:"5px 8px",fontWeight:700,color:"#0098da"}}>{r.katalog}</td>
-                          <td style={{padding:"5px 8px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.description}</td>
-                          <td style={{padding:"5px 8px"}}>{r.prefix}</td>
-                          <td style={{padding:"5px 8px",fontSize:10}}>{r.materialType}</td>
-                          <td style={{padding:"5px 8px"}}>{r.satuan}</td>
-                          <td style={{padding:"5px 8px",textAlign:"center"}}>{r.isCadang?"✅":""}</td>
-                          <td style={{padding:"5px 8px",textAlign:"center"}}>{r.isUnblocked?"✅":""}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-                {maraSearch && maraReference.filter(r=>r.katalog.includes(maraSearch)||r.description.toLowerCase().includes(maraSearch.toLowerCase())).length > 200 && (
-                  <div style={{padding:8,textAlign:"center",color:C.muted,fontSize:11}}>Tampil 200 teratas. Perjelas pencarian untuk hasil lebih spesifik.</div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Modal detail item */}
       {detailItem && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setDetailItem(null)}>
@@ -11485,13 +11922,28 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               {sapFile && <span style={{fontSize:12,color:C.green,fontWeight:700}}>✅ {sapFile} ({sapRows.length} baris)</span>}
             </div>
           </div>
-          <div style={{...sty.card,marginBottom:12}}>
-            <div style={{fontWeight:700,marginBottom:8}}>2. Load MARA Reference (opsional)</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Upload Katalog MARA untuk validasi nomor SAP. Session-only.</p>
-            <label style={{...sty.btn(maraReference?"ghost":"ghost"),cursor:"pointer"}}>
-              {maraLoading?"⏳ Memuat...":maraReference?`✅ MARA (${maraReference.length} material)`:"📂 Load MARA (.xlsx) — Opsional"}
-              <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara} disabled={maraLoading}/>
-            </label>
+          <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1"}}>
+            <div style={{fontWeight:700,marginBottom:4}}>2. Upload Katalog MARA ke Database</div>
+            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Upload file MARA (.xlsx) agar tersimpan permanen di database dan bisa digunakan sebagai referensi saat Tambah Katalog Barang.</p>
+            {maraUploadProgress && (
+              <div style={{fontSize:12,color:"#0369a1",fontWeight:700,marginBottom:8,padding:"6px 10px",background:"#e0f2fe",borderRadius:6}}>{maraUploadProgress}</div>
+            )}
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <label style={{...sty.btn("primary"),cursor:"pointer",background:"#0369a1",borderColor:"#0369a1"}}>
+                {maraUploadLoading?"⏳ Mengupload...":"📂 Upload Katalog MARA (.xlsx)"}
+                <input type="file" accept=".xlsx" style={{display:"none"}} disabled={maraUploadLoading}
+                  onChange={e=>{ if(e.target.files?.[0]) uploadMaraToDB(e.target.files[0]); e.target.value=""; }}/>
+              </label>
+              <span style={{fontSize:11,color:C.muted}}>Format: kolom Material, Material Type, Material Group, Base Unit, Status, Material Description</span>
+            </div>
+            {/* Legacy session-only load — untuk validasi SAP */}
+            <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Load session-only (untuk validasi SAP migration):</div>
+              <label style={{...sty.btn("ghost","sm"),cursor:"pointer"}}>
+                {maraLoading?"⏳ Memuat...":maraReference?`✅ MARA session (${maraReference.length} material)`:"📂 Load MARA session-only"}
+                <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleLoadMara} disabled={maraLoading}/>
+              </label>
+            </div>
           </div>
           <button style={sty.btn("primary")} disabled={sapRows.length===0||busy} onClick={buildPreview}>
             Lanjut → Preview Rekonsiliasi
