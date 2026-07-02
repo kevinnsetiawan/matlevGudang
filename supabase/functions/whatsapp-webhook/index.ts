@@ -217,7 +217,7 @@ async function buildWarnotoStateContext(): Promise<string> {
     if (!data) return "";
     const s = data.state_data as Record<string, unknown>;
     const since = new Date(data.updated_at as string).toLocaleString("id-ID", { timeZone:"Asia/Jakarta" });
-    return `\nDATA KONDISI GUDANG (update: ${since}):\n` + JSON.stringify(s, null, 2).slice(0, 2000);
+    return `\nDATA KONDISI GUDANG (update: ${since}):\n` + JSON.stringify(s, null, 2).slice(0, 8000);
   } catch {
     return "";
   }
@@ -233,6 +233,7 @@ async function generateReply(question: string): Promise<{ text: string; chunksUs
 Jawab singkat dan jelas. Format untuk WhatsApp: hindari tabel panjang, gunakan bullet point atau angka.
 Gunakan Bahasa Indonesia profesional namun mudah dipahami.
 Kapasitas jawaban: maksimal 600 kata.
+Kalau ditanya jumlah/qty/harga/nilai material, cari dulu di "DATA KONDISI GUDANG" (bagian top20ByValue/materialKritis) sebelum bilang tidak ada datanya — itu sumber angka real-time (qty, satuan, harga satuan, nilai Rupiah).
 
 KONTEKS KNOWLEDGE BASE (Master Katalog + riwayat TUG):
 ${ragContext}

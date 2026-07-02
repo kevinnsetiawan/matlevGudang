@@ -4573,6 +4573,59 @@ export default function PLNWarehouse() {
     setRagSyncing(false);
   }
 
+  // Snapshot data ringkas (qty, harga/Rupiah, stok kritis, pending approval, rencana
+  // kedatangan) yang dikirim ke bot WA/Telegram lewat tabel `warnoto_state`. Tanpa ini,
+  // bot cuma punya RAG chunk katalog (nama/satuan/kategori doang, tidak ada qty/harga —
+  // lihat buildKatalogRagContent) sehingga jauh lebih "bodoh" dibanding AI Agent web yang
+  // selalu inject snapshot ini langsung ke prompt tiap chat (lihat sendChat di bawah).
+  // Dipicu manual bareng "Sync Knowledge Base (RAG)" — sama seperti RAG, sengaja tidak
+  // otomatis tiap perubahan data supaya tidak boros write ke Supabase.
+  function buildWarnotoStateSnapshot() {
+    const top20 = [...enrichedStocks].sort((a,b)=>(b.qty*b.price)-(a.qty*a.price)).slice(0,20);
+    const kritis = enrichedStocks.filter(s=>s.minQty>0&&s.qty<=s.minQty);
+    const pending = txns.filter(t=>t.status==="PENDING");
+    const tiga_bulan_lalu = Date.now() - 90*24*60*60*1000;
+    const txnRecent = txns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
+    const usageSummary = {};
+    txnRecent.forEach(t=>{
+      (t.stockItems||[]).forEach(si=>{
+        const s = enrichedStocks.find(x=>x.id===si.stockId);
+        if(!s) return;
+        if(!usageSummary[s.name]) usageSummary[s.name]={total:0,count:0};
+        usageSummary[s.name].total += si.qty||0;
+        usageSummary[s.name].count += 1;
+      });
+    });
+    const topPakai = Object.entries(usageSummary).sort((a,b)=>b[1].total-a[1].total).slice(0,10).map(([nama,d])=>({nama, total:d.total, count:d.count}));
+    const plus30 = Date.now()+30*24*60*60*1000;
+    const rencana30 = rencanaKedatanganList
+      .flatMap(r=>(r.items||[]).map(i=>({...i,supplier:r.supplier,tanggalSerahTerima:r.tanggalSerahTerima,noKontrak:r.noKontrak})))
+      .filter(i=>i.tanggalSerahTerima&&new Date(i.tanggalSerahTerima).getTime()<=plus30)
+      .sort((a,b)=>new Date(a.tanggalSerahTerima)-new Date(b.tanggalSerahTerima));
+
+    return {
+      generatedAt: new Date().toISOString(),
+      totalItem: enrichedStocks.length,
+      totalNilaiRp: Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)),
+      top20ByValue: top20.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, hargaSatuan:s.price, nilaiRp: Math.round(s.qty*s.price) })),
+      materialKritis: kritis.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, minQty:s.minQty })),
+      pemakaian3BulanTop10: topPakai,
+      tugPendingApproval: pending.map(t=>({ docType:t.docType, id:t.id, namaPekerjaan:t.namaPekerjaan, requiredApprover:t.requiredApprover, createdAt:t.createdAt })),
+      rencanaKedatangan30Hari: rencana30.map(i=>({ namaBarang:i.namaBarang, jumlah:i.jumlah, satuan:i.satuan, supplier:i.supplier, noKontrak:i.noKontrak, tanggalSerahTerima:i.tanggalSerahTerima })),
+    };
+  }
+
+  async function syncWarnotoState() {
+    if (!supabase) return;
+    try {
+      const state_data = buildWarnotoStateSnapshot();
+      const { error } = await supabase.from("warnoto_state").insert({ state_data, version: "v1" });
+      if (error) throw error;
+    } catch (err) {
+      showToast("Gagal sinkron State Gudang (untuk bot WA/Telegram): " + err.message, "error");
+    }
+  }
+
   async function sendChat(overrideMsg) {
     const msg = overrideMsg || chatInput.trim();
     if (!msg || chatLoading) return;
@@ -6461,6 +6514,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             chatEndRef={chatEndRef}
             sendChat={sendChat}
             syncRagChunks={syncRagChunks}
+            syncWarnotoState={syncWarnotoState}
             ragSyncing={ragSyncing}
             ragLastSync={ragLastSync}
             currentUser={currentUser}
@@ -8853,7 +8907,7 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
 // ─── AI AGENT PAGE (Forecast + Chat terintegrasi) ────────────────────────
 function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
   rencanaKedatanganList, chatHistory, setChatHistory, chatInput, setChatInput,
-  chatLoading, chatEndRef, sendChat, syncRagChunks, ragSyncing, ragLastSync, currentUser, C, sty }) {
+  chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState, ragSyncing, ragLastSync, currentUser, C, sty }) {
 
   const SUGGESTED = [
     "Analisa kondisi stok sekarang dan material yang perlu perhatian",
@@ -8873,8 +8927,8 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
         </div>
         {currentUser?.role==="ADMIN" && (
           <div style={{textAlign:"right"}}>
-            <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={syncRagChunks}>
-              {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG)"}
+            <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={async()=>{await syncRagChunks(); await syncWarnotoState();}}>
+              {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG + Bot WA/Telegram)"}
             </button>
             {ragLastSync && <div style={{fontSize:10,color:C.muted,marginTop:4}}>Terakhir sync: {fmtDate(ragLastSync)}</div>}
           </div>
