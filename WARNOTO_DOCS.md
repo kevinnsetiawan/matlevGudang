@@ -1414,6 +1414,10 @@ Warna per kategori:
 | :--- | :--- | :--- |
 | Foto Stock Opname | Butuh server PLN + API endpoint | Fase 2 |
 | Multi-UPT data terisolasi | Butuh backend nyata | Fase 2 |
+| Material Cadang | Spesifikasi konsep, format import, hidden Catalog Master/MARA reference, dashboard manajemen, dan approval Asman untuk apply `minQty` sudah dipisah di `MATERIAL_CADANG_SPEC.md` | Fase 2 |
+| WA AI Agent | Spesifikasi integrasi AI Agent ke WhatsApp Cloud API, read-only, whitelist nomor, server-side state, RAG sync harian, dan audit log sudah dipisah di `WA_AI_AGENT_SPEC.md` | Fase 2 |
+| Migrasi Stok SAP/Non-SAP + TUG-15 | Planning cutover data, cleansing Non-SAP, staging review, histori migrasi `MIGRASI`, dan backup wajib terdokumentasi di bagian 20 | Fase 2 |
+| Monitoring Kapasitas Gudang | Spesifikasi import laporan UIT berbasis m2, dashboard manajemen, mapping peta gudang, dan storage Supabase sudah dipisah di `GUDANG_CAPACITY_SPEC.md` | Fase 2 |
 | True ML Forecasting (XGBoost) | Butuh Python server | Fase 3 |
 | SAP API integration | Butuh middleware | Fase 3 |
 | Retrain model otomatis | Butuh Fase 3 selesai | Fase 3 |
@@ -1424,6 +1428,13 @@ Warna per kategori:
 - Input stok Non-SAP (ATTB, Bongkaran) manual
 - Assign lokasi/blok per material setelah import SAP
 - Upload denah gudang PDF untuk Peta Gudang
+- Review dan implementasi fitur Material Cadang berdasarkan `MATERIAL_CADANG_SPEC.md`
+- Siapkan hidden SAP MARA reference untuk lookup/extend Master Katalog tanpa memenuhi Master Data utama
+- Siapkan alur approval Asman untuk penerapan rekomendasi Material Cadang ke `minQty`
+- Review dan implementasi WA AI Agent berdasarkan `WA_AI_AGENT_SPEC.md`
+- Siapkan server-side state Supabase agar AI Agent WhatsApp bisa membaca konteks yang setara dengan AI Agent web
+- Siapkan migrasi data stok SAP/Non-SAP dan histori TUG-15 berdasarkan planning bagian 20
+- Review dan implementasi Monitoring Kapasitas Gudang berdasarkan `GUDANG_CAPACITY_SPEC.md`
 
 **Fase 2 (1 bulan):**
 - Enhanced Claude API forecasting (sudah ada di v31)
@@ -1627,8 +1638,507 @@ TL approve dari panel "🔔 Menunggu Approval Anda" (alur sama seperti 16.5)
 - **Fitur Foto Material** (foto nameplate + foto keseluruhan di tiap Data Stok, klik card → modal detail). Konsep sudah disetujui user (wajib diisi semua kecuali data lama disinkronkan saat import PEMAT nanti; upload hanya Admin+TL; klik di mana saja pada card untuk buka detail) — **belum mulai implementasi**, sempat ketunda karena ada permintaan tabel horizontal & fitur Dashboard menyusul.
 - Backend HP-scan-barcode + shared DB lintas device masih **dipause**, menunggu riset user sendiri (lihat memory `warnoto_backend_decision_pending`).
 
-#### 17.10 Hal yang HARUS diingat kalau lanjut malam ini
+### 18. Sesi 30 Juni 2026 — Planning Material Cadang & Hidden Reference
+
+#### 18.1 Dokumen Khusus
+- File baru: `MATERIAL_CADANG_SPEC.md`.
+- File ini menjadi sumber detail untuk implementasi fitur Material Cadang di Claude.
+- `WARNOTO_DOCS.md` hanya menyimpan ringkasan dan pointer agar dokumen utama tidak terlalu padat.
+
+#### 18.2 Scope Material Cadang v1
+- Fitur khusus untuk `jenisBarang === "Cadang"`.
+- Import data Material Cadang menerima CSV/XLSX dengan grain `Material x Equipment Cluster`.
+- Template upload awal sudah dibuat: `TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx`.
+- Sheet utama template: `Import Material Cadang`; sheet pendukung: `Contoh`, `Referensi`, `Petunjuk`.
+- CSV tetap didukung selama header sama dengan template XLSX.
+- ABC Analysis 5 kelas: `A1`, `A2`, `B1`, `B2`, `C`.
+- Inventory policy:
+  - `A1` -> Mandatory.
+  - `A2` -> split Persediaan/Material Cadang berdasarkan lead time, time to failure, breakdown, emergency.
+  - `B1/B2` -> Optimum & Economic.
+  - `C` -> Persediaan/rutin, tidak apply sebagai Material Cadang v1.
+- Perhitungan:
+  - Mandatory = `ceil(2% x populasi)`.
+  - Optimum = Poisson reliability-only.
+  - Economic = `% history penggantian x populasi`.
+  - B1/B2 memakai `max(poissonQty, economicQty)`.
+
+#### 18.3 Approval Asman untuk Apply Min Qty
+- Rekomendasi Material Cadang tidak langsung mengubah `minQty`.
+- `ADMIN`/`TL` hanya mengajukan apply rekomendasi ke `minQty`.
+- `ASMAN` approve/reject pengajuan.
+- `minQty` baru berubah setelah approval Asman.
+- `MANAGER` hanya melihat dashboard/ringkasan/histori.
+- Apply tidak boleh mengubah `qty` stok dan tidak boleh mengubah histori TUG.
+
+#### 18.4 Dashboard Manajemen Material Cadang
+- Dashboard harus menampilkan ringkasan Material Cadang untuk manajemen:
+  - total item dianalisis;
+  - aman;
+  - kurang;
+  - kosong/critical;
+  - total gap qty;
+  - estimasi nilai gap.
+- Dashboard juga menampilkan distribusi kelas ABC, policy, dan tabel prioritas maksimal 10 item.
+- Empty state wajib jelas: "Material Cadang belum dianalisis", jangan tampilkan angka 0 seolah-olah aman.
+
+#### 18.5 Hidden Catalog Master PLN Reference
+- File referensi: `CATALOG MASTER.xlsx`.
+- Fungsi: hidden cataloger reference, bukan Master Katalog utama.
+- Dipakai untuk standar naming cataloger PLN, search global, alias equipment, dan warning pola nama katalog.
+- Alias penting:
+  - PMT = CB / Circuit Breaker.
+  - PMS = DS / Disconnecting Switch.
+  - PT/CVT, CT, LA, Cable Joint, Bushing, OLTC dipakai sebagai cluster/equipment penting Material Cadang.
+- Tidak boleh auto-rename katalog existing tanpa review user.
+
+#### 18.6 Hidden SAP MARA Reference
+- File referensi: `Katalog MARA (01-2026).xlsx`.
+- Fungsi: hidden SAP reference, bukan Master Katalog utama.
+- Sheet `Sheet1` menjadi sumber utama katalog SAP.
+- Sheet `Katalog Unblock` hanya menjadi flag `isUnblocked`, bukan data kedua.
+- Sheet `Formula Nama Katalog` menjadi referensi naming.
+- Struktur reference disarankan memakai storage key `pln_sap_mara_reference_v1`.
+- Jangan auto-import 42 ribu material MARA ke Master Katalog.
+- Extend ke Master Data hanya untuk material yang dipilih user.
+- Jika MARA berbeda dengan WARNOTO existing, WARNOTO tetap authority operasional; MARA memberi warning/review.
+
+#### 18.7 Instruksi Migrasi ke Claude
+- Saat implementasi di Claude, upload:
+  - `App.jsx`;
+  - `WARNOTO_DOCS.md`;
+  - `MATERIAL_CADANG_SPEC.md`;
+  - `TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx`;
+  - `CATALOG MASTER.xlsx`;
+  - `Katalog MARA (01-2026).xlsx`;
+  - contoh file import Material Cadang/populasi-failure jika sudah tersedia.
+- Prompt pembuka dan urutan kerja detail sudah tertulis di `MATERIAL_CADANG_SPEC.md` bagian "Instruksi Saat Update/Migrasi di Claude".
+
+#### 18.8 Catatan Teknis Lintas Sesi
 - Selalu cek `preview_console_logs` setelah edit JSX besar — beberapa kali sesi ini kena bug JSX tag tidak seimbang (`</div>` dobel) yang baru kelihatan dari error Babel `[plugin:vite:react-babel] Adjacent JSX elements must be wrapped...`, bukan dari console log HMR yang kadang ambigu (lihat 17.6 & catatan debugging "table tidak muncul" — root cause-nya 1 `</div>` ekstra di baris penutup tabel Data Stok).
 - Setelah HMR gagal beberapa kali, kadang perlu **hard reload** (`location.reload()`) + login ulang manual via `preview_eval` (native value setter + dispatch `input`/`change` event, BUKAN cuma set `.value` langsung — React tidak mendeteksi perubahan tanpa native setter + event).
 - localStorage browser testing ini **sudah punya data lama** dari sesi-sesi sebelumnya (termasuk Gudang Ketintang tanpa `lat/lng` sebelum fitur Peta Wilayah ada) — kalau fitur baru "kelihatan tidak jalan" di preview, cek dulu apakah memang datanya belum di-migrasi/isi, bukan otomatis berarti bug kode.
+### 19. Sesi 30 Juni 2026 — Planning WA AI Agent
 
+#### 19.1 Dokumen Khusus
+- File baru: `WA_AI_AGENT_SPEC.md`.
+- File ini menjadi sumber detail untuk implementasi integrasi AI Agent WARNOTO ke WhatsApp.
+- `WARNOTO_DOCS.md` hanya menyimpan ringkasan dan pointer agar dokumen utama tidak terlalu padat.
+
+#### 19.2 Scope WA AI Agent v1
+- Platform resmi: WhatsApp Cloud API.
+- Runtime webhook: Supabase Edge Function existing `supabase/functions/whatsapp-webhook/index.ts`.
+- WA Agent v1 bersifat read-only.
+- Pesan masuk yang didukung v1 hanya teks.
+- Command dasar:
+  - `help`;
+  - `menu`;
+  - `status sinkron`.
+- WA tidak boleh approve/reject, membuat TUG, mengubah stok, mengubah Master Katalog, mengubah lokasi, mengubah `minQty`, atau apply rekomendasi Material Cadang.
+
+#### 19.3 Akses, Data, dan Audit
+- Akses memakai whitelist nomor WhatsApp.
+- Semua nomor whitelist mendapat akses baca yang sama; role boleh disimpan untuk audit tetapi tidak menjadi filter jawaban v1.
+- Karena Edge Function tidak bisa membaca localStorage/browser state, AI Agent WA membutuhkan server-side state di Supabase.
+- Storage awal yang disarankan: `warnoto_state` berbasis JSONB per domain.
+- Domain state awal: `stocks`, `katalogList`, `txns`, `rencanaKedatanganList`, `lokasiList`, `approvalHistoryList`, `opnameList`, `stockCountList`, dan `materialCadangAnalysis`.
+- RAG/Knowledge Base ditargetkan sync otomatis harian.
+- Audit log WA menyimpan metadata + ringkasan, bukan seluruh jawaban panjang secara default.
+
+#### 19.4 Supabase dan Secrets
+- Tabel baru yang direncanakan:
+  - `warnoto_state`;
+  - `wa_allowed_users`;
+  - `wa_agent_logs`;
+  - `wa_sync_status`.
+- Secrets Edge Function:
+  - `WHATSAPP_VERIFY_TOKEN`;
+  - `WHATSAPP_ACCESS_TOKEN`;
+  - `WHATSAPP_PHONE_NUMBER_ID`;
+  - `GROQ_API_KEY`;
+  - `COHERE_API_KEY`.
+- Service role hanya dipakai server-side di Edge Function, tidak diekspos ke frontend.
+
+#### 19.5 Instruksi Migrasi ke Claude
+- Saat implementasi di Claude, upload:
+  - `App.jsx`;
+  - `WARNOTO_DOCS.md`;
+  - `README.md`;
+  - `WA_AI_AGENT_SPEC.md`;
+  - `supabase/schema.sql`;
+  - `supabase/functions/whatsapp-webhook/index.ts`;
+  - `MATERIAL_CADANG_SPEC.md` jika butuh konteks lintas fitur.
+- Prompt pembuka dan urutan kerja detail sudah tertulis di `WA_AI_AGENT_SPEC.md` bagian "Instruksi Implementasi di Claude".
+
+#### 19.6 Status Setup WhatsApp Cloud API
+- Meta App sudah dibuat dengan nama `Warnoto BOT`.
+- User sudah mendapatkan `Phone Number ID`, `WhatsApp Business Account ID`, `App ID`, dan `App Secret`.
+- Form yang sedang disiapkan di Meta: `Configure Webhooks`.
+- Isi form Meta:
+  - `Callback URL`: `https://tadxodrzoquugnsyejld.supabase.co/functions/v1/whatsapp-webhook`
+  - `Verify token`: `warnoto-wa-verify-2026`
+- `App ID`, `App Secret`, dan `WhatsApp Business Account ID` tidak diisi di form webhook.
+- Cek endpoint terakhir masih `404 Requested function was not found`, artinya Edge Function `whatsapp-webhook` belum terdeploy.
+- Lanjutan besok: jalankan `npx supabase login`, `npx supabase link --project-ref tadxodrzoquugnsyejld`, set secrets, deploy `whatsapp-webhook --no-verify-jwt`, lalu baru klik `Verify and save` di Meta.
+
+### 20. Planning Migrasi Data Stok SAP, Non-SAP, dan TUG-15
+
+#### 20.1 Tujuan
+- Migrasi data stok dibuat sebagai cutover terkontrol, bukan import bebas.
+- File SAP diperlakukan sebagai sumber baku.
+- File Non-SAP diperlakukan sebagai data kotor yang harus melalui cleansing dan review.
+- Saldo cutover approved menjadi sumber kebenaran utama stok aktif.
+- Histori TUG-15 migrasi boleh terlihat di aplikasi, tetapi tidak menjadi transaksi approval aktif.
+
+#### 20.2 Input Migrasi
+- Input utama:
+  - XLSX `Material Status SAP` dari sistem SAP.
+  - XLSX `Material Non-SAP`.
+  - XLSX histori/mutasi TUG-15 jika terpisah dari dua file utama.
+- File SAP:
+  - formatnya baku dari SAP;
+  - parser mengikuti kolom SAP seperti `Material`, `Material Description`, `Base Unit of Measure`, `Unrestricted Use Stock`, `Valuation Type`, dan `Harga Satuan` jika tersedia.
+- File Non-SAP:
+  - tidak boleh langsung masuk Master Katalog aktif;
+  - tidak selalu punya No Katalog;
+  - nama material bisa tidak standar;
+  - perlu cleansing, grouping, dan review Admin + TL.
+
+#### 20.3 Lapisan Data
+- Migrasi dibagi menjadi 4 lapisan:
+  - `Master Katalog`: referensi material hasil cleaning.
+  - `Saldo Cutover`: saldo final per `No Katalog x Lokasi/Blok`.
+  - `Histori TUG15`: mutasi historis hasil migrasi.
+  - `Arsip Backup`: metadata backup, tanggal cutover, sumber file, dan catatan rekonsiliasi.
+- Grain saldo aktif:
+  - `Material x Lokasi/Blok`.
+- Matching utama:
+  - SAP memakai `No Katalog/Material`.
+  - Non-SAP memakai hasil mapping review, bukan nama mentah.
+
+#### 20.4 Jalur SAP
+- Parse otomatis dari XLSX SAP.
+- Normalisasi `Material` dengan trim dan leading zero handling.
+- Klasifikasi:
+  - 10 digit -> `Cadang`.
+  - 7/8 digit + `NORMAL` -> `Persediaan`.
+  - 7/8 digit + `BURSA` -> `Persediaan Bursa`.
+  - 7/8 digit + `PRE-MEMORY` -> `Pre Memory`.
+- Deduplicate saldo per `No Katalog x Lokasi/Blok`.
+- Jika nama/satuan/jenis berbeda dari Master Katalog existing, tampilkan warning, bukan langsung overwrite diam-diam.
+
+#### 20.5 Jalur Non-SAP
+- Non-SAP masuk staging cleansing, bukan langsung aktif.
+- Cleaning awal:
+  - uppercase/trim;
+  - hapus karakter/noise berulang;
+  - normalisasi satuan;
+  - pisahkan token material, equipment, spesifikasi, rating, tegangan, ukuran, dan lokasi jika tersedia.
+- Grouping kandidat duplikat berdasarkan:
+  - `jenisBarang`;
+  - nama normalisasi;
+  - satuan;
+  - spesifikasi utama;
+  - lokasi jika diperlukan.
+- Cocokkan ke hidden SAP/MARA reference:
+  - jika match kuat, tampilkan kandidat No Katalog SAP/MARA.
+  - jika tidak match, status `HOLD_NON_SAP`.
+- `HOLD_NON_SAP`:
+  - tidak masuk `stocks` aktif;
+  - tidak masuk Master Katalog aktif;
+  - tetap muncul di report review;
+  - harus diselesaikan di luar cutover sebelum bisa aktif.
+
+#### 20.6 Master Review Sheet Non-SAP
+- Output cleansing Non-SAP wajib berupa Master Review Sheet.
+- Kolom minimal:
+  - `Nama Asli`;
+  - `Nama Standar Usulan`;
+  - `Kandidat No Katalog SAP/MARA`;
+  - `Status Match`;
+  - `Jenis Barang Usulan`;
+  - `Satuan Usulan`;
+  - `Lokasi/Blok`;
+  - `Qty`;
+  - `Confidence`;
+  - `Warning`;
+  - `Keputusan Admin`;
+  - `Keputusan TL`;
+  - `Catatan Review`.
+- Hanya item yang sudah disetujui Admin + TL yang boleh ikut saldo cutover aktif.
+
+#### 20.7 Cutover
+- Replace scope:
+  - replace `katalogList`;
+  - replace `stocks`;
+  - kosongkan `txns` test lama;
+  - simpan histori migrasi TUG-15 ke state terpisah;
+  - lokasi boleh diupdate dari mapping jika ada.
+- Master pendukung dipertahankan:
+  - gudang;
+  - lokasi existing yang tidak konflik;
+  - satpam;
+  - tim mutu;
+  - rencana kedatangan;
+  - opname;
+  - stock count;
+  - maturity;
+  - approval history non-migrasi.
+- Transaksi baru WARNOTO dimulai dari tanggal cutover fixed.
+- `docSeq` diset ke nomor awal transaksi baru setelah cutover.
+
+#### 20.8 Histori TUG-15 Migrasi
+- Histori migrasi disimpan di state/storage terpisah:
+  - state: `migratedTug15History`;
+  - storage key: `pln_migrated_tug15_v1`.
+- Histori migrasi tidak dikonversi menjadi `txns`.
+- Histori migrasi tidak membuat approval palsu.
+- Histori migrasi tidak mengubah qty aktif.
+- Menu TUG-15 menampilkan gabungan:
+  - sumber `MIGRASI` dari `migratedTug15History`;
+  - sumber `WARNOTO` dari transaksi baru `txns`.
+- Tabel TUG-15 perlu kolom/badge sumber:
+  - `MIGRASI`;
+  - `WARNOTO`.
+- Histori migrasi belum dipakai forecast/AI sampai Admin menandai valid.
+
+#### 20.9 Preview dan Rekonsiliasi
+- Sebelum apply, sistem wajib menampilkan:
+  - total baris SAP;
+  - total baris Non-SAP;
+  - total kandidat approved;
+  - total `HOLD_NON_SAP`;
+  - total invalid fatal;
+  - total warning;
+  - total qty aktif hasil cutover;
+  - total nilai stok;
+  - ringkasan per jenis barang;
+  - ringkasan per lokasi/blok;
+  - overlap histori dengan tanggal cutover.
+- Tombol apply diblokir hanya jika ada invalid fatal.
+- Warning boleh lanjut.
+- `HOLD_NON_SAP` boleh lanjut, tetapi item HOLD dikeluarkan dari stok aktif.
+
+#### 20.10 Backup Wajib
+- Sebelum apply replace, sistem wajib membuat:
+  - JSON full backup untuk rollback;
+  - XLSX report backup untuk audit manusia.
+- JSON full backup harus memuat state aktif sebelum migrasi:
+  - `stocks`;
+  - `katalogList`;
+  - `lokasiList`;
+  - `txns`;
+  - `docSeq`;
+  - `rencanaKedatanganList`;
+  - `opnameList`;
+  - `stockCountList`;
+  - `approvalHistoryList`;
+  - `maturityAssessments`;
+  - state lain yang sudah ada.
+- XLSX report backup harus memuat:
+  - summary migrasi;
+  - data sebelum;
+  - data sesudah;
+  - Non-SAP HOLD;
+  - warning;
+  - invalid;
+  - histori migrasi.
+
+#### 20.11 Acceptance Test
+- SAP XLSX valid berhasil diparse.
+- Non-SAP tidak bisa langsung aktif tanpa review.
+- Non-SAP tidak match MARA/SAP masuk `HOLD_NON_SAP`.
+- Item `HOLD_NON_SAP` tidak masuk `stocks`.
+- Invalid fatal memblokir apply.
+- Warning tidak memblokir apply.
+- Backup JSON dan XLSX dibuat sebelum replace.
+- Setelah cutover, total qty aktif sama dengan saldo approved.
+- `txns` test lama kosong.
+- TUG-15 menampilkan sumber `MIGRASI` dan `WARNOTO`.
+- Histori migrasi tidak mengubah saldo aktif.
+- Forecast tidak memakai histori migrasi sebelum validasi.
+
+#### 20.12 Keputusan yang Sudah Dikunci
+- Detail rencana migrasi digabung ke `WARNOTO_DOCS.md`, bukan MD baru.
+- Saldo cutover approved adalah sumber kebenaran utama.
+- Material Non-SAP tanpa match SAP/MARA tidak boleh aktif dan masuk `HOLD_NON_SAP`.
+- Admin + TL menjadi pihak review/approval master Non-SAP.
+- Histori TUG-15 migrasi adalah histori referensi, bukan transaksi approval aktif.
+- Histori TUG-15 migrasi terlihat di menu TUG-15 dengan label sumber `MIGRASI`.
+- Histori TUG-15 migrasi belum dipakai forecast sampai divalidasi Admin.
+
+### 21. Paket Handoff ke Claude
+
+#### 21.1 Pintu Masuk
+- File handoff utama: `CLAUDE_HANDOFF.md`.
+- Saat memulai sesi baru di Claude, baca file tersebut terlebih dahulu, lalu lanjutkan ke `README.md`, `WARNOTO_DOCS.md`, dan spec fitur terkait.
+
+#### 21.2 File yang Perlu Dibawa
+- Source utama:
+  - `App.jsx`;
+  - `README.md`;
+  - `WARNOTO_DOCS.md`;
+  - `CLAUDE_HANDOFF.md`;
+  - `MATERIAL_CADANG_SPEC.md`;
+  - `WA_AI_AGENT_SPEC.md`;
+  - `GUDANG_CAPACITY_SPEC.md`;
+  - `TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx`;
+  - `supabase/schema.sql`;
+  - `supabase/functions/whatsapp-webhook/index.ts`.
+- Referensi eksternal dari folder `D:\CLAUDE\WARNOTO data\tester`:
+  - `CATALOG MASTER.xlsx`;
+  - `Katalog MARA (01-2026).xlsx`;
+  - `KAPASITAS GUDANG UIT JBM.xlsx`;
+  - `ABC ANALISIS 2020-2022 Signed.pdf`;
+  - `Buku Perhitungan Standard Jumlah Mat Cadang Trans.pdf`.
+
+#### 21.3 Status Terakhir
+- Material Cadang: planning/spec/template sudah siap, implementasi kode belum dimulai.
+- WA AI Agent: planning/spec sudah siap; Meta App sudah dibuat; Supabase Edge Function `whatsapp-webhook` belum deploy.
+- Migrasi Stok SAP/Non-SAP + TUG-15: planning final ada di bagian 20; implementasi kode belum dimulai.
+- Monitoring Kapasitas Gudang: planning/spec sudah siap di `GUDANG_CAPACITY_SPEC.md`; implementasi kode belum dimulai.
+- Alat Berat / Alat Angkat Angkut: implementasi kode sudah masuk di `App.jsx`; detail flow multi-UPT, approval Asman pemilik, overdue, dan histori ada di bagian 23.
+- Jangan memasukkan secret asli ke repo; `.env.example` hanya placeholder.
+
+#### 21.4 Prompt Pembuka Saat Migrasi ke Claude
+
+```text
+Baca `CLAUDE_HANDOFF.md` terlebih dahulu, lalu `README.md`, `WARNOTO_DOCS.md`, dan spec fitur yang sedang dikerjakan.
+
+Jangan refactor besar `App.jsx` di awal. WARNOTO masih single-file React app dengan beberapa data seed sensitif.
+
+Fitur yang sudah diimplementasikan terakhir adalah Alat Berat / Alat Angkat Angkut. Baca `WARNOTO_DOCS.md` bagian 23 sebelum mengubah:
+- flow multi-UPT;
+- approval Asman UPT pemilik alat;
+- status `PENDING_OWNER_ASMAN`, `DIPINJAM`, `OVERDUE`, `SELESAI`, `REJECTED`;
+- histori peminjaman dari `heavyEquipmentLoans`;
+- dashboard summary Alat Berat.
+
+Sebelum final, jalankan `npm run build`.
+```
+
+### 22. Planning Monitoring Kapasitas Gudang
+
+#### 22.1 Status
+- Detail spesifikasi fitur Monitoring Kapasitas Gudang ada di `GUDANG_CAPACITY_SPEC.md`.
+- Status saat ini: **PLANNING / SPEC READY**, belum diimplementasikan ke kode.
+- Sumber awal: `KAPASITAS GUDANG UIT JBM.xlsx`.
+
+#### 22.2 Keputusan Utama
+- Fitur memakai laporan resmi kapasitas gudang UIT JBM berbasis luas m2.
+- Data kapasitas m2 disimpan sebagai dataset terpisah, tidak memakai ulang `lokasi.kapasitas`.
+- Grain v1 adalah `UPT x Gudang x Sub Gudang`.
+- Data awal masuk lewat Import UI Review:
+  - upload XLSX;
+  - validasi header;
+  - preview;
+  - koreksi;
+  - mapping;
+  - publish baseline.
+- Storage utama direncanakan Supabase table `warehouse_capacity`, dengan fallback local/CLOUD `pln_gudang_capacity_v1`.
+- Mapping ke Peta Gudang memakai auto-suggest + konfirmasi manual Admin/TL.
+
+#### 22.3 Dashboard dan Peta
+- Dashboard manajemen menampilkan:
+  - total luas lahan;
+  - total luas terpakai;
+  - total sisa luas;
+  - utilization total;
+  - jumlah gudang/sub-gudang `KRITIS`, `WASPADA`, `AMAN`;
+  - ranking UPT berdasarkan weighted utilization;
+  - top sub-gudang kritis;
+  - komposisi area material.
+- Peta Wilayah Gudang menampilkan marker warna berdasarkan status kapasitas.
+- Peta Gudang detail hanya menampilkan badge/panel kapasitas jika record sudah `CONFIRMED`.
+- Record yang belum match tetap tampil di dashboard, tetapi tidak ditempel ke denah gudang.
+
+#### 22.4 Threshold Status Kapasitas
+- `KRITIS`: persentase terpakai >= 90%.
+- `WASPADA`: persentase terpakai 75% sampai < 90%.
+- `AMAN`: persentase terpakai < 75%.
+
+#### 22.5 Batasan v1
+- Sheet `ALAT ANGKAT ANGKUT` dipisahkan untuk fitur berikutnya.
+- Belum menghitung volume material.
+- Belum auto-optimasi penempatan material.
+- Belum memblokir transaksi stok berdasarkan kapasitas penuh.
+- Contact person dan link gudang tampil di detail, bukan kartu dashboard utama.
+
+### 23. Implementasi Alat Berat / Alat Angkat Angkut
+
+#### 23.1 Status
+- Status: **IMPLEMENTASI DI KODE**.
+- Menu baru sidebar: `Alat Berat`.
+- Komponen aktif: `HeavyEquipmentTabV2`.
+- Komponen `HeavyEquipmentTab` lama masih ada sebagai legacy pembanding dan belum dirender.
+- Sumber seed awal: sheet `ALAT ANGKAT ANGKUT` dari `KAPASITAS GUDANG UIT JBM.xlsx`.
+
+#### 23.2 Scope Implementasi
+- Menampilkan list alat angkat/angkut multi-UPT.
+- Menampilkan status alat:
+  - `LAYAK`;
+  - `PERLU_SERVICE`;
+  - `BUTUH_PERBAIKAN`;
+  - `BUTUH_PEREMAJAAN`.
+- Menampilkan status ketersediaan:
+  - `TERSEDIA`;
+  - `DIPINJAM`.
+- Admin/TL dapat upload foto alat.
+- Admin/TL UPT peminjam dapat mengajukan peminjaman alat antar UPT dengan field:
+  - `requesterUpt`;
+  - `ownerUpt`;
+  - `equipmentId`;
+  - `namaPekerjaan`;
+  - `tanggalAmbil`;
+  - `tanggalKembali`;
+  - `keperluan`;
+  - `catatan`.
+- Peminjaman menunggu approval Asman UPT pemilik alat.
+- Status peminjaman:
+  - `PENDING_OWNER_ASMAN`;
+  - `DIPINJAM`;
+  - `OVERDUE`;
+  - `SELESAI`;
+  - `REJECTED`.
+- Asman pemilik alat dapat approve/reject peminjaman.
+- Admin/TL/Asman dapat menandai alat sudah kembali.
+- Alat tetap tercatat pada UPT pemilik dengan status pinjam, termasuk UPT peminjam, nama pekerjaan, tanggal ambil, dan tanggal kembali.
+- Reminder overdue tampil jika `tanggalKembali` sudah lewat dan peminjaman belum `SELESAI`.
+- Histori peminjaman dibaca dari `heavyEquipmentLoans`, termasuk pengajuan yang ditolak.
+
+#### 23.3 UI
+- Menu `Alat Berat` memakai tab:
+  - `List Alat`;
+  - `Peminjaman`;
+  - `Histori`.
+- KPI menu:
+  - total alat;
+  - tersedia;
+  - dipinjam;
+  - overdue;
+  - pending approval;
+  - perlu tindakan.
+- Card alat menampilkan ringkasan histori terakhir: UPT peminjam dan nama pekerjaan terakhir.
+- Tab histori memiliki filter:
+  - UPT pemilik;
+  - UPT peminjam;
+  - alat;
+  - status;
+  - rentang tanggal ambil.
+- Dashboard default, Asman, dan Manager menampilkan ringkasan Alat Berat.
+
+#### 23.4 Storage
+- State utama:
+  - `heavyEquipmentList`;
+  - `heavyEquipmentLoans`.
+- Storage fallback:
+  - `pln_heavy_equipment_v1`;
+  - `pln_heavy_equipment_loans_v1`.
+- Data ikut export/import JSON backup WARNOTO.
+
+#### 23.5 Catatan Lanjut
+- Belum ada dokumen cetak/form resmi peminjaman alat.
+- Belum ada expiry otomatis untuk surat izin alat.
+- Belum ada Supabase table khusus; v1 memakai fallback cloud/local storage seperti state aplikasi lain.
+- Jika fitur ini diperluas, pertimbangkan tabel Supabase `heavy_equipment` dan `heavy_equipment_loans`.
+- Data user existing belum punya binding UPT formal; sementara Asman tanpa `upt/uptName/uptKode/uptId` tetap bisa approve agar fitur berjalan. Jika profil UPT sudah tersedia, approve dibatasi ke UPT pemilik alat.

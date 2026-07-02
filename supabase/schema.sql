@@ -240,6 +240,13 @@ create table if not exists gudang (
   data jsonb not null,
   created_at bigint
 );
+create table if not exists sub_gudang (
+  id text primary key,
+  gudang_id text references gudang(id) on delete set null,
+  data jsonb not null,
+  created_at bigint
+);
+create index if not exists idx_subgudang_gudang on sub_gudang(gudang_id);
 create table if not exists lokasi (
   id text primary key,
   gudang_id text references gudang(id) on delete set null,
@@ -262,9 +269,15 @@ create table if not exists tim_mutu (
 alter table uit enable row level security;
 alter table upt enable row level security;
 alter table gudang enable row level security;
+alter table sub_gudang enable row level security;
 alter table lokasi enable row level security;
 alter table satpam enable row level security;
 alter table tim_mutu enable row level security;
+
+drop policy if exists "Authenticated read sub_gudang" on sub_gudang;
+drop policy if exists "Authenticated write sub_gudang" on sub_gudang;
+create policy "Authenticated read sub_gudang" on sub_gudang for select using (auth.role() = 'authenticated');
+create policy "Authenticated write sub_gudang" on sub_gudang for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Baca: siapa saja yang sudah login boleh baca semua master data (app butuh
 -- ini di banyak tempat — dropdown, laporan, dst). Tulis: dibatasi authenticated

@@ -44,6 +44,14 @@ warnoto-project/
 └── WARNOTO_DOCS.md      ← Dokumentasi lengkap & planning
 ```
 
+Catatan dokumen tambahan:
+- `CLAUDE_HANDOFF.md` adalah pintu masuk singkat saat project dipindahkan/dilanjutkan di Claude.
+- `MATERIAL_CADANG_SPEC.md` berisi spesifikasi fitur Material Cadang, format import CSV/XLSX, dashboard manajemen, approval Asman untuk apply `minQty`, hidden Catalog Master PLN, dan hidden SAP MARA reference.
+- `TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx` adalah template upload XLSX resmi v1 untuk data populasi/failure Material Cadang; CSV harus mengikuti header yang sama.
+- `WA_AI_AGENT_SPEC.md` berisi spesifikasi integrasi AI Agent WARNOTO ke WhatsApp Cloud API via Supabase Edge Function, read-only, whitelist nomor, server-side state, RAG sync harian, dan audit log.
+- `GUDANG_CAPACITY_SPEC.md` berisi spesifikasi fitur Monitoring Kapasitas Gudang berbasis laporan UIT JBM, import XLSX review, dashboard manajemen, mapping ke peta gudang, dan storage Supabase.
+- Planning migrasi stok SAP/Non-SAP dan histori TUG-15 ada di `WARNOTO_DOCS.md` bagian 20.
+
 ## Perbedaan Artifact vs Lokal
 
 | Aspek | Claude Artifact | Claude Code / Lokal |
@@ -75,6 +83,12 @@ headers: {
 - **v32** — Juni 2026
 - Single-file React architecture
 - 145 material SAP Persediaan UPT Surabaya hardcoded sebagai default data
+- Handoff Claude tersedia di `CLAUDE_HANDOFF.md`
+- Planning fitur Material Cadang tersedia di `MATERIAL_CADANG_SPEC.md`
+- Planning fitur WA AI Agent tersedia di `WA_AI_AGENT_SPEC.md`
+- Planning fitur Monitoring Kapasitas Gudang tersedia di `GUDANG_CAPACITY_SPEC.md`
+- Menu Alat Berat tersedia untuk monitoring alat angkat/angkut multi-UPT, foto alat, peminjaman antar UPT dengan approval Asman pemilik, reminder overdue, histori peminjaman, dan ringkasan dashboard.
+- Planning migrasi stok SAP/Non-SAP + TUG-15 tersedia di `WARNOTO_DOCS.md` bagian 20
 - Lihat WARNOTO_DOCS.md untuk roadmap lengkap
 
 ## Kontak

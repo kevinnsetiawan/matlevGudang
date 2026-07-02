@@ -1989,6 +1989,8 @@ export default function PLNWarehouse() {
   const [uitList, setUitList] = useState([]);
   const [uptList, setUptList] = useState([]);
   const [gudangList, setGudangList] = useState([]);
+  const [subGudangList, setSubGudangList] = useState([]); // level di antara Gudang dan Blok Lokasi
+  const [importGudangOpen, setImportGudangOpen] = useState(false); // toggle panel Import & Review di Master Gudang
   const [rencanaKedatanganList, setRencanaKedatanganList] = useState([]);
   const [opnameList, setOpnameList] = useState([]);
   const [stockCountList, setStockCountList] = useState([]); // riwayat sesi Stock Count (banding SAP vs Aplikasi)
@@ -2084,6 +2086,11 @@ export default function PLNWarehouse() {
   }, [txns, stocks, katalogList, currentUser, loading]);
   const [ocrSuggestions, setOcrSuggestions] = useState([]); // usulan blok batch dari OCR denah: [{id,kode,xPct,yPct,checked}]
   const [ocrSuggestGudangId, setOcrSuggestGudangId] = useState(null); // gudang mana yang usulannya sedang tampil
+  const [ocrSuggestSubGudangId, setOcrSuggestSubGudangId] = useState(null); // non-null = usulan berasal dari denah Sub Gudang, bukan denah Gudang keseluruhan
+  const [mapConfigSubGudangId, setMapConfigSubGudangId] = useState(null);
+  const [pendingMapLokasiSub, setPendingMapLokasiSub] = useState(null);
+  const [manualAddModeSub, setManualAddModeSub] = useState(false);
+  const [denahSubLoading, setDenahSubLoading] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [docPreview, setDocPreview] = useState(null); // txn object when previewing TUG-9 document
   const [kartuGantungDetail, setKartuGantungDetail] = useState(null);
@@ -2104,6 +2111,7 @@ export default function PLNWarehouse() {
   const chatEndRef = useRef(null);
   const petaWilayahDivRef = useRef(null);
   const petaWilayahMapRef = useRef(null);
+  const dedupeGudangRanRef = useRef(false);
   const [forecastDetail, setForecastDetail] = useState(null); // katalog object for drill-down
   const [forecastDetailResult, setForecastDetailResult] = useState(null);
   const [forecastDetailLoading, setForecastDetailLoading] = useState(false);
@@ -2132,10 +2140,11 @@ export default function PLNWarehouse() {
       // Master data (UIT/UPT/Gudang/Lokasi/Satpam/Tim Mutu) sekarang sumber
       // utamanya Supabase, bukan localStorage lagi — load dulu (seed dari
       // DEFAULT_* kalau tabelnya masih kosong, mis. instalasi baru).
-      const [cuit, cupt, cgdg, clokRemote, csp, ctm] = await Promise.all([
+      const [cuit, cupt, cgdg, csgdg, clokRemote, csp, ctm] = await Promise.all([
         seedMasterTableIfEmpty("uit", DEFAULT_UIT),
         seedMasterTableIfEmpty("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null })),
         seedMasterTableIfEmpty("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null })),
+        loadMasterTable("sub_gudang").then(r => r || []),
         seedMasterTableIfEmpty("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null })),
         seedMasterTableIfEmpty("satpam", DEFAULT_SATPAM),
         seedMasterTableIfEmpty("tim_mutu", DEFAULT_TIM_MUTU),
@@ -2175,6 +2184,7 @@ export default function PLNWarehouse() {
       setUitList(cuit);
       setUptList(cupt);
       setGudangList(cgdg);
+      setSubGudangList(csgdg || []);
       setRencanaKedatanganList(crk || []);
       setOpnameList(copn || []);
       setStockCountList(csc || []);
@@ -2195,7 +2205,7 @@ export default function PLNWarehouse() {
   // to the latest React state via stateRef (always up to date, avoids stale
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
-  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, gudangCapacityList, gudangCapacityImports, migratedTug15History };
+  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, gudangCapacityList, gudangCapacityImports, migratedTug15History };
   // Catatan: satpamList/timMutuList/uitList/uptList/gudangList/lokasiList TIDAK
   // lagi ditulis di sini — sumber utamanya sekarang Supabase (tabel satpam/
   // tim_mutu/uit/upt/gudang/lokasi), ditulis langsung oleh masing-masing
@@ -2242,6 +2252,16 @@ export default function PLNWarehouse() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
   useEffect(() => { setStockPage(1); }, [search, filterJenis, stockPageSize]);
   useEffect(() => { setKatalogPage(1); }, [katalogPageSize]);
+
+  // Auto-gabungkan Gudang/Sub Gudang duplikat sekali per sesi setelah data dimuat — supaya
+  // denah/koordinat yang "nyasar" ke ID duplikat langsung ketemu tanpa perlu klik manual.
+  useEffect(() => {
+    if (dedupeGudangRanRef.current) return;
+    if (loading) return;
+    if (gudangList.length === 0) return;
+    dedupeGudangRanRef.current = true;
+    dedupeGudangDanSubGudang();
+  }, [loading, gudangList]);
 
   // Peta Wilayah Gudang UPT Surabaya — render/refresh marker Leaflet tiap kali Dashboard dibuka atau data gudang berubah
   useEffect(() => {
@@ -2419,6 +2439,10 @@ export default function PLNWarehouse() {
   // kecuali yang mengajukan sendiri adalah TL (langsung disetujui).
   function openAddLokasi() {
     setLokasiForm({ id:`LOK-${uid().slice(-6)}`, kode:"", keterangan:"", kapasitas:50 });
+    setLokasiModal("add");
+  }
+  function openAddLokasiFor(gudangId, subGudangId) {
+    setLokasiForm({ id:`LOK-${uid().slice(-6)}`, kode:"", keterangan:"", kapasitas:50, gudangId, subGudangId: subGudangId||null });
     setLokasiModal("add");
   }
   function openEditLokasi(l) { setLokasiForm({...l}); setLokasiModal("edit"); }
@@ -2756,6 +2780,192 @@ export default function PLNWarehouse() {
   function openEditGudang(g) { setGudangForm({...g}); setGudangModal("edit"); }
   function closeGudangWizard() { setGudangModal(null); setGudangWizardStep(1); setWizardBlokDraft(null); }
   function syncGudang(ng) { return syncMasterTable("gudang", ng, g => ({ upt_id: g.uptId || null })); }
+  function syncSubGudang(nsg) { return syncMasterTable("sub_gudang", nsg, sg => ({ gudang_id: sg.gudangId || null })); }
+
+  // Cari Master UPT yang cocok dengan label string UPT dari laporan kapasitas (fuzzy, uppercase)
+  function findMatchingUpt(uptLabel) {
+    const needle = String(uptLabel||"").trim().toUpperCase();
+    if (!needle) return null;
+    return uptList.find(u =>
+      String(u.nama||"").toUpperCase().includes(needle) ||
+      needle.includes(String(u.nama||"").toUpperCase().replace(/^UPT\s+/,"")) ||
+      String(u.kode||"").toUpperCase()===needle
+    ) || null;
+  }
+
+  // Auto-create/merge Master Gudang + Sub Gudang dari record kapasitas yang disetujui.
+  // Data yang sudah ada (manual atau dari import sebelumnya) TIDAK di-overwrite,
+  // hanya alamat kosong yang dilengkapi. UPT yang tidak match di-skip + dilaporkan.
+  function syncGudangCapacityToMasterGudang(records) {
+    let gList = [...gudangList];
+    let sgList = [...subGudangList];
+    const created = [];
+    const createdSub = [];
+    const skippedNoUpt = [];
+    const uniqueRows = new Map(); // key: "UPT|GUDANG|SUBGUDANG" -> record
+    records.forEach(r => {
+      const key = `${r.upt}|${r.gudang}|${r.subGudang}`;
+      if (!uniqueRows.has(key)) uniqueRows.set(key, r);
+    });
+    uniqueRows.forEach(r => {
+      const uptMatch = findMatchingUpt(r.upt);
+      if (!uptMatch) { skippedNoUpt.push(`${r.upt} / ${r.gudang}`); return; }
+
+      let gudangEntry = gList.find(g => g.uptId===uptMatch.id && String(g.nama||"").trim().toUpperCase()===String(r.gudang||"").trim().toUpperCase());
+      if (gudangEntry) {
+        const patch = {};
+        if (!gudangEntry.alamat && r.alamat) patch.alamat = r.alamat;
+        if (gudangEntry.lat == null && r.latitude != null) patch.lat = r.latitude;
+        if (gudangEntry.lng == null && r.longitude != null) patch.lng = r.longitude;
+        if (Object.keys(patch).length) {
+          gList = gList.map(g => g.id===gudangEntry.id ? {...g, ...patch} : g);
+          gudangEntry = {...gudangEntry, ...patch};
+        }
+      } else {
+        gudangEntry = {
+          id: `GDG-CAP-${r.upt}-${r.gudang}`.replace(/\s+/g,"-").toUpperCase(),
+          nama: r.gudang, kode: "", alamat: r.alamat||"", uptId: uptMatch.id,
+          lat: r.latitude ?? null, lng: r.longitude ?? null,
+          denahImageData: null, denahUploadedAt: null, createdAt: Date.now(),
+          sourceCapacityImport: true,
+        };
+        gList.push(gudangEntry);
+        created.push(r.gudang);
+      }
+
+      if (!r.subGudang) return;
+      const existingSub = sgList.find(sg => sg.gudangId===gudangEntry.id && String(sg.nama||"").trim().toUpperCase()===String(r.subGudang||"").trim().toUpperCase());
+      if (!existingSub) {
+        sgList.push({
+          id: `SGD-CAP-${r.upt}-${r.gudang}-${r.subGudang}`.replace(/\s+/g,"-").toUpperCase(),
+          nama: r.subGudang, gudangId: gudangEntry.id, createdAt: Date.now(),
+          sourceCapacityImport: true,
+        });
+        createdSub.push(r.subGudang);
+      }
+    });
+    return { gList, sgList, created, createdSub, skippedNoUpt };
+  }
+
+  // Sinkron ulang koordinat lat/lng + alamat Master Gudang dari data Kapasitas Gudang yang
+  // sudah live (gudangCapacityList) — dipakai saat data lama sudah live tapi lat/lng belum
+  // sempat ikut ke Master Gudang (mis. dibuat sebelum field koordinat ditambahkan).
+  async function backfillGudangCoordFromCapacity() {
+    if (!gudangCapacityList.length) { showToast("Belum ada data Kapasitas Gudang live.", "error"); return; }
+    const { gList: newGudangList, sgList: newSubGudangList } = syncGudangCapacityToMasterGudang(gudangCapacityList);
+    setGudangList(newGudangList);
+    setSubGudangList(newSubGudangList);
+    await syncGudang(newGudangList);
+    await syncSubGudang(newSubGudangList);
+    showToast("✅ Koordinat & data Master Gudang disinkron ulang dari Kapasitas Gudang.", "success");
+  }
+
+  // Gabungkan Gudang/Sub Gudang duplikat (nama sama, ID beda — biasanya karena satu dibuat manual
+  // dan satu lagi otomatis dari import Kapasitas Gudang). Ini penyebab umum denah/koordinat "hilang":
+  // datanya nyasar ke ID duplikat yang sedang tidak ditampilkan. Blok Lokasi & Sub Gudang direassign
+  // ke ID "primary" yang dipilih (prioritas: sudah punya denah > sudah punya koordinat > paling lama).
+  async function dedupeGudangDanSubGudang() {
+    const norm = s => String(s||"").trim().toUpperCase().replace(/\s+/g," ");
+    let newGudangList = [...gudangList];
+    let newSubGudangList = [...subGudangList];
+    let newLokasiList = [...lokasiList];
+    let mergedGudang = 0, mergedSub = 0;
+
+    const gGroups = new Map();
+    gudangList.forEach(g => {
+      const key = `${g.uptId||""}|${norm(g.nama)}`;
+      if (!gGroups.has(key)) gGroups.set(key, []);
+      gGroups.get(key).push(g);
+    });
+    gGroups.forEach(list => {
+      if (list.length <= 1) return;
+      mergedGudang += list.length - 1;
+      const primary = [...list].sort((a,b) => {
+        const scoreA = (a.denahImageData?2:0)+(a.lat!=null?1:0);
+        const scoreB = (b.denahImageData?2:0)+(b.lat!=null?1:0);
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return (a.createdAt||0) - (b.createdAt||0);
+      })[0];
+      const losers = list.filter(g=>g.id!==primary.id);
+      const loserIds = new Set(losers.map(g=>g.id));
+      let merged = {...primary};
+      losers.forEach(l => {
+        if (!merged.denahImageData && l.denahImageData) { merged.denahImageData=l.denahImageData; merged.denahUploadedAt=l.denahUploadedAt; merged.denahOcrWords=l.denahOcrWords; }
+        if (merged.lat == null && l.lat != null) { merged.lat=l.lat; merged.lng=l.lng; }
+        if (!merged.alamat && l.alamat) merged.alamat = l.alamat;
+        if (!merged.kode && l.kode) merged.kode = l.kode;
+      });
+      newGudangList = newGudangList.filter(g=>!loserIds.has(g.id)).map(g=>g.id===primary.id?merged:g);
+      newLokasiList = newLokasiList.map(l => loserIds.has(l.gudangId) ? {...l, gudangId: primary.id} : l);
+      newSubGudangList = newSubGudangList.map(sg => loserIds.has(sg.gudangId) ? {...sg, gudangId: primary.id} : sg);
+    });
+
+    const sgGroups = new Map();
+    newSubGudangList.forEach(sg => {
+      const key = `${sg.gudangId}|${norm(sg.nama)}`;
+      if (!sgGroups.has(key)) sgGroups.set(key, []);
+      sgGroups.get(key).push(sg);
+    });
+    sgGroups.forEach(list => {
+      if (list.length <= 1) return;
+      mergedSub += list.length - 1;
+      const primary = [...list].sort((a,b) => {
+        const scoreA = a.denahImageData?1:0, scoreB = b.denahImageData?1:0;
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return (a.createdAt||0) - (b.createdAt||0);
+      })[0];
+      const losers = list.filter(sg=>sg.id!==primary.id);
+      const loserIds = new Set(losers.map(sg=>sg.id));
+      let merged = {...primary};
+      losers.forEach(l => { if (!merged.denahImageData && l.denahImageData) { merged.denahImageData=l.denahImageData; merged.denahUploadedAt=l.denahUploadedAt; merged.denahOcrWords=l.denahOcrWords; } });
+      newSubGudangList = newSubGudangList.filter(sg=>!loserIds.has(sg.id)).map(sg=>sg.id===primary.id?merged:sg);
+      newLokasiList = newLokasiList.map(l => loserIds.has(l.subGudangId) ? {...l, subGudangId: primary.id} : l);
+    });
+
+    if (mergedGudang===0 && mergedSub===0) { showToast("Tidak ada Gudang/Sub Gudang duplikat ditemukan.", "success"); return; }
+
+    setGudangList(newGudangList);
+    setSubGudangList(newSubGudangList);
+    setLokasiList(newLokasiList);
+    await syncGudang(newGudangList);
+    await syncSubGudang(newSubGudangList);
+    await syncLokasi(newLokasiList);
+    showToast(`✅ ${mergedGudang} Gudang duplikat & ${mergedSub} Sub Gudang duplikat digabungkan.`, "success");
+  }
+
+  async function approveCapacityImport(importId) {
+    const imp = gudangCapacityImports.find(i=>i.id===importId);
+    if (!imp) return;
+    const newList = imp.records.map(r => ({...r, importBatchId: imp.id}));
+    const newImports = gudangCapacityImports.map(i => i.id===importId
+      ? {...i, status:"APPROVED", approvedBy:currentUser.id, approvedAt:Date.now()} : i);
+    const { gList: newGudangList, sgList: newSubGudangList, created, createdSub, skippedNoUpt } = syncGudangCapacityToMasterGudang(newList);
+    setGudangCapacityList(newList);
+    setGudangCapacityImports(newImports);
+    setGudangList(newGudangList);
+    setSubGudangList(newSubGudangList);
+    await saveToCloud({ gudangCapacityList: newList, gudangCapacityImports: newImports });
+    await syncGudang(newGudangList);
+    await syncSubGudang(newSubGudangList);
+    await logApprovalHistory({ type:"KAPASITAS_GUDANG_IMPORT", refId:imp.id, decision:"APPROVED", note:`${imp.sourceFile} — ${newList.length} record, ${created.length} Gudang + ${createdSub.length} Sub Gudang baru` });
+    let msg = `Import disetujui — ${newList.length} record kapasitas gudang kini live.`;
+    if (created.length || createdSub.length) msg += ` ${created.length} Gudang, ${createdSub.length} Sub Gudang baru dibuat otomatis.`;
+    showToast(msg, "success");
+    if (skippedNoUpt.length) {
+      showToast(`⚠️ ${skippedNoUpt.length} gudang di-skip dari Master Gudang (UPT tidak dikenal): ${skippedNoUpt.slice(0,3).join(", ")}${skippedNoUpt.length>3?"...":""}`, "error");
+    }
+  }
+
+  async function rejectCapacityImport(importId, reason) {
+    const imp = gudangCapacityImports.find(i=>i.id===importId);
+    if (!imp) return;
+    const newImports = gudangCapacityImports.map(i => i.id===importId
+      ? {...i, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : i);
+    setGudangCapacityImports(newImports);
+    await saveToCloud({ gudangCapacityImports: newImports });
+    await logApprovalHistory({ type:"KAPASITAS_GUDANG_IMPORT", refId:imp.id, decision:"REJECTED", note:reason });
+    showToast("Import ditolak.", "success");
+  }
   async function saveGudang() {
     if (!gudangForm.nama?.trim()) { showToast("Nama Gudang wajib diisi!","error"); return; }
     const ng = gudangModal==="add" ? [...gudangList, gudangForm] : gudangList.map(g=>g.id===gudangForm.id?gudangForm:g);
@@ -2887,10 +3097,12 @@ export default function PLNWarehouse() {
     setOcrSuggestions(s => s.filter(x => x.id!==id));
   }
   function dismissOcrSuggestions() {
-    setOcrSuggestions([]); setOcrSuggestGudangId(null);
+    setOcrSuggestions([]); setOcrSuggestGudangId(null); setOcrSuggestSubGudangId(null);
   }
-  // Konfirmasi: usulan yang dicentang ditambahkan ke Master Lokasi (kena alur approval TL)
-  async function confirmOcrSuggestions(gudangId) {
+  // Konfirmasi: usulan yang dicentang ditambahkan ke Master Lokasi (kena alur approval TL).
+  // subGudangId non-null = usulan berasal dari denah Sub Gudang -> koordinat disimpan di
+  // subMapX/subMapY (bukan mapX/mapY yang dipakai denah Gudang keseluruhan).
+  async function confirmOcrSuggestions(gudangId, subGudangId=null) {
     const isTL = currentUser.role === "TL";
     const checked = ocrSuggestions.filter(s => s.checked);
     if (checked.length === 0) { showToast("Tidak ada usulan yang dicentang.","error"); return; }
@@ -2914,7 +3126,8 @@ export default function PLNWarehouse() {
       id: `LOK-${uid().slice(-6)}`,
       kode: s.kode.trim(), keterangan: "", kapasitas: 50,
       jenisArea: s.jenisArea||"Rak Tertutup", luasan: s.luasan||"",
-      mapX: s.xPct, mapY: s.yPct, gudangId,
+      ...(subGudangId ? { subMapX: s.xPct, subMapY: s.yPct, subGudangId } : { mapX: s.xPct, mapY: s.yPct }),
+      gudangId,
       createdAt: Date.now(),
       status: isTL ? "APPROVED" : "PENDING",
       pendingAction: isTL ? null : "ADD",
@@ -2954,6 +3167,94 @@ export default function PLNWarehouse() {
     setLokasiList(nl);
     await syncLokasi(nl);
     showToast("Koordinat blok direset.");
+  }
+
+  // Assign koordinat blok via klik di denah Sub Gudang (terpisah dari mapX/mapY denah Gudang keseluruhan)
+  async function assignLokasiKoordinatSub(lokasiId, xPct, yPct, subGudangId, gudangId) {
+    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:xPct, subMapY:yPct, subGudangId, gudangId} : l);
+    setLokasiList(nl);
+    await syncLokasi(nl);
+    showToast(`📍 Koordinat Blok (Sub Gudang) disimpan!`);
+  }
+
+  // Reset hanya koordinat pin di denah Sub Gudang — assignment subGudangId (pengelompokan) tidak ikut dihapus
+  async function resetLokasiKoordinatSub(lokasiId) {
+    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:null, subMapY:null} : l);
+    setLokasiList(nl);
+    await syncLokasi(nl);
+    showToast("Koordinat blok (Sub Gudang) direset.");
+  }
+
+  async function uploadDenahSubGudang(subGudangId, gudangId, file) {
+    setDenahSubLoading(true);
+    try {
+      const imgData = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 1400;
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+              const ratio = Math.min(maxDim/w, maxDim/h);
+              w = Math.round(w * ratio);
+              h = Math.round(h * ratio);
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.80));
+          };
+          img.onerror = () => reject(new Error("Gagal membaca gambar"));
+          img.src = ev.target.result;
+        };
+        reader.onerror = () => reject(new Error("Gagal membaca file"));
+        reader.readAsDataURL(file);
+      });
+      const nsg = subGudangList.map(sg=>sg.id===subGudangId ? {...sg, denahImageData:imgData, denahUploadedAt:Date.now(), denahOcrWords:null} : sg);
+      setSubGudangList(nsg);
+      await syncSubGudang(nsg);
+      showToast("✅ Denah Sub Gudang berhasil diupload! Membaca label blok di gambar...");
+      await runOcrOnDenahSub(subGudangId, gudangId, imgData);
+    } catch(e) {
+      showToast("Gagal upload denah: " + e.message, "error");
+    } finally {
+      setDenahSubLoading(false);
+    }
+  }
+
+  async function runOcrOnDenahSub(subGudangId, gudangId, imgData) {
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("Gagal membaca dimensi gambar"));
+        im.src = imgData;
+      });
+      const { data } = await ocrRecognize(imgData, "eng");
+      const words = (data.words || [])
+        .filter(w => w.text && w.text.trim().length > 0)
+        .map(w => ({
+          text: w.text.trim(),
+          xPct: Number((((w.bbox.x0 + w.bbox.x1) / 2) / img.naturalWidth * 100).toFixed(1)),
+          yPct: Number((((w.bbox.y0 + w.bbox.y1) / 2) / img.naturalHeight * 100).toFixed(1)),
+        }));
+      const nsg2 = stateRef.current.subGudangList.map(sg => sg.id === subGudangId ? { ...sg, denahOcrWords: words } : sg);
+      setSubGudangList(nsg2);
+      await syncSubGudang(nsg2);
+
+      const suggestions = words
+        .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
+        .slice(0, 40)
+        .map(w => ({ id: uid(), kode: w.text.toUpperCase().replace(/[^A-Z0-9]/g,""), jenisArea:"Rak Tertutup", luasan:"", xPct: w.xPct, yPct: w.yPct, checked: true }));
+      setOcrSuggestions(suggestions);
+      setOcrSuggestGudangId(gudangId);
+      setOcrSuggestSubGudangId(subGudangId);
+
+      showToast(words.length > 0 ? `🔎 OCR selesai: ${words.length} label terbaca, ${suggestions.length} diusulkan jadi blok.` : "🔎 OCR selesai, tidak ada teks terbaca di denah.");
+    } catch (e) {
+      showToast("OCR gagal membaca label di denah: " + e.message, "error");
+    }
   }
 
   const [importSAPModal, setImportSAPModal] = useState(false);
@@ -4306,7 +4607,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"stock",icon:"📦",label:"Data Stok"},
     {id:"master",icon:"🗂️",label:"Master Data"},
     {id:"transaction",icon:"🔄",label:"TUG"},
-    ...(["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0)}] : []),
+    ...(["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0) + (["TL","ASMAN"].includes(currentUser.role) ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="TL" ? lokasiList.filter(l=>l.status==="PENDING").length : 0)}] : []),
     {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
     {id:"opname",icon:"📋",label:"Stock Opname & Count",badge:stockCountPendingCount},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
@@ -4720,16 +5021,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="kapasitasGudang" && (
           <KapasitasGudangTab
             gudangCapacityList={gudangCapacityList}
-            setGudangCapacityList={setGudangCapacityList}
-            gudangCapacityImports={gudangCapacityImports}
-            setGudangCapacityImports={setGudangCapacityImports}
             gudangList={gudangList}
+            subGudangList={subGudangList}
             lokasiList={lokasiList}
             stocks={enrichedStocks}
             currentUser={currentUser}
             sty={sty} C={C}
-            saveToCloud={saveToCloud}
-            showToast={showToast}
+            setTab={setTab}
+            setStockSubTab={setStockSubTab}
           />
         )}
 
@@ -4952,8 +5251,39 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {currentUser.role==="ADMIN" && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="uit" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="upt" && <button style={sty.btn("primary")} onClick={openAddUPT}>+ Tambah UPT</button>}
-              {currentUser.role==="ADMIN" && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang</button>}
             </div>
+            {stockSubTab==="gudang" && (
+              <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
+                ℹ️ Master Gudang kini otomatis terbentuk dari data <b>Monitoring Kapasitas Gudang</b> setelah disetujui Asman. Tidak ada input manual di sini — lengkapi Kode Gudang / Denah lewat tombol Edit jika diperlukan.
+              </div>
+            )}
+            {stockSubTab==="gudang" && ["ADMIN","TL"].includes(currentUser.role) && (
+              <div style={{marginBottom:16}}>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button style={{...sty.btn(importGudangOpen?"danger":"primary","sm")}} onClick={()=>setImportGudangOpen(o=>!o)}>
+                    {importGudangOpen?"✕ Tutup Import Data Gudang":"📥 Import Data Gudang"}
+                  </button>
+                  <button style={sty.btn("ghost","sm")} onClick={backfillGudangCoordFromCapacity} title="Isi ulang koordinat lat/lng Master Gudang dari data Kapasitas Gudang yang sudah live">
+                    🔄 Sinkron Koordinat dari Kapasitas Gudang
+                  </button>
+                  <button style={sty.btn("ghost","sm")} onClick={dedupeGudangDanSubGudang} title="Gabungkan Gudang/Sub Gudang yang namanya sama tapi ID berbeda — perbaiki denah/koordinat yang 'hilang'">
+                    🧹 Gabungkan Gudang Duplikat
+                  </button>
+                </div>
+                {importGudangOpen && (
+                  <div style={{marginTop:12}}>
+                    <KapasitasGudangImportTab
+                      gudangCapacityImports={gudangCapacityImports}
+                      setGudangCapacityImports={setGudangCapacityImports}
+                      currentUser={currentUser}
+                      sty={sty} C={C}
+                      saveToCloud={saveToCloud}
+                      showToast={showToast}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             {/* ── SUB-TAB: MASTER KATALOG ── */}
             {stockSubTab==="katalog" && currentUser.role==="ADMIN" && (
               <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1",padding:14}}>
@@ -5204,20 +5534,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             const belumPunyaKoordinat = lokasiList.filter(l=>l.status!=="PENDING" && l.gudangId===g.id && l.mapX==null);
                             return (
                             <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:8,padding:12}}>
-                              <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-                                <button style={sty.btn(manualAddMode?"success":"primary","sm")} onClick={()=>{
-                                  if (manualAddMode) {
-                                    setManualAddMode(false);
-                                    setPendingMapLokasi(null);
-                                    setMapConfigGudangId(null);
-                                  } else {
-                                    setManualAddMode(true);
-                                    setPendingMapLokasi(null);
-                                  }
-                                }}>
-                                  {manualAddMode ? "💾 Save Blok" : "➕ Tambah Blok Baru"}
-                                </button>
-                              </div>
+                              {!manualAddMode && (
+                                <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                                  <button style={sty.btn("primary","sm")} onClick={()=>{setManualAddMode(true);setPendingMapLokasi(null);}}>
+                                    ➕ Tambah Blok Baru
+                                  </button>
+                                </div>
+                              )}
 
                               {manualAddMode && (
                                 <div style={{fontSize:11,color:"#1d4ed8",fontWeight:700,marginBottom:8}}>Klik titik-titik di denah untuk menambah blok baru (bisa beberapa kali). Usulan akan muncul di panel di atas untuk dikonfirmasi & dikirim ke TL.</div>
@@ -5241,64 +5564,185 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
                               {g.denahOcrWords==null && <div style={{fontSize:10,color:C.muted,marginBottom:8}}>⏳ OCR denah belum tersedia, jalankan ulang upload denah untuk membaca label otomatis.</div>}
 
-                              <div style={{position:"relative",cursor:(manualAddMode||pendingMapLokasi)?"crosshair":"default",display:"inline-block",width:"100%"}}
-                                onClick={e=>{
-                                  if (!manualAddMode && !pendingMapLokasi) { showToast("Aktifkan 'Tambah Blok Baru' atau pilih blok di daftar dulu!","error"); return; }
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  const xPct = Number(((e.clientX - rect.left) / rect.width * 100).toFixed(1));
-                                  const yPct = Number(((e.clientY - rect.top) / rect.height * 100).toFixed(1));
-                                  if (manualAddMode) {
-                                    const totalUsulan = lokasiList.filter(l=>l.gudangId===g.id).length + ocrSuggestions.length;
-                                    const kodeUsulan = suggestKodeFromOcr(g, xPct, yPct) || `${g.kode||"BLOK"}-${String(totalUsulan+1).padStart(2,"0")}`;
-                                    setOcrSuggestions(prev=>[...prev, { id: uid(), kode: kodeUsulan, jenisArea:"Rak Tertutup", luasan:"", xPct, yPct, checked: true }]);
-                                    setOcrSuggestGudangId(g.id);
-                                  } else if (pendingMapLokasi) {
-                                    assignLokasiKoordinat(pendingMapLokasi, xPct, yPct, g.id);
-                                    setPendingMapLokasi(null);
-                                  }
-                                }}>
-                                <img src={g.denahImageData} alt="Denah" style={{width:"100%",borderRadius:6,border:`2px dashed #3b82f6`,display:"block"}}/>
-                                {lokasiList.filter(l=>l.gudangId===g.id&&l.mapX!=null).map(l=>(
-                                  <div key={l.id} title={l.status==="PENDING"?`${l.kode} (Menunggu Approval)`:l.kode} style={{position:"absolute",left:`${l.mapX}%`,top:`${l.mapY}%`,transform:"translate(-50%,-50%)",width:14,height:14,borderRadius:"50%",background:l.status==="PENDING"?"#9ca3af":"#dc2626",border:l.status==="PENDING"?"2px dashed white":"2px solid white",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}} onClick={e=>{e.stopPropagation();if(window.confirm(`Reset koordinat ${l.kode}?`)) resetLokasiKoordinat(l.id);}}/>
-                                ))}
-                                {ocrSuggestGudangId===g.id && ocrSuggestions.map(s=>(
-                                  <div key={s.id} title={`${s.kode} (draft, belum dikirim)`} style={{position:"absolute",left:`${s.xPct}%`,top:`${s.yPct}%`,transform:"translate(-50%,-50%)",width:14,height:14,borderRadius:"50%",background:"#22c55e",border:"2px dashed white",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}}/>
-                                ))}
+                              <div style={{maxWidth:380,margin:"0 auto"}}>
+                                <div style={{position:"relative",cursor:(manualAddMode||pendingMapLokasi)?"crosshair":"default",width:"100%"}}
+                                  onClick={e=>{
+                                    if (!manualAddMode && !pendingMapLokasi) { showToast("Aktifkan 'Tambah Blok Baru' atau pilih blok di daftar dulu!","error"); return; }
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const xPct = Number(((e.clientX - rect.left) / rect.width * 100).toFixed(1));
+                                    const yPct = Number(((e.clientY - rect.top) / rect.height * 100).toFixed(1));
+                                    if (manualAddMode) {
+                                      const totalUsulan = lokasiList.filter(l=>l.gudangId===g.id).length + ocrSuggestions.length;
+                                      const kodeUsulan = suggestKodeFromOcr(g, xPct, yPct) || `${g.kode||"BLOK"}-${String(totalUsulan+1).padStart(2,"0")}`;
+                                      setOcrSuggestions(prev=>[...prev, { id: uid(), kode: kodeUsulan, jenisArea:"Rak Tertutup", luasan:"", xPct, yPct, checked: true }]);
+                                      setOcrSuggestGudangId(g.id);
+                                      setOcrSuggestSubGudangId(null);
+                                    } else if (pendingMapLokasi) {
+                                      assignLokasiKoordinat(pendingMapLokasi, xPct, yPct, g.id);
+                                      setPendingMapLokasi(null);
+                                    }
+                                  }}>
+                                  <img src={g.denahImageData} alt="Denah" style={{width:"100%",height:"auto",borderRadius:6,border:`2px dashed #3b82f6`,display:"block"}}/>
+                                  {lokasiList.filter(l=>l.gudangId===g.id&&l.mapX!=null).map(l=>(
+                                    <div key={l.id} title={pendingMapLokasi===l.id?`${l.kode} — klik posisi baru di denah`:`${l.kode} — klik untuk pindah koordinat`} style={{position:"absolute",left:`${l.mapX}%`,top:`${l.mapY}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:pendingMapLokasi===l.id?"#22c55e":(l.status==="PENDING"?"#9ca3af":"#dc2626"),border:l.status==="PENDING"?"2px dashed white":"2px solid white",cursor:"pointer",boxShadow:pendingMapLokasi===l.id?"0 0 0 3px rgba(34,197,94,.35)":"0 1px 4px rgba(0,0,0,0.4)"}} onClick={e=>{e.stopPropagation();setPendingMapLokasi(pendingMapLokasi===l.id?null:l.id);setManualAddMode(false);}}/>
+                                  ))}
+                                  {ocrSuggestGudangId===g.id && !ocrSuggestSubGudangId && ocrSuggestions.map(s=>(
+                                    <div key={s.id} title={`${s.kode} (draft, belum dikirim)`} style={{position:"absolute",left:`${s.xPct}%`,top:`${s.yPct}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:"#22c55e",border:"2px dashed white",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}}/>
+                                  ))}
+                                </div>
                               </div>
-                              <div style={{fontSize:10,color:C.muted,marginTop:6}}>💡 Klik titik merah yang sudah ada untuk mereset koordinatnya. Titik hijau putus-putus = blok baru draft (belum dikirim ke TL).</div>
+                              {manualAddMode && (
+                                <button style={{...sty.btn("success","sm"),marginTop:10}} onClick={()=>{setManualAddMode(false);setPendingMapLokasi(null);setMapConfigGudangId(null);}}>
+                                  💾 Save Blok
+                                </button>
+                              )}
+                              <div style={{fontSize:10,color:C.muted,marginTop:6}}>💡 Klik titik merah yang sudah ada, lalu klik posisi baru di denah untuk memindahkan koordinatnya (titik jadi hijau saat mode pindah aktif). Titik hijau putus-putus = blok baru draft (belum dikirim ke TL).</div>
                             </div>
                             );
                           })()}
                         </div>
                       )}
 
-                      {/* Daftar Blok Lokasi milik Gudang ini */}
+                      {/* Sub Gudang milik Gudang ini, tiap Sub Gudang punya daftar Blok + denah sendiri */}
                       <div style={{marginTop:16}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                          <div style={{fontSize:13,fontWeight:800}}>📍 Daftar Blok Lokasi ({bloklokasi.length})</div>
-                        </div>
-                        {bloklokasi.length===0
-                          ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic"}}>Belum ada blok lokasi di gudang ini.</div>
-                          : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-                              {bloklokasi.map(l=>renderLokasiCard(l))}
+                        {(() => {
+                          const subsOfGudang = subGudangList.filter(sg=>sg.gudangId===g.id);
+                          const knownSubIds = new Set(subsOfGudang.map(sg=>sg.id));
+                          const umumBlok = bloklokasi.filter(l=>!l.subGudangId || !knownSubIds.has(l.subGudangId));
+                          const groups = [
+                            ...subsOfGudang.map(sg=>({ id:sg.id, sg, nama:sg.nama, blok: bloklokasi.filter(l=>l.subGudangId===sg.id) })),
+                            { id:null, sg:null, nama:"Umum / Belum Dikelompokkan", blok: umumBlok },
+                          ];
+                          return groups.map(grp=>{
+                            const belumPunyaKoordinatSub = grp.sg ? grp.blok.filter(l=>l.status!=="PENDING" && l.subMapX==null) : [];
+                            return (
+                            <div key={grp.id||"umum"} style={{marginBottom:18,paddingLeft:10,borderLeft:`3px solid ${C.border}`}}>
+                              <div style={{fontSize:13,fontWeight:800,marginBottom:2}}>🏢 Sub Gudang: {grp.nama}</div>
+
+                              {/* Opsi 2: Upload Denah per Sub Gudang (hanya untuk grup real, bukan "Umum") */}
+                              {grp.sg && currentUser.role==="ADMIN" && (
+                                <div style={{marginBottom:10,marginTop:6}}>
+                                  <label style={{...sty.label,fontSize:10}}>Upload Denah Sub Gudang (PNG / JPG) — opsional, fallback ke denah Gudang jika kosong</label>
+                                  <div>
+                                    <input type="file" accept="image/*" capture="environment"
+                                      onChange={e=>{const f=e.target.files[0];if(f)uploadDenahSubGudang(grp.sg.id,g.id,f);}}
+                                      style={{fontSize:11,color:C.muted}}/>
+                                  </div>
+                                  {denahSubLoading && <div style={{fontSize:11,color:"#1d4ed8",marginTop:4}}>⏳ Mengompres dan menyimpan gambar...</div>}
+                                  {grp.sg.denahUploadedAt && !denahSubLoading && <div style={{fontSize:10,color:C.green,marginTop:4}}>✅ Denah tersimpan • {fmtDate(grp.sg.denahUploadedAt)}</div>}
+                                </div>
+                              )}
+                              {grp.sg?.denahImageData && (
+                                <div style={{marginBottom:10}}>
+                                  <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>Preview Denah Sub Gudang:</div>
+                                  <img src={grp.sg.denahImageData} alt="Denah Sub Gudang" style={{width:"100%",maxHeight:180,objectFit:"contain",borderRadius:6,border:`1px solid ${C.border}`}}/>
+                                </div>
+                              )}
+
+                              {/* Konfigurasi Koordinat Blok — level Sub Gudang */}
+                              {grp.sg && currentUser.role==="ADMIN" && grp.sg.denahImageData && (
+                                <div style={{marginBottom:10}}>
+                                  <button style={{...sty.btn(mapConfigSubGudangId===grp.sg.id?"danger":"primary","sm"),marginBottom:8}} onClick={()=>{setMapConfigSubGudangId(mapConfigSubGudangId===grp.sg.id?null:grp.sg.id);setPendingMapLokasiSub(null);setManualAddModeSub(false);}}>
+                                    {mapConfigSubGudangId===grp.sg.id?"✕ Tutup Mode Konfigurasi":"⚙️ Konfigurasi Koordinat Blok (Sub Gudang)"}
+                                  </button>
+                                  {mapConfigSubGudangId===grp.sg.id && (
+                                    <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:8,padding:12}}>
+                                      {!manualAddModeSub && (
+                                        <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                                          <button style={sty.btn("primary","sm")} onClick={()=>{setManualAddModeSub(true);setPendingMapLokasiSub(null);}}>
+                                            ➕ Tambah Blok Baru
+                                          </button>
+                                        </div>
+                                      )}
+                                      {manualAddModeSub && <div style={{fontSize:11,color:"#1d4ed8",fontWeight:700,marginBottom:8}}>Klik titik-titik di denah untuk menambah blok baru. Usulan akan muncul di panel di atas untuk dikonfirmasi & dikirim ke TL.</div>}
+                                      {!manualAddModeSub && (
+                                        <div style={{marginBottom:10}}>
+                                          <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:6}}>Blok belum punya koordinat di denah ini — klik untuk pilih, lalu klik titik di denah:</div>
+                                          {belumPunyaKoordinatSub.length===0
+                                            ? <div style={{fontSize:11,color:C.muted,fontStyle:"italic"}}>Semua blok di sub gudang ini sudah punya koordinat.</div>
+                                            : <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                                                {belumPunyaKoordinatSub.map(l=>(
+                                                  <button key={l.id} style={sty.btn(pendingMapLokasiSub===l.id?"danger":"ghost","sm")} onClick={()=>setPendingMapLokasiSub(pendingMapLokasiSub===l.id?null:l.id)}>
+                                                    📍 {l.kode}{pendingMapLokasiSub===l.id?" (klik di peta)":""}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                          }
+                                        </div>
+                                      )}
+                                      <div style={{maxWidth:380,margin:"0 auto"}}>
+                                        <div style={{position:"relative",cursor:(manualAddModeSub||pendingMapLokasiSub)?"crosshair":"default",width:"100%"}}
+                                          onClick={e=>{
+                                            if (!manualAddModeSub && !pendingMapLokasiSub) { showToast("Aktifkan 'Tambah Blok Baru' atau pilih blok di daftar dulu!","error"); return; }
+                                            const rect = e.currentTarget.getBoundingClientRect();
+                                            const xPct = Number(((e.clientX - rect.left) / rect.width * 100).toFixed(1));
+                                            const yPct = Number(((e.clientY - rect.top) / rect.height * 100).toFixed(1));
+                                            if (manualAddModeSub) {
+                                              const totalUsulan = grp.blok.length + ocrSuggestions.length;
+                                              const kodeUsulan = suggestKodeFromOcr(grp.sg, xPct, yPct) || `${grp.sg.nama?.slice(0,6).toUpperCase()||"BLOK"}-${String(totalUsulan+1).padStart(2,"0")}`;
+                                              setOcrSuggestions(prev=>[...prev, { id: uid(), kode: kodeUsulan, jenisArea:"Rak Tertutup", luasan:"", xPct, yPct, checked: true }]);
+                                              setOcrSuggestGudangId(g.id);
+                                              setOcrSuggestSubGudangId(grp.sg.id);
+                                            } else if (pendingMapLokasiSub) {
+                                              assignLokasiKoordinatSub(pendingMapLokasiSub, xPct, yPct, grp.sg.id, g.id);
+                                              setPendingMapLokasiSub(null);
+                                            }
+                                          }}>
+                                          <img src={grp.sg.denahImageData} alt="Denah Sub Gudang" style={{width:"100%",height:"auto",borderRadius:6,border:`2px dashed #3b82f6`,display:"block"}}/>
+                                          {grp.blok.filter(l=>l.subMapX!=null).map(l=>(
+                                            <div key={l.id} title={pendingMapLokasiSub===l.id?`${l.kode} — klik posisi baru di denah`:`${l.kode} — klik untuk pindah koordinat`} style={{position:"absolute",left:`${l.subMapX}%`,top:`${l.subMapY}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:pendingMapLokasiSub===l.id?"#22c55e":(l.status==="PENDING"?"#9ca3af":"#dc2626"),border:l.status==="PENDING"?"2px dashed white":"2px solid white",cursor:"pointer",boxShadow:pendingMapLokasiSub===l.id?"0 0 0 3px rgba(34,197,94,.35)":"0 1px 4px rgba(0,0,0,0.4)"}} onClick={e=>{e.stopPropagation();setPendingMapLokasiSub(pendingMapLokasiSub===l.id?null:l.id);setManualAddModeSub(false);}}/>
+                                          ))}
+                                          {ocrSuggestSubGudangId===grp.sg.id && ocrSuggestions.map(s=>(
+                                            <div key={s.id} title={`${s.kode} (draft, belum dikirim)`} style={{position:"absolute",left:`${s.xPct}%`,top:`${s.yPct}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:"#22c55e",border:"2px dashed white",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}}/>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      {manualAddModeSub && (
+                                        <button style={{...sty.btn("success","sm"),marginTop:10}} onClick={()=>{setManualAddModeSub(false);setPendingMapLokasiSub(null);setMapConfigSubGudangId(null);}}>
+                                          💾 Save Blok
+                                        </button>
+                                      )}
+                                      <div style={{fontSize:10,color:C.muted,marginTop:6}}>💡 Klik titik merah yang sudah ada untuk mereset koordinatnya. Titik hijau putus-putus = blok baru draft (belum dikirim ke TL).</div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                                <div style={{fontSize:12,color:C.muted}}>📍 Daftar Blok Lokasi ({grp.blok.length})</div>
+                                {currentUser.role==="ADMIN" && <button style={sty.btn("ghost","sm")} onClick={()=>openAddLokasiFor(g.id, grp.id)}>+ Tambah Blok</button>}
+                              </div>
+                              {grp.blok.length===0
+                                ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic",marginBottom:8}}>Belum ada blok lokasi di sub gudang ini.</div>
+                                : <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
+                                    {grp.blok.map(l=>{
+                                      const n = stocks.filter(s=>s.lokasiId===l.id).length;
+                                      const hasCoord = grp.sg ? l.subMapX!=null : l.mapX!=null;
+                                      return (
+                                        <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"#f9fafb",border:`1px solid ${C.border}`,borderRadius:6,fontSize:12}}>
+                                          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+                                            <span style={{fontWeight:700}}>{l.kode}</span>
+                                            {l.nama && <span style={{color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nama}</span>}
+                                            {l.status==="PENDING" && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>MENUNGGU APPROVAL TL</span>}
+                                            {!hasCoord && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>BELUM ADA KOORDINAT</span>}
+                                          </div>
+                                          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                                            <span style={{fontSize:11,color:n>0?C.accent:C.muted,fontWeight:700}}>{n} item</span>
+                                            {currentUser.role==="ADMIN" && <button style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                              }
                             </div>
-                        }
+                          );});
+                        })()}
                       </div>
                       </div>}
                     </div>
                   );
                 })}
-
-                {/* Blok Lokasi yang belum terhubung ke Gudang manapun (data legacy) */}
-                {lokasiList.some(l=>!l.gudangId) && (
-                  <div style={{...sty.card,marginTop:16,borderTop:`3px solid ${C.muted}`}}>
-                    <div style={{fontWeight:800,fontSize:14,marginBottom:4}}>📦 Blok Lokasi Belum Terhubung ke Gudang</div>
-                    <div style={{fontSize:11,color:C.muted,marginBottom:12}}>Data lama yang belum di-assign ke salah satu Gudang. Edit blok untuk menentukan Gudang-nya.</div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-                      {lokasiList.filter(l=>!l.gudangId).map(l=>renderLokasiCard(l))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -5463,29 +5907,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* APPROVAL — semua notifikasi approval (TUG, Lokasi/Blok, Pemindahan Stok, dkk) dikumpulkan di sini, dipisah per-bagian + riwayat di bawah */}
         {tab==="approval" && ["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) && (
           <div>
-            {/* ── BAGIAN: Perubahan Lokasi/Blok (khusus TL) ── */}
-            {currentUser.role==="TL" && lokasiList.some(l=>l.status==="PENDING") && (
-              <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
-                <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📍 Perubahan Lokasi/Blok ({lokasiList.filter(l=>l.status==="PENDING").length})</div>
-                {lokasiList.filter(l=>l.status==="PENDING").map(l=>{
-                  const pemohon = users.find(u=>u.id===l.requestedBy);
-                  const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[l.pendingAction]||l.pendingAction;
-                  return (
-                    <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10}}>
-                      <div>
-                        <div style={{fontSize:12,fontWeight:700}}>{aksiLabel}: {l.pendingAction==="EDIT"?l.pendingData?.kode:l.kode}</div>
-                        <div style={{fontSize:11,color:C.muted}}>Diajukan oleh {pemohon?.name||"?"} • {fmtDate(l.requestedAt)}</div>
-                      </div>
-                      <div style={{display:"flex",gap:6}}>
-                        <button style={sty.btn("primary","sm")} onClick={()=>approveLokasiChange(l.id)}>✓ Setuju</button>
-                        <button style={sty.btn("danger","sm")} onClick={()=>rejectLokasiChange(l.id)}>✕ Tolak</button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
             {/* ── BAGIAN: Pemindahan Blok Data Stok (khusus TL) ── */}
             {currentUser.role==="TL" && stocks.some(s=>s.lokasiMovePending) && (
               <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
@@ -5595,6 +6016,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               submitTUG7_AdminUIT={submitTUG7_AdminUIT}
               approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik}
               konfirmasiDraftTUG8={konfirmasiDraftTUG8}
+              gudangCapacityImports={gudangCapacityImports}
+              approveCapacityImport={approveCapacityImport}
+              rejectCapacityImport={rejectCapacityImport}
+              approveLokasiChange={approveLokasiChange}
+              rejectLokasiChange={rejectLokasiChange}
             />
 
             {/* ── BAGIAN: Riwayat Approval (gabungan semua jenis, terbaru di atas) ── */}
@@ -5704,7 +6130,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   <option value="">-- Pilih Lokasi --</option>
                   {lokasiList.map(l=><option key={l.id} value={l.id}>{l.kode} {l.keterangan ? `— ${l.keterangan}` : ""}</option>)}
                 </select>
-                {lokasiList.length===0 && <div style={{fontSize:10,color:"#be185d",marginTop:4}}>Belum ada Master Lokasi. Tambahkan dulu di tab "Master Lokasi".</div>}
+                {lokasiList.length===0 && <div style={{fontSize:10,color:"#be185d",marginTop:4}}>Belum ada Blok Lokasi. Tambahkan dulu di Master Data → Master Gudang.</div>}
               </div>
               <div><label style={sty.label}>Harga Satuan (Rp)</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.price||0} onChange={e=>setStockForm(sf=>({...sf,price:Number(e.target.value)}))}/></div>
               <div><label style={sty.label}>Qty di Lokasi Ini</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.qty||0} onChange={e=>setStockForm(sf=>({...sf,qty:Number(e.target.value)}))}/></div>
@@ -5810,7 +6236,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {currentUser.role==="ADMIN" && ocrSuggestGudangId && ocrSuggestions.length>0 && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100}}>
           <div style={{...sty.card,width:520,maxHeight:"85vh",overflowY:"auto"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>📋 Usulan Blok dari Denah ({ocrSuggestions.length})</h3>
+            <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>📋 Usulan Blok dari Denah {ocrSuggestSubGudangId?"(Sub Gudang)":"(Gudang)"} ({ocrSuggestions.length})</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>Lengkapi data tiap usulan, lalu konfirmasi untuk mengirim ke approval TL.</p>
             <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
               {ocrSuggestions.map(s=>(
@@ -5846,7 +6272,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
             <div style={{display:"flex",gap:10}}>
               <button style={{...sty.btn("ghost"),flex:1}} onClick={dismissOcrSuggestions}>Lewati Semua</button>
-              <button style={{...sty.btn("primary"),flex:2}} onClick={()=>confirmOcrSuggestions(ocrSuggestGudangId)}>✓ Konfirmasi & Tambahkan Blok Terpilih</button>
+              <button style={{...sty.btn("primary"),flex:2}} onClick={()=>confirmOcrSuggestions(ocrSuggestGudangId, ocrSuggestSubGudangId)}>✓ Konfirmasi & Tambahkan Blok Terpilih</button>
             </div>
           </div>
         </div>
@@ -5864,11 +6290,20 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             )}
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Gudang *</label>
-              <select style={sty.select} value={lokasiForm.gudangId||""} disabled={gudangList.length===0} onChange={e=>setLokasiForm(lf=>({...lf,gudangId:e.target.value||null}))}>
+              <select style={sty.select} value={lokasiForm.gudangId||""} disabled={gudangList.length===0} onChange={e=>setLokasiForm(lf=>({...lf,gudangId:e.target.value||null,subGudangId:null}))}>
                 <option value="">-- Pilih Gudang --</option>
                 {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
               </select>
             </div>
+            {lokasiForm.gudangId && (
+              <div style={{marginBottom:12}}>
+                <label style={sty.label}>Sub Gudang</label>
+                <select style={sty.select} value={lokasiForm.subGudangId||""} onChange={e=>setLokasiForm(lf=>({...lf,subGudangId:e.target.value||null}))}>
+                  <option value="">-- Umum / Tidak ada Sub Gudang --</option>
+                  {subGudangList.filter(sg=>sg.gudangId===lokasiForm.gudangId).map(sg=><option key={sg.id} value={sg.id}>{sg.nama}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{marginBottom:12}}><label style={sty.label}>Kode Lokasi (Blok)</label><input style={sty.input} value={lokasiForm.kode||""} placeholder="cth: Rak A-1" disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,kode:e.target.value}))}/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Keterangan Area</label><input style={sty.input} value={lokasiForm.keterangan||""} placeholder="cth: Area Transformator" disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,keterangan:e.target.value}))}/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Kapasitas Maksimal</label><input style={sty.input} type="number" inputMode="decimal" value={lokasiForm.kapasitas||0} disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,kapasitas:Number(e.target.value)}))}/></div>
@@ -6516,7 +6951,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <option value="">-- Pilih Lokasi --</option>
                 {lokasiList.map(l=><option key={l.id} value={l.id}>{l.kode} {l.keterangan?`— ${l.keterangan}`:""}</option>)}
               </select>
-              {lokasiList.length===0 && <div style={{fontSize:10,color:"#be185d",marginTop:4}}>Belum ada Master Lokasi. Tambahkan dulu di menu Master Data → Master Lokasi.</div>}
+              {lokasiList.length===0 && <div style={{fontSize:10,color:"#be185d",marginTop:4}}>Belum ada Blok Lokasi. Tambahkan dulu di menu Master Data → Master Gudang.</div>}
             </div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>BARANG / MATERIAL RETUR</div>
@@ -10129,10 +10564,22 @@ function HeavyEquipmentTab({ equipmentList, loans, currentUser, users, sty, C, h
   );
 }
 
-function PetaGudangTab({ gudangList, lokasiList, stocks, sty, C, currentUser }) {
+function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, sty, C, currentUser, gudangCapacityList }) {
   const [selectedGudangId, setSelectedGudangId] = useState(gudangList[0]?.id||"");
   const [hoveredLokasi, setHoveredLokasi] = useState(null);
   const [filterHanyaBerisi, setFilterHanyaBerisi] = useState(false);
+
+  // gudangList dimuat async dari Supabase — kalau saat mount masih kosong,
+  // selectedGudangId ke-stuck di "" dan peta tidak pernah tampil walau data sudah ada.
+  // Kalau belum ada pilihan valid, prioritaskan Gudang yang sudah punya konten (denah sendiri
+  // atau denah Sub Gudang) — supaya user tidak mendarat di gudang kosong lalu mengira peta belum tampil.
+  useEffect(() => {
+    const stillValid = gudangList.some(g=>g.id===selectedGudangId);
+    if (selectedGudangId && stillValid) return;
+    if (gudangList.length === 0) return;
+    const withContent = gudangList.find(g => g.denahImageData || subGudangList.some(sg=>sg.gudangId===g.id && sg.denahImageData));
+    setSelectedGudangId((withContent || gudangList[0]).id);
+  }, [gudangList, subGudangList, selectedGudangId]);
 
   const gudang = gudangList.find(g=>g.id===selectedGudangId);
   const blokDiGudang = lokasiList.filter(l=>l.gudangId===selectedGudangId && l.mapX!=null);
@@ -10306,6 +10753,44 @@ function PetaGudangTab({ gudangList, lokasiList, stocks, sty, C, currentUser }) 
             </div>
           </div>
         </div>
+        );
+      })()}
+
+      {/* Galeri denah Sub Gudang (read-only) — hanya sub gudang yang sudah upload denah sendiri */}
+      {gudang && (() => {
+        const subsWithDenah = subGudangList.filter(sg=>sg.gudangId===gudang.id && sg.denahImageData);
+        if (subsWithDenah.length===0) return null;
+        return (
+          <div style={{marginTop:24}}>
+            <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>🏢 Denah Sub Gudang</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
+              {subsWithDenah.map(sg=>{
+                const blokSub = lokasiList.filter(l=>l.subGudangId===sg.id && l.subMapX!=null);
+                const blokBerisi = blokSub.filter(l=>stokDiBlok(l.id).length>0).length;
+                return (
+                  <div key={sg.id} style={{...sty.card,padding:12}}>
+                    <div style={{fontWeight:700,fontSize:13,marginBottom:2}}>{sg.nama}</div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:8}}>
+                      {gudang.nama} • {blokSub.length} blok terpetakan • {blokBerisi} berisi barang
+                      {sg.denahUploadedAt && <> • diupdate {fmtDate(sg.denahUploadedAt)}</>}
+                    </div>
+                    <div style={{position:"relative",width:"100%"}}>
+                      <img src={sg.denahImageData} alt={`Denah ${sg.nama}`} style={{width:"100%",height:"auto",display:"block",borderRadius:8,border:`1px solid ${C.border}`}}/>
+                      {blokSub.map(l=>{
+                        const stokList = stokDiBlok(l.id);
+                        const isEmpty = stokList.length===0;
+                        const isPending = l.status==="PENDING";
+                        return (
+                          <div key={l.id} title={`${l.kode}${isEmpty?" (kosong)":` — ${stokList.length} item`}`}
+                            style={{position:"absolute",left:`${l.subMapX}%`,top:`${l.subMapY}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:isPending?"#9ca3af":(isEmpty?"#9ca3af":"#dc2626"),border:isPending?"2px dashed white":"2px solid white",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}}/>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         );
       })()}
     </div>
@@ -11251,13 +11736,29 @@ function excelSerialToDate(serial) {
 
 // Parse sheet KAPASITAS GUDANG dari XLSX
 function parseKapasitasGudangSheet(rows) {
+  // Parse angka format Indonesia: "1.234,56" (titik ribuan, koma desimal) atau format polos "1234.56"
+  function parseIdNumber(v) {
+    let s = String(v==null?"":v).trim();
+    if (!s) return NaN;
+    const hasComma = s.includes(",");
+    const hasDot = s.includes(".");
+    if (hasComma && hasDot) {
+      // titik = ribuan, koma = desimal -> buang titik, ganti koma jadi titik
+      s = s.replace(/\./g,"").replace(",",".");
+    } else if (hasComma && !hasDot) {
+      // hanya koma -> anggap desimal
+      s = s.replace(",",".");
+    }
+    // hasDot only (or neither): biarkan apa adanya, itu format desimal standar
+    return parseFloat(s);
+  }
   // Normalisasi persen: nilai bisa 0.95 (ratio) atau 95 (persen)
   function normPct(v) {
-    const n = parseFloat(String(v||"0").replace(",","."));
+    const n = parseIdNumber(v);
     if (isNaN(n)) return 0;
     return n > 1 ? n / 100 : n; // store as 0-1
   }
-  function normNum(v) { return parseFloat(String(v||"0").replace(",",".")) || 0; }
+  function normNum(v) { const n = parseIdNumber(v); return isNaN(n) ? 0 : n; }
 
   const COL_MAP = {
     upt: ["UPT"], gudang: ["GUDANG"], subGudang: ["SUB GUDANG"],
@@ -11285,6 +11786,9 @@ function parseKapasitasGudangSheet(rows) {
     const upt = String(getVal(row, COL_MAP.upt)||"").trim();
     const gudang = String(getVal(row, COL_MAP.gudang)||"").trim();
     const subGudang = String(getVal(row, COL_MAP.subGudang)||"").trim();
+    // Skip baris section-divider (merged cell nama UPT sebagai pemisah section) —
+    // baris data asli selalu punya UPT dan GUDANG terisi bersamaan.
+    if (!upt && !gudang) continue;
     if (!upt && !gudang && !subGudang) continue; // skip empty rows
 
     const luasLahan = normNum(getVal(row, COL_MAP.luasLahan));
@@ -11302,8 +11806,10 @@ function parseKapasitasGudangSheet(rows) {
     if (luasLahan <= 0) errors.push("Luas lahan tidak valid");
     if (luasTerpakai < 0) errors.push("Luas terpakai negatif");
 
-    const lat = parseFloat(getVal(row, COL_MAP.latitude)) || null;
-    const lng = parseFloat(getVal(row, COL_MAP.longitude)) || null;
+    const latRaw = parseIdNumber(getVal(row, COL_MAP.latitude));
+    const lngRaw = parseIdNumber(getVal(row, COL_MAP.longitude));
+    const lat = isNaN(latRaw) ? null : latRaw;
+    const lng = isNaN(lngRaw) ? null : lngRaw;
     if (!lat || !lng) warnings.push("Koordinat kosong");
 
     const waktuRaw = getVal(row, COL_MAP.waktuUpdate);
@@ -11335,18 +11841,277 @@ function parseKapasitasGudangSheet(rows) {
   return results;
 }
 
-function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangCapacityImports, setGudangCapacityImports, gudangList, lokasiList, stocks, currentUser, sty, C, saveToCloud, showToast }) {
-  const [subTab, setSubTab] = useState("dashboard");
+// ════════════════════════════════════════════════════════════════════
+// KAPASITAS GUDANG — IMPORT & REVIEW (dipasang di Master Data > Master Gudang)
+// ════════════════════════════════════════════════════════════════════
+function KapasitasGudangImportTab({ gudangCapacityImports, setGudangCapacityImports, currentUser, sty, C, saveToCloud, showToast }) {
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
+  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
+
+  function revalidateRecord(r) {
+    const luasLahan = Number(r.luasLahanM2) || 0;
+    const luasTerpakai = Number(r.luasTerpakaiM2) || 0;
+    const sisaLuas = luasLahan > 0 ? luasLahan - luasTerpakai : 0;
+    const pctTerpakai = luasLahan > 0 ? luasTerpakai / luasLahan : 0;
+    let statusKapasitas = "AMAN";
+    if (pctTerpakai >= 0.90) statusKapasitas = "KRITIS";
+    else if (pctTerpakai >= 0.75) statusKapasitas = "WASPADA";
+    const errors = [];
+    if (!r.upt?.trim() || !r.gudang?.trim() || !r.subGudang?.trim()) errors.push("UPT/GUDANG/SUB GUDANG wajib ada");
+    if (luasLahan <= 0) errors.push("Luas lahan tidak valid");
+    if (luasTerpakai < 0) errors.push("Luas terpakai negatif");
+    const warnings = (!r.latitude || !r.longitude) ? ["Koordinat kosong"] : [];
+    return { ...r, luasLahanM2:luasLahan, luasTerpakaiM2:luasTerpakai, sisaLuasM2:sisaLuas,
+      persentaseTerpakai:pctTerpakai, statusKapasitas, _errors:errors, _warnings:warnings, _valid:errors.length===0 };
+  }
+
+  function updatePreviewField(idx, field, value) {
+    setImportPreview(prev => {
+      if (!prev) return prev;
+      const records = prev.records.map((r,i) => i===idx ? revalidateRecord({...r, [field]:value}) : r);
+      const valid = records.filter(r=>r._valid);
+      const invalid = records.filter(r=>!r._valid);
+      const warnings = records.filter(r=>r._valid && r._warnings.length>0);
+      return { ...prev, records, valid, invalid, warnings };
+    });
+  }
+
+  function addPreviewRow() {
+    setImportPreview(prev => {
+      if (!prev) return prev;
+      const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
+      const defaultUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
+      const blank = revalidateRecord({
+        upt: defaultUpt.toUpperCase(), gudang:"", subGudang:"", typeGudang:"", alamat:"",
+        latitude:null, longitude:null, luasLahanM2:0, luasTerpakaiM2:0, sisaLuasM2:0,
+        persentaseTerpakai:0, persediaanPct:0, cadangPct:0, preMemoryPct:0, attbPct:0, lainnyaPct:0,
+        statusKapasitas:"AMAN", contactPerson:"", waktuUpdate:"", keterangan:"Ditambahkan manual", linkGudang:"",
+        matchedGudangId:null, matchedLokasiId:null, mappingStatus:"UNMATCHED",
+      });
+      const records = [...prev.records, blank];
+      const valid = records.filter(r=>r._valid);
+      const invalid = records.filter(r=>!r._valid);
+      const warnings = records.filter(r=>r._valid && r._warnings.length>0);
+      return { ...prev, records, valid, invalid, warnings };
+    });
+  }
+
+  function deletePreviewRow(idx) {
+    setImportPreview(prev => {
+      if (!prev) return prev;
+      const records = prev.records.filter((_,i)=>i!==idx);
+      const valid = records.filter(r=>r._valid);
+      const invalid = records.filter(r=>!r._valid);
+      const warnings = records.filter(r=>r._valid && r._warnings.length>0);
+      return { ...prev, records, valid, invalid, warnings };
+    });
+  }
+
+  function deletePreviewByUpt(uptToRemove) {
+    setImportPreview(prev => {
+      if (!prev) return prev;
+      const records = prev.records.filter(r=>r.upt!==uptToRemove);
+      const valid = records.filter(r=>r._valid);
+      const invalid = records.filter(r=>!r._valid);
+      const warnings = records.filter(r=>r._valid && r._warnings.length>0);
+      return { ...prev, records, valid, invalid, warnings };
+    });
+  }
+
+  function keepOnlyUpt(uptToKeep) {
+    setImportPreview(prev => {
+      if (!prev) return prev;
+      const records = prev.records.filter(r=>r.upt===uptToKeep);
+      const valid = records.filter(r=>r._valid);
+      const invalid = records.filter(r=>!r._valid);
+      const warnings = records.filter(r=>r._valid && r._warnings.length>0);
+      return { ...prev, records, valid, invalid, warnings };
+    });
+  }
+
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const sheetName = wb.SheetNames.find(s=>s.toUpperCase().includes("KAPASITAS GUDANG")) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rawRows = XLSX.utils.sheet_to_json(ws, { header:1, defval:"", raw:false });
+      let headerRowIdx = 0;
+      for (let i=0; i<Math.min(15, rawRows.length); i++) {
+        const hasUpt = rawRows[i].some(cell => String(cell||"").trim().toUpperCase()==="UPT");
+        if (hasUpt) { headerRowIdx = i; break; }
+      }
+      const rows = XLSX.utils.sheet_to_json(ws, { defval:"", range: headerRowIdx });
+      const parsed = parseKapasitasGudangSheet(rows);
+      if (parsed.length === 0) {
+        showToast("File terbaca tapi 0 baris data ditemukan. Cek apakah baris header (UPT, GUDANG, dst) ada di file.", "error");
+      } else if (parsed.every(r=>!r._valid)) {
+        showToast(`File terbaca (${parsed.length} baris) tapi semua tidak valid. Cek kolom UPT/GUDANG/SUB GUDANG/LUAS LAHAN.`, "error");
+      }
+      const valid = parsed.filter(r=>r._valid);
+      const invalid = parsed.filter(r=>!r._valid);
+      const warnings = parsed.filter(r=>r._valid && r._warnings.length>0);
+      setImportPreview({ records: parsed, valid, invalid, warnings, fileName: file.name, sheetName });
+    } catch(err) {
+      showToast("Gagal baca file: " + err.message, "error");
+    }
+    setImporting(false);
+    e.target.value = "";
+  }
+
+  async function handleSubmitForApproval() {
+    if (!importPreview) return;
+    const toPublish = importPreview.valid.map(r => ({...r, _errors:undefined, _warnings:undefined, _valid:undefined}));
+    const batchId = "CAPIMP-"+Date.now();
+    const importRecord = {
+      id: batchId, sourceFile: importPreview.fileName, sheetName: importPreview.sheetName,
+      importedBy: currentUser.id, importedAt: Date.now(),
+      totalRows: importPreview.records.length, validRows: importPreview.valid.length,
+      invalidRows: importPreview.invalid.length, warningRows: importPreview.warnings.length,
+      status: "PENDING_ASMAN", records: toPublish,
+    };
+    const newImports = [...gudangCapacityImports, importRecord];
+    setGudangCapacityImports(newImports);
+    await saveToCloud({ gudangCapacityImports: newImports });
+    setImportPreview(null);
+    showToast(`Diajukan ke Asman untuk approval (${toPublish.length} record). Lihat status di menu Approval.`, "success");
+  }
+
+  return (
+    <div>
+      <div style={{...sty.card,marginBottom:16}}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📥 Import Laporan Kapasitas Gudang (XLSX)</div>
+        <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Upload file KAPASITAS GUDANG UIT JBM.xlsx. Sheet yang dibaca: <strong>KAPASITAS GUDANG</strong>.</p>
+        {canEdit && (
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <label style={{...sty.btn("primary"),cursor:"pointer"}}>
+              {importing?"⏳ Memproses...":"📂 Upload XLSX Kapasitas Gudang"}
+              <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleImportFile} disabled={importing}/>
+            </label>
+            {!importPreview && (
+              <button style={sty.btn("ghost")} onClick={()=>setImportPreview({records:[],valid:[],invalid:[],warnings:[],fileName:"(manual, tanpa file)",sheetName:"-"})}>
+                ➕ Buat Manual (tanpa file)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {importPreview && (
+        <div style={{...sty.card}}>
+          <div style={{fontWeight:700,marginBottom:10}}>Preview: {importPreview.fileName} (Sheet: {importPreview.sheetName})</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+            {[
+              {label:"Total",val:importPreview.records.length,color:C.accent},
+              {label:"Valid",val:importPreview.valid.length,color:C.green},
+              {label:"Warning",val:importPreview.warnings.length,color:"#f59e0b"},
+              {label:"Invalid",val:importPreview.invalid.length,color:C.red},
+            ].map(s=>(
+              <div key={s.label} style={{padding:"8px 14px",borderRadius:8,background:"#f9fafb",border:`1px solid ${C.border}`,textAlign:"center"}}>
+                <div style={{fontSize:11,color:C.muted}}>{s.label}</div>
+                <div style={{fontSize:18,fontWeight:800,color:s.color}}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+          {importPreview.invalid.length > 0 && (
+            <div style={{color:C.red,fontWeight:700,fontSize:12,marginBottom:8}}>⚠️ Ada {importPreview.invalid.length} baris invalid — edit langsung di tabel (sel putih = bisa diedit) untuk memperbaiki, atau baris akan diabaikan saat submit.</div>
+          )}
+          {canEdit && (()=>{
+            const uptsInPreview = [...new Set(importPreview.records.map(r=>r.upt))].filter(Boolean).sort();
+            if (uptsInPreview.length <= 1) return null;
+            return (
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:10,padding:"8px 10px",background:"#f9fafb",border:`1px solid ${C.border}`,borderRadius:8}}>
+                <span style={{fontSize:11,color:C.muted,fontWeight:700}}>File berisi {uptsInPreview.length} UPT — hapus cepat:</span>
+                {uptsInPreview.map(u=>(
+                  <span key={u} style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                    <button style={{...sty.btn("ghost","sm"),padding:"3px 8px",fontSize:11}} onClick={()=>keepOnlyUpt(u)} title={`Hanya simpan ${u}, hapus sisanya`}>Hanya {u}</button>
+                    <button style={{...sty.btn("danger","sm"),padding:"3px 8px",fontSize:11}} onClick={()=>deletePreviewByUpt(u)} title={`Hapus semua baris ${u}`}>🗑️ {u}</button>
+                  </span>
+                ))}
+              </div>
+            );
+          })()}
+          <div style={{overflowX:"auto",maxHeight:440,overflowY:"auto",marginBottom:14}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:1050}}>
+              <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+                <tr>
+                  {["UPT","Gudang","Sub Gudang","Luas Lahan (m²)","Terpakai (m²)","Utilization","Status","Warning","Aksi"].map(h=>(
+                    <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {importPreview.records.map((r,i)=>{
+                  const cellStyle = {padding:"3px 6px",border:`1px solid ${C.border}`,borderRadius:5,fontSize:11,width:"100%",background:"white"};
+                  return (
+                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:!r._valid?"#fef2f2":r._warnings.length>0?"#fefce8":"white"}}>
+                    <td style={{padding:"4px 6px"}}><input style={cellStyle} value={r.upt} onChange={e=>updatePreviewField(i,"upt",e.target.value.toUpperCase())} disabled={!canEdit}/></td>
+                    <td style={{padding:"4px 6px"}}><input style={cellStyle} value={r.gudang} onChange={e=>updatePreviewField(i,"gudang",e.target.value)} disabled={!canEdit}/></td>
+                    <td style={{padding:"4px 6px"}}><input style={{...cellStyle,fontWeight:600,minWidth:160}} value={r.subGudang} onChange={e=>updatePreviewField(i,"subGudang",e.target.value)} disabled={!canEdit}/></td>
+                    <td style={{padding:"4px 6px"}}><input style={{...cellStyle,textAlign:"right",width:80}} type="number" value={r.luasLahanM2} onChange={e=>updatePreviewField(i,"luasLahanM2",parseFloat(e.target.value)||0)} disabled={!canEdit}/></td>
+                    <td style={{padding:"4px 6px"}}><input style={{...cellStyle,textAlign:"right",width:80}} type="number" value={r.luasTerpakaiM2} onChange={e=>updatePreviewField(i,"luasTerpakaiM2",parseFloat(e.target.value)||0)} disabled={!canEdit}/></td>
+                    <td style={{padding:"5px 8px",fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{(r.persentaseTerpakai*100).toFixed(1)}%</td>
+                    <td style={{padding:"5px 8px"}}><span style={{fontSize:10,fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{r.statusKapasitas}</span></td>
+                    <td style={{padding:"5px 8px",fontSize:10,color:C.muted,maxWidth:200}}>{[...r._errors,...r._warnings].join(", ")||"-"}</td>
+                    <td style={{padding:"4px 6px"}}>{canEdit && <button style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={()=>deletePreviewRow(i)} title="Hapus baris ini">🗑️</button>}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+          {canEdit && (
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button style={sty.btn("ghost")} onClick={addPreviewRow}>➕ Tambah Gudang</button>
+              <button style={sty.btn("primary")} disabled={importPreview.valid.length===0} onClick={handleSubmitForApproval}>
+                📤 Kirim ke Asman untuk Approval ({importPreview.valid.length} record valid)
+              </button>
+            </div>
+          )}
+          {importPreview.invalid.length > 0 && (
+            <div style={{color:C.red,fontSize:11,marginTop:6}}>Baris invalid ({importPreview.invalid.length}) akan diabaikan otomatis — perbaiki dulu di tabel jika ingin ikut disertakan.</div>
+          )}
+        </div>
+      )}
+
+      {gudangCapacityImports.length > 0 && (
+        <div style={{...sty.card,marginTop:16}}>
+          <div style={{fontWeight:700,marginBottom:8}}>Riwayat Import</div>
+          {[...gudangCapacityImports].reverse().map(imp=>{
+            const statusMeta = {
+              PENDING_ASMAN:{label:"⏳ Menunggu Asman",bg:"#fefce8",fg:"#92400e"},
+              APPROVED:{label:"✅ Disetujui",bg:"#f0fdf4",fg:C.green},
+              REJECTED:{label:"❌ Ditolak",bg:"#fef2f2",fg:C.red},
+            }[imp.status] || {label:"— (legacy, langsung publish)",bg:"#f9fafb",fg:C.muted};
+            return (
+            <div key={imp.id} style={{padding:"8px 0",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontWeight:700}}>{imp.sourceFile}</div>
+                <span style={{padding:"2px 8px",borderRadius:10,fontSize:10,fontWeight:700,background:statusMeta.bg,color:statusMeta.fg}}>{statusMeta.label}</span>
+              </div>
+              <div style={{color:C.muted,fontSize:11}}>{new Date(imp.importedAt).toLocaleString("id")} — {imp.validRows} valid / {imp.invalidRows} invalid</div>
+              {imp.status==="REJECTED" && imp.rejectReason && <div style={{color:C.red,fontSize:11,marginTop:2}}>Alasan: {imp.rejectReason}</div>}
+            </div>
+          );})}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangList, lokasiList, stocks, currentUser, sty, C, setTab, setStockSubTab }) {
+  const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
 
   const canEdit = ["ADMIN","TL"].includes(currentUser.role);
 
-  // Daftar UPT unik dari data
-  const uptList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
+  // Daftar UPT unik dari data (string label, bukan Master UPT)
+  const uptLabelList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
 
   const filtered = gudangCapacityList.filter(r =>
     (filterUPT==="ALL" || r.upt===filterUPT) &&
@@ -11373,53 +12138,9 @@ function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangC
   ).map(([upt,v])=>({upt, util: v.lahan>0?v.terpakai/v.lahan:0, lahan:v.lahan, terpakai:v.terpakai}))
    .sort((a,b)=>b.util-a.util);
 
-  async function handleImportFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImporting(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf);
-      const sheetName = wb.SheetNames.find(s=>s.toUpperCase().includes("KAPASITAS GUDANG")) || wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval:"" });
-      const parsed = parseKapasitasGudangSheet(rows);
-      const valid = parsed.filter(r=>r._valid);
-      const invalid = parsed.filter(r=>!r._valid);
-      const warnings = parsed.filter(r=>r._valid && r._warnings.length>0);
-      setImportPreview({ records: parsed, valid, invalid, warnings, fileName: file.name, sheetName });
-    } catch(err) {
-      showToast("Gagal baca file: " + err.message, "error");
-    }
-    setImporting(false);
-    e.target.value = "";
-  }
-
-  async function handlePublish() {
-    if (!importPreview) return;
-    const toPublish = importPreview.valid;
-    const batchId = "CAPIMP-"+Date.now();
-    const importRecord = {
-      id: batchId, sourceFile: importPreview.fileName, sheetName: importPreview.sheetName,
-      importedBy: currentUser.id, importedAt: Date.now(),
-      totalRows: importPreview.records.length, validRows: importPreview.valid.length,
-      invalidRows: importPreview.invalid.length, warningRows: importPreview.warnings.length,
-    };
-    const newList = toPublish.map(r => ({...r, importBatchId: batchId, _errors:undefined, _warnings:undefined, _valid:undefined}));
-    const newImports = [...gudangCapacityImports, importRecord];
-    setGudangCapacityList(newList);
-    setGudangCapacityImports(newImports);
-    await saveToCloud({ gudangCapacityList: newList, gudangCapacityImports: newImports });
-    setImportPreview(null);
-    setSubTab("dashboard");
-    showToast(`Berhasil publish ${newList.length} record kapasitas gudang.`, "success");
-  }
-
   const TABS = [
     {id:"dashboard",label:"📊 Dashboard"},
     {id:"data",label:"📋 Data Kapasitas"},
-    {id:"import",label:"📥 Import & Review"},
-    {id:"mapping",label:"🔗 Mapping"},
     {id:"peta",label:"🗺️ Peta Gudang"},
   ];
 
@@ -11443,8 +12164,8 @@ function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangC
             <div style={{...sty.card,textAlign:"center",padding:40,color:C.muted}}>
               <div style={{fontSize:40,marginBottom:12}}>📐</div>
               <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Data kapasitas gudang belum tersedia</div>
-              <div style={{fontSize:13,marginBottom:20}}>Import file KAPASITAS GUDANG UIT JBM.xlsx di tab "Import & Review"</div>
-              {canEdit && <button style={sty.btn("primary")} onClick={()=>setSubTab("import")}>📥 Import Laporan Kapasitas</button>}
+              <div style={{fontSize:13,marginBottom:20}}>Import file KAPASITAS GUDANG UIT JBM.xlsx di menu Master Data → Master Gudang</div>
+              {canEdit && <button style={sty.btn("primary")} onClick={()=>{setTab("master");setStockSubTab("gudang");}}>📥 Buka Master Gudang untuk Import</button>}
             </div>
           ) : (
             <div>
@@ -11507,7 +12228,7 @@ function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangC
           <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             <select style={{...sty.select,maxWidth:180}} value={filterUPT} onChange={e=>setFilterUPT(e.target.value)}>
               <option value="ALL">Semua UPT</option>
-              {uptList.map(u=><option key={u}>{u}</option>)}
+              {uptLabelList.map(u=><option key={u}>{u}</option>)}
             </select>
             <select style={{...sty.select,maxWidth:180}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
               <option value="ALL">Semua Status</option>
@@ -11559,146 +12280,18 @@ function KapasitasGudangTab({ gudangCapacityList, setGudangCapacityList, gudangC
         </div>
       )}
 
-      {/* IMPORT & REVIEW */}
-      {subTab==="import" && (
-        <div>
-          <div style={{...sty.card,marginBottom:16}}>
-            <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>📥 Import Laporan Kapasitas Gudang (XLSX)</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Upload file KAPASITAS GUDANG UIT JBM.xlsx. Sheet yang dibaca: <strong>KAPASITAS GUDANG</strong>.</p>
-            {canEdit && (
-              <label style={{...sty.btn("primary"),cursor:"pointer"}}>
-                {importing?"⏳ Memproses...":"📂 Upload XLSX Kapasitas Gudang"}
-                <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleImportFile} disabled={importing}/>
-              </label>
-            )}
-          </div>
-
-          {importPreview && (
-            <div style={{...sty.card}}>
-              <div style={{fontWeight:700,marginBottom:10}}>Preview: {importPreview.fileName} (Sheet: {importPreview.sheetName})</div>
-              <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
-                {[
-                  {label:"Total",val:importPreview.records.length,color:C.accent},
-                  {label:"Valid",val:importPreview.valid.length,color:C.green},
-                  {label:"Warning",val:importPreview.warnings.length,color:"#f59e0b"},
-                  {label:"Invalid",val:importPreview.invalid.length,color:C.red},
-                ].map(s=>(
-                  <div key={s.label} style={{padding:"8px 14px",borderRadius:8,background:"#f9fafb",border:`1px solid ${C.border}`,textAlign:"center"}}>
-                    <div style={{fontSize:11,color:C.muted}}>{s.label}</div>
-                    <div style={{fontSize:18,fontWeight:800,color:s.color}}>{s.val}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto",marginBottom:14}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:900}}>
-                  <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
-                    <tr>
-                      {["UPT","Gudang","Sub Gudang","Luas Lahan","Terpakai","Utilization","Status","Warning"].map(h=>(
-                        <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importPreview.records.map((r,i)=>(
-                      <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:!r._valid?"#fef2f2":r._warnings.length>0?"#fefce8":"white"}}>
-                        <td style={{padding:"5px 8px"}}>{r.upt}</td>
-                        <td style={{padding:"5px 8px"}}>{r.gudang}</td>
-                        <td style={{padding:"5px 8px",fontWeight:600}}>{r.subGudang}</td>
-                        <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtNum(Math.round(r.luasLahanM2))}</td>
-                        <td style={{padding:"5px 8px",textAlign:"right"}}>{fmtNum(Math.round(r.luasTerpakaiM2))}</td>
-                        <td style={{padding:"5px 8px",fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{(r.persentaseTerpakai*100).toFixed(1)}%</td>
-                        <td style={{padding:"5px 8px"}}><span style={{fontSize:10,fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{r.statusKapasitas}</span></td>
-                        <td style={{padding:"5px 8px",fontSize:10,color:C.muted,maxWidth:200}}>{[...r._errors,...r._warnings].join(", ")||"-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {canEdit && importPreview.invalid.length === 0 && (
-                <button style={sty.btn("primary")} onClick={handlePublish}>✅ Publish Baseline ({importPreview.valid.length} record)</button>
-              )}
-              {importPreview.invalid.length > 0 && (
-                <div style={{color:C.red,fontWeight:700,fontSize:13}}>⚠️ Ada {importPreview.invalid.length} baris invalid — perbaiki file terlebih dahulu. Warning (baris kuning) tidak memblokir publish.</div>
-              )}
-            </div>
-          )}
-
-          {gudangCapacityImports.length > 0 && (
-            <div style={{...sty.card,marginTop:16}}>
-              <div style={{fontWeight:700,marginBottom:8}}>Riwayat Import</div>
-              {[...gudangCapacityImports].reverse().map(imp=>(
-                <div key={imp.id} style={{padding:"8px 0",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
-                  <div style={{fontWeight:700}}>{imp.sourceFile}</div>
-                  <div style={{color:C.muted,fontSize:11}}>{new Date(imp.importedAt).toLocaleString("id")} — {imp.validRows} valid / {imp.invalidRows} invalid</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* MAPPING */}
-      {subTab==="mapping" && (
-        <div style={{...sty.card}}>
-          <div style={{fontWeight:700,marginBottom:10}}>🔗 Mapping ke Master Gudang WARNOTO</div>
-          {gudangCapacityList.filter(r=>r.mappingStatus!=="CONFIRMED").length === 0 ? (
-            <div style={{color:C.muted,fontSize:13}}>Semua record sudah di-mapping atau belum ada data.</div>
-          ) : (
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead style={{background:"#f9fafb"}}>
-                  <tr>
-                    {["UPT","Gudang (Laporan)","Sub Gudang","Map ke Gudang WARNOTO","Status","Aksi"].map(h=>(
-                      <th key={h} style={{padding:"7px 8px",textAlign:"left",borderBottom:`1px solid ${C.border}`}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {gudangCapacityList.filter(r=>r.mappingStatus!=="CONFIRMED").map((r,i)=>(
-                    <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
-                      <td style={{padding:"6px 8px"}}>{r.upt}</td>
-                      <td style={{padding:"6px 8px"}}>{r.gudang}</td>
-                      <td style={{padding:"6px 8px",fontWeight:600}}>{r.subGudang}</td>
-                      <td style={{padding:"6px 8px"}}>
-                        <select style={{...sty.select,fontSize:11,padding:"4px 8px"}} value={r.matchedGudangId||""} onChange={async e=>{
-                          const newList = gudangCapacityList.map(x=>x.id===r.id?{...x,matchedGudangId:e.target.value||null,mappingStatus:e.target.value?"AUTO_SUGGESTED":"UNMATCHED"}:x);
-                          setGudangCapacityList(newList);
-                          await saveToCloud({gudangCapacityList:newList});
-                        }}>
-                          <option value="">-- Pilih Gudang --</option>
-                          {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
-                        </select>
-                      </td>
-                      <td style={{padding:"6px 8px"}}>
-                        <span style={{fontSize:10,fontWeight:700,color:r.mappingStatus==="CONFIRMED"?C.green:r.mappingStatus==="AUTO_SUGGESTED"?"#f59e0b":C.muted}}>{r.mappingStatus}</span>
-                      </td>
-                      <td style={{padding:"6px 8px"}}>
-                        {r.matchedGudangId && r.mappingStatus!=="CONFIRMED" && canEdit && (
-                          <button style={sty.btn("primary","sm")} onClick={async()=>{
-                            const newList = gudangCapacityList.map(x=>x.id===r.id?{...x,mappingStatus:"CONFIRMED"}:x);
-                            setGudangCapacityList(newList);
-                            await saveToCloud({gudangCapacityList:newList});
-                          }}>✅ Konfirmasi</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Detail modal */}
       {/* SUB-TAB PETA GUDANG */}
       {subTab==="peta" && (
         <PetaGudangTab
           gudangList={gudangList}
+          subGudangList={subGudangList}
           lokasiList={lokasiList}
           stocks={stocks||[]}
           sty={sty} C={C}
           currentUser={currentUser}
+          gudangCapacityList={gudangCapacityList}
         />
       )}
 
@@ -12535,11 +13128,16 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   );
 }
 
-function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8 }) {
+function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Form, setTug7Form] = useState({});
   const [tug7Modal, setTug7Modal] = useState(null);
+  const [rejectingCapId, setRejectingCapId] = useState(null);
+  const [capReason, setCapReason] = useState("");
+  const canApproveCap = ["TL","ASMAN"].includes(currentUser.role);
+  const pendingCapacityImports = (gudangCapacityImports||[]).filter(i=>i.status==="PENDING_ASMAN");
+  const pendingLokasiChanges = currentUser.role==="TL" ? (lokasiList||[]).filter(l=>l.status==="PENDING") : [];
 
   function stageLabelOf(t) {
     if (t.docType==="TUG5") return t.stage==="PENDING_ASMAN"?"Menunggu Asman":"Menunggu Manager";
@@ -12592,9 +13190,10 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
     <div>
       <div style={{marginBottom:16}}>
         <h1 style={{fontSize:22,fontWeight:900}}>Approval</h1>
-        <p style={{color:C.muted,fontSize:13}}>{pendingTxns.length} item menunggu persetujuan atau tindakan kamu ({ROLES[currentUser.role]})</p>
+        <p style={{color:C.muted,fontSize:13}}>{pendingTxns.length + pendingCapacityImports.length + pendingLokasiChanges.length} item menunggu persetujuan atau tindakan kamu ({ROLES[currentUser.role]})</p>
       </div>
-      {pendingTxns.length===0 ? (
+
+      {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 ? (
         <div style={{...sty.card,textAlign:"center",padding:40}}>
           <div style={{fontSize:48,marginBottom:12}}>✅</div>
           <div style={{fontSize:16,fontWeight:700}}>Semua sudah diproses</div>
@@ -12675,6 +13274,78 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
                   ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG7_MgrLogistik(t)}>✅ SETUJUI TUG-7 → Generate Draft TUG-8</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
               )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Approval Import Kapasitas Gudang — TL/Asman saja */}
+      {canApproveCap && pendingCapacityImports.map(imp=>(
+        <div key={imp.id} style={{...sty.card,marginBottom:12,borderLeft:"4px solid #f59e0b"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:11,color:"#92400e",fontWeight:800,textTransform:"uppercase"}}>Kapasitas Gudang — Menunggu Approval</div>
+              <div style={{fontWeight:800,fontSize:13,marginTop:2}}>{imp.sourceFile}</div>
+              <div style={{fontSize:11,color:C.muted}}>Diajukan {new Date(imp.importedAt).toLocaleString("id")} oleh {imp.importedBy}</div>
+            </div>
+            <span style={{padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,background:"#fefce8",color:"#92400e"}}>⏳ Pending</span>
+          </div>
+          <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10}}>
+            <span>Total: <b>{imp.totalRows}</b></span>
+            <span style={{color:C.green}}>Valid: <b>{imp.validRows}</b></span>
+            <span style={{color:C.red}}>Invalid: <b>{imp.invalidRows}</b></span>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:200,overflowY:"auto",marginBottom:10,border:`1px solid ${C.border}`,borderRadius:8}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
+                <tr>{["UPT","Gudang","Sub Gudang","Luas Lahan","Terpakai","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {imp.records.slice(0,50).map((r,i)=>(
+                  <tr key={i} style={{borderTop:`1px solid ${C.border}`}}>
+                    <td style={{padding:"4px 8px"}}>{r.upt}</td>
+                    <td style={{padding:"4px 8px"}}>{r.gudang}</td>
+                    <td style={{padding:"4px 8px"}}>{r.subGudang}</td>
+                    <td style={{padding:"4px 8px",textAlign:"right"}}>{fmtNum(Math.round(r.luasLahanM2))}</td>
+                    <td style={{padding:"4px 8px",textAlign:"right"}}>{fmtNum(Math.round(r.luasTerpakaiM2))}</td>
+                    <td style={{padding:"4px 8px",fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{r.statusKapasitas}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {imp.records.length>50 && <div style={{fontSize:10,color:C.muted,padding:6,textAlign:"center"}}>+{imp.records.length-50} baris lainnya</div>}
+          </div>
+          {rejectingCapId===imp.id ? (
+            <div style={{display:"flex",gap:8}}>
+              <input style={{...sty.input,flex:1}} placeholder="Alasan penolakan..." value={capReason} onChange={e=>setCapReason(e.target.value)}/>
+              <button style={sty.btn("danger","sm")} onClick={()=>{rejectCapacityImport(imp.id, capReason); setRejectingCapId(null); setCapReason("");}}>Kirim Penolakan</button>
+              <button style={sty.btn("ghost","sm")} onClick={()=>{setRejectingCapId(null);setCapReason("");}}>Batal</button>
+            </div>
+          ) : (
+            <div style={{display:"flex",gap:8}}>
+              <button style={sty.btn("success","sm")} onClick={()=>approveCapacityImport(imp.id)}>✅ Setujui & Publish</button>
+              <button style={sty.btn("danger","sm")} onClick={()=>setRejectingCapId(imp.id)}>❌ Tolak</button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Approval Perubahan Lokasi/Blok — TL saja */}
+      {pendingLokasiChanges.map(l=>{
+        const pemohon = users.find(u=>u.id===l.requestedBy);
+        const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[l.pendingAction]||l.pendingAction;
+        return (
+          <div key={l.id} style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.yellow}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:"#92400e",fontWeight:800,textTransform:"uppercase"}}>Perubahan Lokasi/Blok</div>
+                <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{aksiLabel}: {l.pendingAction==="EDIT"?l.pendingData?.kode:l.kode}</div>
+                <div style={{fontSize:11,color:C.muted}}>Diajukan oleh {pemohon?.name||"?"} • {fmtDate(l.requestedAt)}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button style={sty.btn("primary","sm")} onClick={()=>approveLokasiChange(l.id)}>✓ Setuju</button>
+                <button style={sty.btn("danger","sm")} onClick={()=>rejectLokasiChange(l.id)}>✕ Tolak</button>
+              </div>
             </div>
           </div>
         );
