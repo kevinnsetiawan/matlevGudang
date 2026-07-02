@@ -2,7 +2,10 @@
 // (jaminan cadangan tanpa perlu browser Admin terbuka sama sekali).
 //
 // Cakupan (dibatasi oleh data apa yang benar-benar ada di Supabase, tanpa browser):
-//   - Master Katalog + stocks_snapshot (qty/harga) -> chunk RAG "katalog" (dengan angka Rupiah)
+//   - stocks_snapshot (qty/harga/lokasi/kode katalog SAP) -> chunk RAG "katalog" (nama, qty,
+//     harga Rupiah, status SAP/Non-SAP, lokasi fisik gudang+blok). PENTING: tabel `katalog`
+//     terpisah di Supabase TIDAK PERNAH disinkron App.jsx (orphan/basi) -- stocks_snapshot
+//     dipakai sebagai satu-satunya sumber, sengaja TIDAK join ke tabel `katalog`.
 //   - ai_faq_curated (jawaban resmi hasil kurasi Admin) -> chunk RAG "faq"
 //   - tug15_history 6 bulan terakhir -> chunk RAG ringkas "mutasi" (bukan detail TUG penuh
 //     seperti nama pekerjaan/lokasi -- itu cuma ada di state browser, lihat catatan di README)
@@ -44,37 +47,48 @@ async function cohereEmbed(texts, inputType) {
   return data.embeddings;
 }
 
+// Replika persis getSAPLabel() di App.jsx -- deterministik dari kode katalog SAP,
+// aman diduplikasi di sini (bukan di-import, karena App.jsx bukan modul Node biasa).
+function getSAPLabel(kodeKatalog) {
+  if (!kodeKatalog || kodeKatalog.trim() === "") return "Non-SAP";
+  const k = kodeKatalog.trim();
+  if (/^\d{10}$/.test(k)) return "SAP — Cadang";
+  if (/^\d{7,8}$/.test(k)) return "SAP — Persediaan";
+  return "Non-SAP";
+}
+
 async function main() {
   console.log("=== WARNOTO nightly_sync mulai ===", new Date().toISOString());
 
-  const [{ data: katalogList, error: eKat }, { data: stocks, error: eStock }, { data: faqRows, error: eFaq }, { data: mutasi, error: eMut }] = await Promise.all([
-    supabase.from("katalog").select("*"),
+  const [{ data: stocks, error: eStock }, { data: faqRows, error: eFaq }, { data: mutasi, error: eMut }] = await Promise.all([
     supabase.from("stocks_snapshot").select("*"),
     supabase.from("ai_faq_curated").select("*").eq("is_active", true),
     supabase.from("tug15_history").select("*").gte("tanggal", new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).limit(500),
   ]);
-  if (eKat) throw eKat;
   if (eStock) throw eStock;
   if (eFaq) throw eFaq;
   if (eMut) throw eMut;
 
-  const stockByKatalog = {};
+  // Group per katalog_id (bisa ada beberapa baris stocks_snapshot untuk katalog yang sama,
+  // 1 per lokasi/blok) -- stocks_snapshot sendiri sudah cukup lengkap (nama/satuan/jenis/
+  // kode katalog SAP/lokasi), tidak perlu join ke tabel `katalog` yang basi.
+  const grouped = {};
   (stocks || []).forEach((s) => {
-    if (!s.katalog_id) return;
-    if (!stockByKatalog[s.katalog_id]) stockByKatalog[s.katalog_id] = { qty: 0, harga: s.harga || 0 };
-    stockByKatalog[s.katalog_id].qty += s.qty || 0;
+    const key = s.katalog_id || s.id;
+    if (!grouped[key]) grouped[key] = { nama: s.nama, satuan: s.satuan, jenisBarang: s.jenis_barang, kodeKatalog: s.kode_katalog, harga: s.harga || 0, minQty: s.min_qty || 0, qty: 0, locations: [] };
+    grouped[key].qty += s.qty || 0;
+    if (s.qty > 0) grouped[key].locations.push({ gudang: s.gudang_nama || "Gudang tidak diketahui", blok: s.lokasi_kode || "-", qty: s.qty });
   });
 
-  const katalogChunks = (katalogList || []).map((k) => {
-    const si = stockByKatalog[k.id];
-    const angka = si
-      ? ` Qty saat ini: ${fmtNum(si.qty)} ${k.satuan || "-"}. Harga satuan: Rp ${fmtNum(si.harga)}. Nilai total: Rp ${fmtNum(si.qty * si.harga)}.`
-      : " Belum ada data stok untuk material ini.";
+  const katalogChunks = Object.entries(grouped).map(([katalogId, d]) => {
+    const sap = getSAPLabel(d.kodeKatalog);
+    const angka = ` Qty saat ini: ${fmtNum(d.qty)} ${d.satuan || "-"}. Harga satuan: Rp ${fmtNum(d.harga)}. Nilai total: Rp ${fmtNum(d.qty * d.harga)}.`;
+    const lokasiText = d.locations.length === 0 ? " Lokasi: belum diisi." : ` Lokasi fisik: ${d.locations.map((l) => `${fmtNum(l.qty)} ${d.satuan || ""} di ${l.gudang} blok ${l.blok}`).join("; ")}.`;
     return {
-      id: `katalog_${k.id}`,
+      id: `katalog_${katalogId}`,
       source_type: "katalog",
-      source_id: k.id,
-      content: `Material: ${k.nama}. Nomor Katalog: ${k.id}. Kategori: ${k.kategori || "-"}. Jenis Barang: ${k.jenis_barang || "-"}. Satuan: ${k.satuan || "-"}.${angka}`,
+      source_id: katalogId,
+      content: `Material: ${d.nama}. Nomor Katalog: ${d.kodeKatalog || "-"}. Jenis Barang: ${d.jenisBarang || "-"}. Satuan: ${d.satuan || "-"}. Status: ${sap}.${angka}${lokasiText}`,
     };
   });
 
@@ -95,12 +109,12 @@ async function main() {
     mutasiByKatalog[m.katalog_id].count += 1;
   });
   const mutasiChunks = Object.entries(mutasiByKatalog).map(([katalogId, d]) => {
-    const kat = (katalogList || []).find((k) => k.id === katalogId);
+    const nama = grouped[katalogId]?.nama || katalogId;
     return {
       id: `mutasi_${katalogId}`,
       source_type: "mutasi",
       source_id: katalogId,
-      content: `Ringkasan mutasi 6 bulan terakhir untuk ${kat?.nama || katalogId}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
+      content: `Ringkasan mutasi 6 bulan terakhir untuk ${nama}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
     };
   });
 
@@ -137,8 +151,8 @@ async function main() {
     generatedBy: "nightly_sync.mjs (cron)",
     totalItem: enriched.length,
     totalNilaiRp: Math.round(enriched.reduce((a, s) => a + s.nilai, 0)),
-    top20ByValue: top20.map((s) => ({ nama: s.nama, katalog: s.katalog_id, qty: s.qty, satuan: s.satuan, hargaSatuan: s.harga, nilaiRp: Math.round(s.nilai) })),
-    materialKritis: kritis.map((s) => ({ nama: s.nama, katalog: s.katalog_id, qty: s.qty, satuan: s.satuan, minQty: s.min_qty })),
+    top20ByValue: top20.map((s) => ({ nama: s.nama, katalog: s.kode_katalog, qty: s.qty, satuan: s.satuan, hargaSatuan: s.harga, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.kode_katalog), gudang: s.gudang_nama, blok: s.lokasi_kode })),
+    materialKritis: kritis.map((s) => ({ nama: s.nama, katalog: s.kode_katalog, qty: s.qty, satuan: s.satuan, minQty: s.min_qty, gudang: s.gudang_nama, blok: s.lokasi_kode })),
   };
   await supabase.from("warnoto_state").insert({ state_data, version: "v1-nightly" });
 

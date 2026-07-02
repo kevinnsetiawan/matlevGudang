@@ -593,8 +593,17 @@ create table if not exists stocks_snapshot (
   harga numeric not null default 0,
   jenis_barang text,
   min_qty numeric default 0,
+  lokasi_kode text,                 -- kode blok, cth "GD-A1" — supaya bot bisa jawab "di blok mana"
+  gudang_nama text,                 -- nama Gudang induk blok tsb, cth "Gudang Ketintang"
+  kode_katalog text,                -- nomor katalog SAP (BEDA dari katalog_id/PK) — dipakai
+                                     -- klasifikasi SAP/Non-SAP di nightly_sync.mjs. Tabel
+                                     -- `katalog` terpisah TIDAK pernah disinkron App.jsx (orphan),
+                                     -- jadi stocks_snapshot ini sumber tunggal yang selalu segar.
   updated_at timestamptz default now()
 );
+alter table stocks_snapshot add column if not exists lokasi_kode text;
+alter table stocks_snapshot add column if not exists gudang_nama text;
+alter table stocks_snapshot add column if not exists kode_katalog text;
 create index if not exists idx_stocks_snapshot_katalog on stocks_snapshot(katalog_id);
 alter table stocks_snapshot enable row level security;
 drop policy if exists "Authenticated read stocks_snapshot" on stocks_snapshot;

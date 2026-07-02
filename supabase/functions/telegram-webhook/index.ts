@@ -251,7 +251,7 @@ async function generateReply(question: string): Promise<{ text: string; chunksUs
 Jawab singkat dan jelas. Format Markdown Telegram sederhana (bold pakai *teks*), hindari tabel panjang.
 Gunakan Bahasa Indonesia profesional namun mudah dipahami.
 Kapasitas jawaban: maksimal 600 kata.
-Kalau ditanya jumlah/qty/harga/nilai material, cari dulu di "DATA KONDISI GUDANG" (bagian top20ByValue/materialKritis) sebelum bilang tidak ada datanya — itu sumber angka real-time (qty, satuan, harga satuan, nilai Rupiah).
+Kalau ditanya jumlah/qty/harga/nilai material, cari dulu di "DATA KONDISI GUDANG" (bagian top20ByValue/materialKritis) sebelum bilang tidak ada datanya — itu sumber angka real-time (qty, satuan, harga satuan, nilai Rupiah). Kalau ditanya lokasi/di gudang mana/di blok mana suatu material, atau status SAP/Non-SAP-nya, cari juga di KONTEKS KNOWLEDGE BASE (chunk katalog membawa field "Lokasi fisik" dan "Status") — bukan cuma di DATA KONDISI GUDANG.
 
 KONTEKS KNOWLEDGE BASE (Master Katalog + riwayat TUG):
 ${ragContext}

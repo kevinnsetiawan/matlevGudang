@@ -52,12 +52,18 @@ async function cohereEmbed(texts, inputType) {
   return data.embeddings; // array of vectors, sejajar urutan dengan `texts`
 }
 // Teks deskriptif 1 katalog — dipakai sebagai 1 "chunk" RAG.
-// stockInfo (opsional): {qty, price} hasil agregasi enrichedStocks per katalogId — supaya
-// chunk RAG ikut bawa angka real-time (qty/harga/nilai Rupiah), bukan cuma teks deskriptif.
-// Tanpa ini bot WA/Telegram cuma bisa jawab nama/satuan untuk material di luar top-20/kritis.
+// stockInfo (opsional): {qty, price, locations:[{gudang,blok,qty}]} hasil agregasi
+// enrichedStocks per katalogId — supaya chunk RAG ikut bawa angka real-time (qty/harga/
+// nilai Rupiah) + lokasi presisi (gudang & blok mana), bukan cuma teks deskriptif.
+// Tanpa ini bot WA/Telegram cuma bisa jawab nama/satuan untuk material di luar top-20/kritis,
+// dan tidak tahu sama sekali material itu fisiknya ada di gudang/blok mana.
 function buildKatalogRagContent(k, stockInfo) {
-  const angka = stockInfo ? ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan||"-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty*stockInfo.price))}.` : " Belum ada data stok untuk material ini.";
-  return `Material: ${k.name}. Nomor Katalog: ${k.katalog||"-"}. Kategori: ${k.category||"-"}. Jenis Barang: ${k.jenisBarang||"-"}. Satuan: ${k.satuan||"-"}. Keterangan: ${k.keterangan||"-"}.${angka}`;
+  const sap = getSAPLabel(k.katalog);
+  if (!stockInfo) return `Material: ${k.name}. Nomor Katalog: ${k.katalog||"-"}. Kategori: ${k.category||"-"}. Jenis Barang: ${k.jenisBarang||"-"}. Satuan: ${k.satuan||"-"}. Keterangan: ${k.keterangan||"-"}. Status: ${sap}. Belum ada data stok untuk material ini.`;
+  const angka = ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan||"-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty*stockInfo.price))}.`;
+  const lokasiText = (stockInfo.locations||[]).length===0 ? " Lokasi: belum diisi." :
+    ` Lokasi fisik: ${stockInfo.locations.map(l=>`${fmtNum(l.qty)} ${k.satuan||""} di ${l.gudang||"Gudang tidak diketahui"} blok ${l.blok||"-"}`).join("; ")}.`;
+  return `Material: ${k.name}. Nomor Katalog: ${k.katalog||"-"}. Kategori: ${k.category||"-"}. Jenis Barang: ${k.jenisBarang||"-"}. Satuan: ${k.satuan||"-"}. Keterangan: ${k.keterangan||"-"}. Status: ${sap}.${angka}${lokasiText}`;
 }
 // Ringkasan 1 transaksi TUG (approved) — dipakai sebagai 1 "chunk" RAG.
 function buildTxnRagContent(t) {
@@ -4575,8 +4581,13 @@ export default function PLNWarehouse() {
       const stockByKatalog = {};
       enrichedStocks.forEach(s=>{
         if (!s.katalogId) return;
-        if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty:0, price:s.price||0 };
+        if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty:0, price:s.price||0, locations:[] };
         stockByKatalog[s.katalogId].qty += s.qty||0;
+        if (s.qty>0) {
+          const lok = lokasiList.find(l=>l.id===s.lokasiId);
+          const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
+          stockByKatalog[s.katalogId].locations.push({ gudang: gdg?.nama||"", blok: lok?.kode||s.lokasi||"", qty: s.qty||0 });
+        }
       });
       // "Buku pintar" hasil kurasi Admin dari pertanyaan nyata yang dijawab buruk oleh bot —
       // diprioritaskan tinggi karena isinya jawaban resmi untuk pertanyaan yang benar-benar
@@ -4620,6 +4631,9 @@ export default function PLNWarehouse() {
   // Dipicu manual bareng "Sync Knowledge Base (RAG)" — sama seperti RAG, sengaja tidak
   // otomatis tiap perubahan data supaya tidak boros write ke Supabase.
   function buildWarnotoStateSnapshot() {
+    const gudangNamaByLokasiId = {};
+    lokasiList.forEach(l=>{ gudangNamaByLokasiId[l.id] = gudangList.find(g=>g.id===l.gudangId)?.nama || ""; });
+    const withLokasi = s => ({ gudang: gudangNamaByLokasiId[s.lokasiId]||"", blok: s.lokasi||"-" });
     const top20 = [...enrichedStocks].sort((a,b)=>(b.qty*b.price)-(a.qty*a.price)).slice(0,20);
     const kritis = enrichedStocks.filter(s=>s.minQty>0&&s.qty<=s.minQty);
     const pending = txns.filter(t=>t.status==="PENDING");
@@ -4646,8 +4660,8 @@ export default function PLNWarehouse() {
       generatedAt: new Date().toISOString(),
       totalItem: enrichedStocks.length,
       totalNilaiRp: Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)),
-      top20ByValue: top20.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, hargaSatuan:s.price, nilaiRp: Math.round(s.qty*s.price) })),
-      materialKritis: kritis.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, minQty:s.minQty })),
+      top20ByValue: top20.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, hargaSatuan:s.price, nilaiRp: Math.round(s.qty*s.price), status:getSAPLabel(s.katalog), ...withLokasi(s) })),
+      materialKritis: kritis.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, minQty:s.minQty, ...withLokasi(s) })),
       pemakaian3BulanTop10: topPakai,
       tugPendingApproval: pending.map(t=>({ docType:t.docType, id:t.id, namaPekerjaan:t.namaPekerjaan, requiredApprover:t.requiredApprover, createdAt:t.createdAt })),
       rencanaKedatangan30Hari: rencana30.map(i=>({ namaBarang:i.namaBarang, jumlah:i.jumlah, satuan:i.satuan, supplier:i.supplier, noKontrak:i.noKontrak, tanggalSerahTerima:i.tanggalSerahTerima })),
@@ -4674,12 +4688,18 @@ export default function PLNWarehouse() {
   async function syncStocksSnapshot(silent = false) {
     if (!supabase) return;
     try {
-      const rows = enrichedStocks.map(s => ({
-        id: s.id, katalog_id: s.katalogId || null, nama: s.name,
-        qty: s.qty || 0, satuan: s.unit || "", harga: s.price || 0,
-        jenis_barang: s.jenisBarang || "", min_qty: s.minQty || 0,
-        updated_at: new Date().toISOString(),
-      }));
+      const rows = enrichedStocks.map(s => {
+        const lok = lokasiList.find(l=>l.id===s.lokasiId);
+        const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
+        return {
+          id: s.id, katalog_id: s.katalogId || null, nama: s.name,
+          qty: s.qty || 0, satuan: s.unit || "", harga: s.price || 0,
+          jenis_barang: s.jenisBarang || "", min_qty: s.minQty || 0,
+          lokasi_kode: lok?.kode || s.lokasi || null, gudang_nama: gdg?.nama || null,
+          kode_katalog: s.katalog || null,
+          updated_at: new Date().toISOString(),
+        };
+      });
       if (rows.length > 0) {
         const { error } = await supabase.from("stocks_snapshot").upsert(rows, { onConflict: "id" });
         if (error) throw error;
