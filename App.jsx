@@ -66,7 +66,8 @@ const STATUS_MATERIAL_RETUR = ["Material Sisa Baru", "Bongkaran", "Bongkaran ATT
 // Maps a return status to the resulting Jenis Barang in Data Stok (null = leave as user's manual choice)
 const STATUS_RETUR_TO_JENIS = { "Bongkaran": "Bongkaran", "Bongkaran ATTB (MTU)": "ATTB" };
 const CATEGORIES = ["Transformator", "Kabel", "Panel", "Meter", "Tools", "Safety", "Consumable", "Spare Part", "Struktur", "Isolator", "Lainnya"];
-const ROLES = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", PENGADAAN: "Tim Pengadaan", VIEWER: "Viewer" };
+const ROLES = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", PENGADAAN: "Tim Pengadaan", VIEWER: "Viewer", ADMIN_ULTG: "Admin ULTG", MGR_ULTG: "Manager ULTG" };
+const ULTG_ROLES = ["ADMIN_ULTG","MGR_ULTG"]; // role dengan sidebar terbatas (view-only + TUG-5 saja)
 const ROMAN = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
 // Who can create TUG-9 transactions
 const CAN_CREATE = ["ADMIN", "TL"];
@@ -1548,8 +1549,12 @@ function downloadTUG10HTML(txn, katalogList, lokasiList, users, showToast) {
 // Combines all 3 stages into one printable document: TUG-3 Karantina (page 1),
 // TUG-4 Berita Acara Pemeriksaan (page 2), and Lampiran Foto Final (page 3+).
 // ─── TUG-5 DOCUMENT BUILDER ─────────────────────────────────────────────
-function buildTUG5HTML(txn, katalogList, uitList, users) {
+function buildTUG5HTML(txn, katalogList, uitList, users, ultgList) {
   const docs = txn.docNumbers;
+  const isUltg = txn.sourceType === "ULTG";
+
+  if (isUltg) return buildTUG5ULTGHTML(txn, katalogList, users, ultgList);
+
   const managerUser = users.find(u=>u.role==="MANAGER")||{};
   const asmanUser = users.find(u=>u.role==="ASMAN")||{};
   const uit = (uitList||[]).find(u=>u.id===txn.uitId)||{};
@@ -1623,6 +1628,65 @@ function buildTUG5HTML(txn, katalogList, uitList, users) {
 </div></body></html>`;
 }
 
+// ─── TUG-5 (ULTG) DOCUMENT BUILDER — 1 penandatangan (Manager ULTG), tanda tangan
+// digital otomatis terisi nama+waktu approve (bukan gambar, konsisten dengan
+// seluruh dokumen TUG lain di app yang juga pakai nama teks, bukan gambar ttd).
+function buildTUG5ULTGHTML(txn, katalogList, users, ultgList) {
+  const docs = txn.docNumbers;
+  const ultg = (ultgList||[]).find(u=>u.id===txn.ultgId)||{};
+  const mgrUltgUser = users.find(u=>u.id===txn.approvedByMgrUltg) || users.find(u=>u.role==="MGR_ULTG" && u.ultgId===txn.ultgId) || {};
+  const isApproved = !!txn.approvedByMgrUltg;
+  const tanggalApprove = txn.approvedAtMgrUltg ? fmtDate(txn.approvedAtMgrUltg) : "";
+
+  const itemRows = (txn.stockItems||[]).map((si)=>{
+    const kat = (katalogList||[]).find(k=>k.id===si.katalogId)||{};
+    return `<tr>
+      <td>${kat.name||"-"}</td>
+      <td style="text-align:center">${kat.katalog||"-"}</td>
+      <td style="text-align:center">${kat.satuan||"-"}</td>
+      <td style="text-align:center">${fmtNum(si.sisaPersediaan||0)}</td>
+      <td style="text-align:center">${fmtNum(si.permintaan||0)}</td>
+      <td>${si.keterangan||""}</td>
+    </tr>`;
+  }).join("");
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TUG-5 ULTG ${txn.id}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px;color:#111;background:#e5e7eb}.page{padding:24px;background:white;max-width:1000px;margin:0 auto 16px;min-height:100vh}.topbar{height:5px;background:linear-gradient(90deg,#00377a,#0098da);margin-bottom:4px}.doctitle{text-align:center;margin-bottom:10px}.doctitle h2{font-size:13px;font-weight:800;text-decoration:underline}.doctitle .docno{font-size:10px;font-style:italic;color:#0098da}table.meta{width:100%;margin-bottom:10px}table.meta td{padding:3px 4px;font-size:10px}table.meta td.label{width:110px}table.meta td.colon{width:8px}table.items{width:100%;border-collapse:collapse;margin-bottom:10px}table.items th{background:#003087;color:white;padding:6px 6px;font-size:9.5px;text-align:center;border:1px solid #ccc}table.items td{padding:6px 6px;border:1px solid #ccc;font-size:10px}.sig-row{display:flex;justify-content:center;margin-top:24px;text-align:center}.sig-col{width:280px;font-size:10px}.sig-space{height:40px;display:flex;align-items:center;justify-content:center}.sig-name{font-weight:700;text-decoration:underline;margin-top:2px}.digital-stamp{border:2px solid #16a34a;color:#16a34a;border-radius:6px;padding:6px 10px;font-size:9px;font-weight:700;display:inline-block;transform:rotate(-4deg)}.print-bar{position:sticky;top:0;background:#003087;color:white;padding:8px 14px;text-align:center;font-size:12px;font-weight:700;z-index:10}.print-bar button{background:#16a34a;color:white;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer;margin-left:10px}@media print{.print-bar{display:none}body{background:white}}</style></head><body>
+<div class="print-bar">📄 TUG-5 ULTG siap cetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
+<div class="page">
+<div class="topbar"></div>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+  <div><b>PT PLN (PERSERO)</b><br/>${ultg.nama||"ULTG"}</div>
+  <div style="font-weight:800;font-size:14px">TUG - 5</div>
+</div>
+<div class="doctitle"><h2>DAFTAR PERMINTAAN BARANG - BARANG (ULTG)</h2><div class="docno">${docs?.tug5||txn.id}</div></div>
+<table class="meta" style="border:1px solid #ccc;padding:6px;border-radius:4px;margin-bottom:10px">
+  <tr><td class="label">Diajukan oleh</td><td class="colon">:</td><td>${ultg.nama||"-"} (${ultg.kode||"-"})</td></tr>
+  <tr><td class="label">Nama Pekerjaan</td><td class="colon">:</td><td>${txn.namaPekerjaan||"-"}</td></tr>
+  <tr><td class="label">Lokasi Pekerjaan</td><td class="colon">:</td><td>${txn.lokasiPekerjaan||"-"}</td></tr>
+</table>
+<table class="items">
+  <thead><tr>
+    <th style="width:26%">Nama Barang</th>
+    <th>Nomor Normalisasi</th>
+    <th>Satuan</th>
+    <th>Sisa Persediaan<br/>(Stok Aktual UPT)</th>
+    <th>Jumlah Permintaan</th>
+    <th>Keterangan</th>
+  </tr></thead>
+  <tbody>${itemRows}</tbody>
+</table>
+<div style="text-align:right;font-size:10px;margin-bottom:14px">${tanggalApprove||fmtDate(txn.createdAt)}</div>
+<div class="sig-row">
+  <div class="sig-col">
+    <b>MANAGER ULTG${ultg.nama?" — "+ultg.nama.toUpperCase().replace(/^ULTG\s+/,""):""}</b>
+    <div class="sig-space">${isApproved?`<div class="digital-stamp">✓ DISETUJUI SECARA DIGITAL<br/>${tanggalApprove}</div>`:""}</div>
+    <div class="sig-name">${mgrUltgUser.name||"....................."}</div>
+  </div>
+</div>
+</div></body></html>`;
+}
+
 // ─── TUG-7 DOCUMENT BUILDER ─────────────────────────────────────────────
 function buildTUG7HTML(txn, katalogList, uitList, uptList, users) {
   const docs = txn.docNumbers;
@@ -1684,8 +1748,8 @@ function buildTUG7HTML(txn, katalogList, uitList, uptList, users) {
 </div></body></html>`;
 }
 
-function downloadTUG5HTML(txn, katalogList, uitList, users, showToast) {
-  const html = buildTUG5HTML(txn, katalogList, uitList, users);
+function downloadTUG5HTML(txn, katalogList, uitList, users, showToast, ultgList) {
+  const html = buildTUG5HTML(txn, katalogList, uitList, users, ultgList);
   const blob = new Blob([html], {type:"text/html"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1988,6 +2052,7 @@ export default function PLNWarehouse() {
   const [timMutuList, setTimMutuList] = useState([]);
   const [uitList, setUitList] = useState([]);
   const [uptList, setUptList] = useState([]);
+  const [ultgList, setUltgList] = useState([]); // Unit di bawah UPT (mis. ULTG Surabaya Utara/Selatan)
   const [gudangList, setGudangList] = useState([]);
   const [subGudangList, setSubGudangList] = useState([]); // level di antara Gudang dan Blok Lokasi
   const [importGudangOpen, setImportGudangOpen] = useState(false); // toggle panel Import & Review di Master Gudang
@@ -2026,6 +2091,9 @@ export default function PLNWarehouse() {
 
   const [stockModal, setStockModal] = useState(null);
   const [txnModal, setTxnModal] = useState(false);
+  const [editingDraftTxnId, setEditingDraftTxnId] = useState(null); // non-null = sedang edit draft TUG-9 hasil adopt ULTG
+  const [tug5ExpandedIdx, setTug5ExpandedIdx] = useState(0); // index baris material TUG-5 yang sedang terbuka penuh (baris lain collapse)
+  const [tug5MaterialPage, setTug5MaterialPage] = useState(0); // 5 item per halaman, max 10 (2 halaman)
   const [satpamModal, setSatpamModal] = useState(null);
   const [satpamForm, setSatpamForm] = useState({});
   const [katalogModal, setKatalogModal] = useState(null);
@@ -2036,6 +2104,8 @@ export default function PLNWarehouse() {
   const [timMutuForm, setTimMutuForm] = useState({});
   const [uitModal, setUitModal] = useState(null);
   const [uitForm, setUitForm] = useState({});
+  const [ultgModal, setUltgModal] = useState(null);
+  const [ultgForm, setUltgForm] = useState({});
   const [uptModal, setUptModal] = useState(null);
   const [uptForm, setUptForm] = useState({});
   const [stockSubTab, setStockSubTab] = useState("katalog"); // "katalog" | "lokasi" | "satpam" | "timmutu" (within Master Data tab)
@@ -2140,9 +2210,10 @@ export default function PLNWarehouse() {
       // Master data (UIT/UPT/Gudang/Lokasi/Satpam/Tim Mutu) sekarang sumber
       // utamanya Supabase, bukan localStorage lagi — load dulu (seed dari
       // DEFAULT_* kalau tabelnya masih kosong, mis. instalasi baru).
-      const [cuit, cupt, cgdg, csgdg, clokRemote, csp, ctm] = await Promise.all([
+      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm] = await Promise.all([
         seedMasterTableIfEmpty("uit", DEFAULT_UIT),
         seedMasterTableIfEmpty("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null })),
+        loadMasterTable("ultg").then(r => r || []),
         seedMasterTableIfEmpty("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null })),
         loadMasterTable("sub_gudang").then(r => r || []),
         seedMasterTableIfEmpty("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null })),
@@ -2183,6 +2254,7 @@ export default function PLNWarehouse() {
       setTimMutuList(ctm);
       setUitList(cuit);
       setUptList(cupt);
+      setUltgList(cultg);
       setGudangList(cgdg);
       setSubGudangList(csgdg || []);
       setRencanaKedatanganList(crk || []);
@@ -2339,9 +2411,9 @@ export default function PLNWarehouse() {
           await supabase.auth.signOut();
           setCurrentUser(null); setUsers([]);
         } else {
-          setCurrentUser({ id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar });
+          setCurrentUser({ id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id });
           const { data: allProfiles } = await supabase.from("profiles").select("*");
-          setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar })));
+          setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id })));
         }
       } else {
         setCurrentUser(null); setUsers([]);
@@ -2730,7 +2802,7 @@ export default function PLNWarehouse() {
   }
 
   // ── Master UIT CRUD ──
-  function openAddUIT() { setUitForm({id:"UIT-"+uid().slice(0,4).toUpperCase(), nama:"", kode:"", alamat:"", createdAt:Date.now()}); setUitModal("add"); }
+  function openAddUIT() { setUitForm({id:"UIT-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", alamat:"", createdAt:Date.now()}); setUitModal("add"); }
   function openEditUIT(u) { setUitForm({...u}); setUitModal("edit"); }
   async function saveUIT() {
     if (!uitForm.nama?.trim()||!uitForm.kode?.trim()) { showToast("Nama dan Kode UIT wajib diisi!","error"); return; }
@@ -2745,8 +2817,26 @@ export default function PLNWarehouse() {
     setUitList(nu); await syncMasterTable("uit", nu); showToast("UIT dihapus.");
   }
 
+  // ── Master ULTG CRUD (unit di bawah UPT) ──
+  function syncUltg(nu) { return syncMasterTable("ultg", nu, u => ({ upt_id: u.parentUptId || null })); }
+  function openAddULTG() { setUltgForm({id:"ULTG-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", parentUptId: uptList[0]?.id||"", createdAt:Date.now()}); setUltgModal("add"); }
+  function openEditULTG(u) { setUltgForm({...u}); setUltgModal("edit"); }
+  async function saveULTG() {
+    if (!ultgForm.nama?.trim()||!ultgForm.kode?.trim()) { showToast("Nama dan Kode ULTG wajib diisi!","error"); return; }
+    if (!ultgForm.parentUptId) { showToast("Pilih UPT induk!","error"); return; }
+    const nu = ultgModal==="add" ? [...ultgList, ultgForm] : ultgList.map(u=>u.id===ultgForm.id?ultgForm:u);
+    setUltgList(nu); setUltgModal(null);
+    await syncUltg(nu);
+    showToast(ultgModal==="add"?"ULTG ditambahkan!":"ULTG diupdate!");
+  }
+  async function deleteULTG(id) {
+    if (!window.confirm("Hapus ULTG ini?")) return;
+    const nu = ultgList.filter(u=>u.id!==id);
+    setUltgList(nu); await syncUltg(nu); showToast("ULTG dihapus.");
+  }
+
   // ── Master UPT CRUD ──
-  function openAddUPT() { setUptForm({id:"UPT-"+uid().slice(0,4).toUpperCase(), nama:"", kode:"", alamat:"", uitId: uitList[0]?.id||"", createdAt:Date.now()}); setUptModal("add"); }
+  function openAddUPT() { setUptForm({id:"UPT-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", alamat:"", uitId: uitList[0]?.id||"", createdAt:Date.now()}); setUptModal("add"); }
   function openEditUPT(u) { setUptForm({...u}); setUptModal("edit"); }
   function syncUpt(nu) { return syncMasterTable("upt", nu, u => ({ uit_id: u.uitId || null })); }
   async function saveUPT() {
@@ -3715,20 +3805,43 @@ export default function PLNWarehouse() {
         fotoMaterial: [],
       });
     } else if (docType === "TUG5") {
-      setTxnForm({
-        ...base,
-        // TUG-5 header
-        uitId: uitList[0]?.id || "",       // Kepada: UIT tujuan
-        jenisTransfer: "INTRACOMPANY",     // INTRACOMPANY | INTERCOMPANY
-        keteranganUmum: "",
-        perintahKerja: "", kodePerkiraan: "", fungsi: "",
-        // Per-item fields for TUG-5 tabel
-        stockItems: [{ katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }],
-      });
+      setTug5ExpandedIdx(0); setTug5MaterialPage(0);
+      if (currentUser.role === "ADMIN_ULTG") {
+        // TUG-5 dari ULTG: tujuan implisit = UPT induk ULTG-nya, tidak perlu pilih UIT/jenis transfer
+        setTxnForm({
+          ...base,
+          sourceType: "ULTG",
+          ultgId: currentUser.ultgId || "",
+          lokasiPekerjaan: "",
+          keteranganUmum: "",
+          perintahKerja: "", kodePerkiraan: "", fungsi: "",
+          stockItems: [{ katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }],
+        });
+      } else {
+        setTxnForm({
+          ...base,
+          // TUG-5 header
+          uitId: uitList[0]?.id || "",       // Kepada: UIT tujuan
+          jenisTransfer: "INTRACOMPANY",     // INTRACOMPANY | INTERCOMPANY
+          keteranganUmum: "",
+          perintahKerja: "", kodePerkiraan: "", fungsi: "",
+          // Per-item fields for TUG-5 tabel
+          stockItems: [{ katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }],
+        });
+      }
     }
     setTxnModal(true);
   }
   function addItemRow() {
+    if (txnForm.docType === "TUG5" && txnForm.stockItems.length >= 10) {
+      showToast("Maksimal 10 item material per TUG-5.","error");
+      return;
+    }
+    if (txnForm.docType === "TUG5") {
+      const newIdx = txnForm.stockItems.length;
+      setTug5ExpandedIdx(newIdx);
+      setTug5MaterialPage(Math.floor(newIdx/5));
+    }
     setTxnForm(tf => {
       if (tf.docType === "TUG10") {
         return { ...tf, stockItems: [...tf.stockItems, { katalogMode:"existing", katalogId:"", namaBaru:"", katalogBaru:"", categoryBaru:"Lainnya", satuanBaru:"unit", qty:1, statusMaterial:"Material Sisa Baru", noAsset:"", noSeri:"", fotoNameplate:null, fotoBarangRetur:null }] };
@@ -3744,11 +3857,22 @@ export default function PLNWarehouse() {
   }
   function removeItemRow(i) { setTxnForm(tf => ({ ...tf, stockItems: tf.stockItems.filter((_,idx)=>idx!==i) })); }
   function updateItemRow(i, key, val) {
-    setTxnForm(tf => { const items=[...tf.stockItems]; items[i] = {...items[i], [key]: val}; return {...tf, stockItems: items}; });
+    setTxnForm(tf => {
+      const items=[...tf.stockItems];
+      items[i] = {...items[i], [key]: val};
+      // TUG-5 dari ULTG: begitu pilih katalog, auto-isi Sisa Persediaan dari total stok aktual UPT
+      // (dijumlah lintas gudang/lokasi) — ULTG tidak punya stok sendiri untuk diketik manual.
+      if (tf.docType==="TUG5" && tf.sourceType==="ULTG" && key==="katalogId") {
+        const totalQty = enrichedStocks.filter(s=>s.katalogId===val).reduce((a,s)=>a+(s.qty||0),0);
+        items[i].sisaPersediaan = totalQty;
+      }
+      return {...tf, stockItems: items};
+    });
   }
 
   async function saveTxn() {
-    if (!CAN_CREATE.includes(currentUser.role)) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
+    const canCreateULTG = currentUser.role==="ADMIN_ULTG" && txnForm?.docType==="TUG5";
+    if (!CAN_CREATE.includes(currentUser.role) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
     const docType = txnForm.docType;
 
     if (docType !== "TUG3") {
@@ -3767,6 +3891,7 @@ export default function PLNWarehouse() {
           showToast(`Stok ${stock.name} di ${stock.lokasi} tidak cukup! Tersedia: ${stock.qty} ${stock.unit}`,"error"); return;
         }
       }
+      if (editingDraftTxnId) { await submitDraftTug9({ ...txnForm, stockItems: validItems }); return; }
       await commitNewTxn(docType, { ...txnForm, stockItems: validItems });
       return;
     }
@@ -3799,6 +3924,14 @@ export default function PLNWarehouse() {
       return;
     }
 
+    if (docType === "TUG5" && txnForm.sourceType === "ULTG") {
+      if (!txnForm.ultgId) { showToast("Unit ULTG kamu tidak terdeteksi. Hubungi Admin.","error"); return; }
+      const validItems = txnForm.stockItems.filter(si => si.katalogId && si.permintaan > 0);
+      if (validItems.length === 0) { showToast("Minimal 1 material harus diisi!","error"); return; }
+      await commitNewTxn(docType, { ...txnForm, stockItems: validItems, keteranganUmum: txnForm.namaPekerjaan });
+      return;
+    }
+
     if (docType === "TUG5") {
       if (!txnForm.uitId) { showToast("Pilih UIT tujuan (Kepada)!","error"); return; }
       const validItems = txnForm.stockItems.filter(si => si.katalogId && si.permintaan > 0);
@@ -3813,6 +3946,29 @@ export default function PLNWarehouse() {
     const docCode = (docType === "TUG10" || docType === "TUG3") ? "LOG.00.01" : "LOG.00.02";
     const docNumbers = generateDocNumbers(seq, Date.now(), docCode);
     const docKey = docType === "TUG9" ? "tug9" : docType === "TUG8" ? "tug8" : docType === "TUG10" ? "tug10" : docType === "TUG5" ? "tug5" : "tug3";
+
+    if (docType === "TUG5" && formData.sourceType === "ULTG") {
+      // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
+      // Setelah approve, jadi pengajuan yang bisa di-adopt Admin/TL UPT induk (bukan auto-chain TUG-7).
+      const nt5u = {
+        id: `TUG5-` + uid().slice(3,9),
+        docType, docSeq: seq, docNumbers,
+        ...formData,
+        stage: "PENDING_MGR_ULTG",
+        status: "PENDING",
+        requiredApprover: "MGR_ULTG",
+        approvedByMgrUltg: null, approvedAtMgrUltg: null,
+        adoptedBy: null, adoptedAt: null, adoptedTug9Id: null,
+        rejectedBy: null, rejectedAt: null, rejectReason: null,
+        createdBy: currentUser.id, createdAt: Date.now(),
+      };
+      const newTxnsU = [...txns, nt5u];
+      const newSeqU = seq + 1;
+      setTxns(newTxnsU); setDocSeq(newSeqU); setTxnModal(false);
+      await saveToCloud({txns: newTxnsU, docSeq: newSeqU});
+      showToast(`${nt5u.docNumbers.tug5} dibuat! Menunggu approval Manager ULTG. ⏳`);
+      return;
+    }
 
     if (docType === "TUG5") {
       // TUG-5: 2-stage approval: Asman → Manager UPT
@@ -4167,6 +4323,87 @@ export default function PLNWarehouse() {
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // TUG-5 DARI ULTG: Manager ULTG approve (1 tahap) → jadi pengajuan siap di-adopt
+  // Admin/TL UPT induk ULTG tersebut. Adopt = auto-create draft TUG-9 (editable).
+  // ══════════════════════════════════════════════════════════════════
+
+  async function approveTUG5_MgrULTG(txn) {
+    if (currentUser.role !== "MGR_ULTG") { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
+    if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
+    if (txn.stage !== "PENDING_MGR_ULTG") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
+    const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED_ULTG", status:"APPROVED", approvedByMgrUltg:currentUser.id, approvedAtMgrUltg:Date.now()} : t);
+    setTxns(newTxns);
+    await saveToCloud({txns: newTxns});
+    showToast(`✅ ${txn.docNumbers.tug5} disetujui! Menunggu di-adopt oleh Admin/TL UPT.`);
+  }
+  async function rejectTUG5_MgrULTG(txn, reason) {
+    if (currentUser.role !== "MGR_ULTG") { showToast("Hanya Manager ULTG yang bisa menolak TUG-5 ini.","error"); return; }
+    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
+    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
+    setTxns(newTxns); await saveToCloud({txns: newTxns});
+    showToast(`❌ ${txn.docNumbers.tug5} DITOLAK oleh Manager ULTG.`, "error");
+  }
+  // Admin/TL UPT induk "mengadopsi" pengajuan ULTG → auto-create draft TUG-9 (editable, stok dipilih sendiri)
+  async function adoptTUG5ULTG(txn) {
+    if (!["ADMIN","TL"].includes(currentUser.role)) { showToast("Hanya Admin/TL UPT yang bisa mengadopsi pengajuan ini.","error"); return; }
+    if (txn.adoptedBy) { showToast("Pengajuan ini sudah di-adopt UPT lain.","error"); return; }
+    const seq = docSeq;
+    const docCode = "LOG.00.02";
+    const docNumbers = generateDocNumbers(seq, Date.now(), docCode);
+    const ultg = ultgList.find(u=>u.id===txn.ultgId);
+    // Cocokkan katalogId dari pengajuan TUG-5 ULTG ke baris stok aktual (pilih stok dengan
+    // qty terbesar untuk katalog tsb) — supaya list material TIDAK hilang saat masuk draft TUG-9,
+    // karena form TUG-9 me-render item lewat stocks.find(s=>s.id===si.stockId), bukan katalogId.
+    const draftTug9 = {
+      id: `TUG9-` + uid().slice(3,9),
+      docType: "TUG9", docSeq: seq, docNumbers,
+      tug5Id: txn.id, tug5DocNo: txn.docNumbers.tug5,
+      namaPekerjaan: txn.keteranganUmum || "Permintaan Material ULTG",
+      lokasiPekerjaan: ultg?.nama || "ULTG",
+      perkiraanPembebanan: "", kodePerkiraan: txn.kodePerkiraan||"",
+      keteranganBarang: txn.namaPekerjaan || txn.keteranganUmum || `Adopsi dari pengajuan ${ultg?.nama||""} — ${txn.docNumbers.tug5}`,
+      stockItems: txn.stockItems.map(si=>{
+        const matches = stocks.filter(s=>s.katalogId===si.katalogId).sort((a,b)=>(b.qty||0)-(a.qty||0));
+        return { stockId: matches[0]?.id || "", qty: si.permintaan||si.qty||1, _katalogHint: si.katalogId };
+      }),
+      noNodin: "", noPersetujuan: "",
+      nopol: "", simKtp: "", namaPengemudi: "",
+      penerimaNama: "", penerimaJabatan: "", penerimaUnit: ultg?.nama||"",
+      satpamId: "",
+      fotoKendaraan: null, fotoSimKtp: null, fotoSuratPengembalian: null, fotoMaterial: [],
+      status: "DRAFT",
+      createdBy: currentUser.id, createdAt: Date.now(),
+    };
+    const newTxns = txns.map(t => t.id===txn.id ? {...t, adoptedBy:currentUser.id, adoptedAt:Date.now(), adoptedTug9Id:draftTug9.id} : t);
+    const allTxns = [...newTxns, draftTug9];
+    const newSeq = seq + 1;
+    setTxns(allTxns); setDocSeq(newSeq);
+    await saveToCloud({txns: allTxns, docSeq: newSeq});
+    showToast(`📋 Diadopsi! Draft TUG-9 dibuat — lengkapi & edit materialnya sebelum submit.`);
+    return draftTug9;
+  }
+  // Buka draft TUG-9 (hasil adopt) di form TUG-9 biasa supaya bisa diedit — tambah/hapus
+  // baris material, lengkapi field yang kurang — sebelum disubmit ke approval normal.
+  function openDraftTug9(txn) {
+    setTxnForm({ ...txn, stockItems: txn.stockItems.length ? txn.stockItems : [{stockId:"",qty:1}] });
+    setEditingDraftTxnId(txn.id);
+    setTxnModal(true);
+  }
+  // Submit draft TUG-9 (hasil adopt) yang sudah dilengkapi/diedit → masuk approval normal TUG-9
+  async function submitDraftTug9(formData) {
+    const requiredApprover = currentUser.role === "ADMIN" ? "TL" : "ASMAN";
+    const newTxns = txns.map(t => t.id===editingDraftTxnId ? {
+      ...t, ...formData,
+      status: "PENDING", requiredApprover,
+      approvedBy: null, approvedAt: null, asmanAutoApproved: false,
+      createdBy: currentUser.id,
+    } : t);
+    setTxns(newTxns); setTxnModal(false); setEditingDraftTxnId(null);
+    await saveToCloud({txns: newTxns});
+    showToast(`✅ TUG-9 dilengkapi & diajukan! Menunggu approval ${ROLES[requiredApprover]}.`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // TUG-7 APPROVAL CHAIN: Admin UIT (lengkapi) → Manager Logistik UIT (approve)
   // Setelah Manager Logistik approve → auto-generate draft TUG-8 di UPT Pengirim
   // ══════════════════════════════════════════════════════════════════
@@ -4503,8 +4740,21 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     if (t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && currentUser?.role==="MGR_LOGISTIK_UIT") return true;
     // TUG-8 DRAFT from TUG-7 needs Admin/TL UPT to confirm
     if (t.docType==="TUG8" && t.stage==="DRAFT_TUG8" && ["ADMIN","TL"].includes(currentUser?.role)) return true;
+    // TUG-5 dari ULTG: Manager ULTG (unit yang sama) approve
+    if (t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && currentUser?.role==="MGR_ULTG" && t.ultgId===currentUser?.ultgId) return true;
     return false;
   });
+  // Pengajuan TUG-5 dari ULTG yang sudah disetujui Manager ULTG, siap di-adopt oleh Admin/TL UPT induknya.
+  // currentUser.uptId biasanya KOSONG untuk akun ADMIN/TL biasa (UPT mereka ditentukan dari konstanta
+  // global UPT/WAREHOUSE, bukan field profil) — fallback cocokkan nama UPT konstan ke Master UPT.
+  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
+  const currentUserUptId = currentUser?.uptId
+    || (ultgList.find(u=>u.id===currentUser?.ultgId)?.parentUptId)
+    || (uptList.find(u=>String(u.nama||"").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
+  const ultgPengajuanUntukAdopt = ["ADMIN","TL"].includes(currentUser?.role) ? txns.filter(t =>
+    t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="APPROVED_ULTG" && !t.adoptedBy &&
+    ultgList.find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId
+  ) : [];
   const pendingTxns = txns.filter(t=>t.status==="PENDING");
   const stockCountPendingCount = stockCountList.reduce((a,s)=>a+s.items.filter(i=>i.approval==="PENDING").length, 0);
   const heavyEquipmentPendingCount = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)).length;
@@ -4599,9 +4849,20 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // ══════════════════════ MAIN APP ══════════════════════
   // Role PENGADAAN hanya punya akses Dashboard + Rencana Kedatangan
   const isPengadaan = currentUser.role === "PENGADAAN";
+  // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
+  const isUltgRole = ULTG_ROLES.includes(currentUser.role);
   const navItems = isPengadaan ? [
     {id:"dashboard",icon:"📊",label:"Dashboard"},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
+  ] : isUltgRole ? [
+    {id:"dashboard",icon:"📊",label:"Dashboard"},
+    {id:"stock",icon:"📦",label:"Data Stok"},
+    {id:"transaction",icon:"🔄",label:"TUG"},
+    {id:"approval",icon:"✅",label:"Approval",badge: currentUser.role==="MGR_ULTG" ? myPendingApprovals.length : 0},
+    {id:"heavyEquipment",icon:"🚜",label:"Alat Berat"},
+    {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
+    {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
+    {id:"ai",icon:"🤖",label:"AI Agent"},
   ] : [
     {id:"dashboard",icon:"📊",label:"Dashboard"},
     {id:"stock",icon:"📦",label:"Data Stok"},
@@ -4667,12 +4928,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   </button>
                   {tugExpanded && (
                     <div style={{marginBottom:4}}>
-                      {[
+                      {(isUltgRole ? [
+                        {id:"permintaan",icon:"📋",label:"Permintaan (TUG-5)",defaultSub:"TUG5"},
+                      ] : [
                         {id:"penerimaan",icon:"📥",label:"Penerimaan (TUG-3/4/10)",defaultSub:"TUG3"},
                         {id:"pengeluaran",icon:"📤",label:"Pengeluaran (TUG-8/9)",defaultSub:"TUG9"},
                         {id:"permintaan",icon:"📋",label:"Permintaan (TUG-5)",defaultSub:"TUG5"},
                         {id:"laporan",icon:"📊",label:"Laporan (TUG-15)",defaultSub:"TUG15"},
-                      ].map(sub=>{
+                      ]).map(sub=>{
                         const subActive = isActive && tugGroup===sub.id;
                         return (
                           <button
@@ -4710,6 +4973,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         {id:"timmutu",icon:"👥",label:"Tim Mutu"},
                         {id:"uit",icon:"🏢",label:"Master UIT"},
                         {id:"upt",icon:"📍",label:"Master UPT"},
+                        {id:"ultg",icon:"🏘️",label:"Master ULTG"},
                         {id:"gudang",icon:"🏭",label:"Master Gudang"},
         ...(currentUser.role==="ADMIN" ? [{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
                       ].map(sub=>{
@@ -5241,16 +5505,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div>
                 <h1 style={{fontSize:22,fontWeight:900}}>
-                  {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="uit"?"Master UIT (Unit Induk)":stockSubTab==="upt"?"Master UPT (Unit Pelaksana)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
+                  {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="uit"?"Master UIT (Unit Induk)":stockSubTab==="upt"?"Master UPT (Unit Pelaksana)":stockSubTab==="ultg"?"Master ULTG (Unit di bawah UPT)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
                 </h1>
                 <p style={{color:C.muted,fontSize:13}}>
-                  {stockSubTab==="katalog"?`${katalogList.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="uit"?`${uitList.length} UIT terdaftar`:stockSubTab==="upt"?`${uptList.length} UPT terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${katalogList.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="uit"?`${uitList.length} UIT terdaftar`:stockSubTab==="upt"?`${uptList.length} UPT terdaftar`:stockSubTab==="ultg"?`${ultgList.length} ULTG terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </p>
               </div>
               {currentUser.role==="ADMIN" && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="uit" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="upt" && <button style={sty.btn("primary")} onClick={openAddUPT}>+ Tambah UPT</button>}
+              {currentUser.role==="ADMIN" && stockSubTab==="ultg" && <button style={sty.btn("primary")} onClick={openAddULTG}>+ Tambah ULTG</button>}
             </div>
             {stockSubTab==="gudang" && (
               <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
@@ -5453,6 +5718,29 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         <div style={{display:"flex",gap:6}}>
                           <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={()=>openEditUPT(u)}>✏️ Edit</button>
                           <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>deleteUPT(u.id)}>🗑️ Hapus</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── SUB-TAB: MASTER ULTG ── */}
+            {stockSubTab==="ultg" && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
+                {ultgList.length===0 && <div style={{...sty.card,gridColumn:"1/-1",textAlign:"center",color:C.muted,padding:30}}>Belum ada Master ULTG.</div>}
+                {ultgList.map(u=>{
+                  const upt = uptList.find(x=>x.id===u.parentUptId);
+                  return (
+                    <div key={u.id} style={{...sty.card,borderTop:`3px solid ${C.accent}`}}>
+                      <div style={{fontWeight:800,fontSize:13,marginBottom:4}}>🏘️ {u.kode}</div>
+                      <div style={{fontSize:12,marginBottom:4}}>{u.nama}</div>
+                      <div style={{fontSize:11,color:"#0098da",marginBottom:10}}>UPT Induk: {upt?.nama||u.parentUptId||"-"}</div>
+                      {currentUser.role==="ADMIN" && (
+                        <div style={{display:"flex",gap:6}}>
+                          <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={()=>openEditULTG(u)}>✏️ Edit</button>
+                          <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>deleteULTG(u.id)}>🗑️ Hapus</button>
                         </div>
                       )}
                     </div>
@@ -5782,7 +6070,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {tugSubTab==="TUG9"?"Pengeluaran Barang Pemakaian di Unit Sendiri (UPT Surabaya)":tugSubTab==="TUG8"?"Pengeluaran Barang Pemakaian ke Unit PLN Lain":tugSubTab==="TUG10"?"Pengembalian Material ke Gudang — Sisa Pekerjaan / Bekas Bongkaran":tugSubTab==="TUG5"?"Permintaan material ke UIT — Intracompany (→TUG-7) atau Intercompany (→TUG-5 UIT)":tugSubTab==="TUG15"?"History mutasi stok dari semua transaksi TUG yang disetujui — filter rentang tanggal & unduh":"Karantina → Pemeriksaan Mutu → Final (3 tahap: TL → Manager → Asman)"}
                 </p>
               </div>
-              {CAN_CREATE.includes(currentUser.role) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button style={sty.btn("primary")} onClick={()=>openNewTxn(tugSubTab)}>+ Buat {tugSubTab.replace("TUG","TUG-")} Baru</button>}
+              {(CAN_CREATE.includes(currentUser.role) || currentUser.role==="ADMIN_ULTG") && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button style={sty.btn("primary")} onClick={()=>openNewTxn(tugSubTab)}>+ Buat {tugSubTab.replace("TUG","TUG-")} Baru</button>}
             </div>
 
             <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
@@ -5832,6 +6120,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik}
                 konfirmasiDraftTUG8={konfirmasiDraftTUG8}
                 setDocPreview={setDocPreview}
+                ultgList={ultgList}
+                approveTUG5_MgrULTG={approveTUG5_MgrULTG} rejectTUG5_MgrULTG={rejectTUG5_MgrULTG}
+                adoptTUG5ULTG={adoptTUG5ULTG} openDraftTug9={openDraftTug9}
               />
             ) : tugSubTab==="TUG15" ? (
               <TUG15Tab
@@ -5905,7 +6196,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
 
         {/* APPROVAL — semua notifikasi approval (TUG, Lokasi/Blok, Pemindahan Stok, dkk) dikumpulkan di sini, dipisah per-bagian + riwayat di bawah */}
-        {tab==="approval" && ["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) && (
+        {tab==="approval" && ["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","MGR_ULTG","ADMIN_ULTG"].includes(currentUser.role) && (
           <div>
             {/* ── BAGIAN: Pemindahan Blok Data Stok (khusus TL) ── */}
             {currentUser.role==="TL" && stocks.some(s=>s.lokasiMovePending) && (
@@ -6021,6 +6312,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               rejectCapacityImport={rejectCapacityImport}
               approveLokasiChange={approveLokasiChange}
               rejectLokasiChange={rejectLokasiChange}
+              ultgList={ultgList}
+              approveTUG5_MgrULTG={approveTUG5_MgrULTG}
+              rejectTUG5_MgrULTG={rejectTUG5_MgrULTG}
+              ultgPengajuanUntukAdopt={ultgPengajuanUntukAdopt}
+              adoptTUG5ULTG={adoptTUG5ULTG}
+              openDraftTug9={openDraftTug9}
             />
 
             {/* ── BAGIAN: Riwayat Approval (gabungan semua jenis, terbaru di atas) ── */}
@@ -6709,6 +7006,25 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         </div>
       )}
 
+      {/* ULTG MODAL */}
+      {ultgModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+          <div style={{...sty.card,width:440}}>
+            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{ultgModal==="edit"?"Edit ULTG":"Tambah ULTG Baru"}</h3>
+            <div style={{marginBottom:12}}><label style={sty.label}>Kode ULTG</label><input style={sty.input} value={ultgForm.kode||""} onChange={e=>setUltgForm(f=>({...f,kode:e.target.value}))} placeholder="cth: ULTG-SBU"/></div>
+            <div style={{marginBottom:12}}><label style={sty.label}>Nama ULTG</label><input style={sty.input} value={ultgForm.nama||""} onChange={e=>setUltgForm(f=>({...f,nama:e.target.value}))} placeholder="cth: ULTG Surabaya Utara"/></div>
+            <div style={{marginBottom:16}}>
+              <label style={sty.label}>UPT Induk *</label>
+              <select style={sty.select} value={ultgForm.parentUptId||""} onChange={e=>setUltgForm(f=>({...f,parentUptId:e.target.value}))}>
+                <option value="">-- Pilih UPT --</option>
+                {uptList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",gap:10}}><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setUltgModal(null)}>Batal</button><button style={{...sty.btn("primary"),flex:2}} onClick={saveULTG}>💾 Simpan</button></div>
+          </div>
+        </div>
+      )}
+
       {/* TXN MODAL - TUG5 FORM */}
       {txnModal && txnForm && txnForm.docType==="TUG5" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
@@ -6717,6 +7033,27 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-5 — Daftar Permintaan Barang</h3>
               <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-5/...</span>
             </div>
+            {txnForm.sourceType==="ULTG" ? (
+              <>
+                <div style={{background:"#dbeafe",border:`1px solid #93c5fd`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#1e40af",marginBottom:16}}>ℹ️ Alur: Admin Ajukan TUG-5 → Manager ULTG approve</div>
+                <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>HEADER DOKUMEN</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                  <div>
+                    <label style={sty.label}>Unit ULTG Pengaju</label>
+                    <input style={{...sty.input,background:"#f3f4f6"}} value={ultgList.find(u=>u.id===txnForm.ultgId)?.nama || "-"} disabled/>
+                  </div>
+                  <div>
+                    <label style={sty.label}>Lokasi Pekerjaan *</label>
+                    <input style={sty.input} value={txnForm.lokasiPekerjaan||""} onChange={e=>setTxnForm(tf=>({...tf,lokasiPekerjaan:e.target.value}))} placeholder="cth: Gardu Induk Rungkut"/>
+                  </div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <label style={sty.label}>Nama Pekerjaan *</label>
+                    <input style={sty.input} value={txnForm.namaPekerjaan||""} onChange={e=>setTxnForm(tf=>({...tf,namaPekerjaan:e.target.value,keteranganUmum:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit Bay Trafo 1"/>
+                  </div>
+                </div>
+              </>
+            ) : (
+            <>
             <div style={{background:"#dbeafe",border:`1px solid #93c5fd`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#1e40af",marginBottom:16}}>ℹ️ Alur: Asman approve → Manager UPT approve → INTRACOMPANY: auto draft TUG-7 di UIT | INTERCOMPANY: auto draft TUG-5 UIT (cetak manual).</div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>HEADER DOKUMEN</div>
@@ -6741,12 +7078,30 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 {txnForm.jenisTransfer==="INTERCOMPANY" && <div style={{fontSize:10,color:"#7c3aed",marginTop:4}}>→ Setelah approved: otomatis generate draft TUG-5 UIT untuk dikirim manual ke UIT lain.</div>}
               </div>
             </div>
+            </>
+            )}
 
-            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>DAFTAR MATERIAL</div>
-            {txnForm.stockItems.map((si,idx)=>{
-              const kat = katalogList.find(k=>k.id===si.katalogId);
-              return (
-                <div key={idx} style={{border:`1px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:8,background:"#f9fafb"}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>DAFTAR MATERIAL ({txnForm.stockItems.length}/10)</div>
+            {(()=>{
+              const pageStart = tug5MaterialPage*5;
+              const pageIdxs = txnForm.stockItems.map((_,i)=>i).slice(pageStart, pageStart+5);
+              return pageIdxs.map(idx=>{
+                const si = txnForm.stockItems[idx];
+                const kat = katalogList.find(k=>k.id===si.katalogId);
+                const isExpanded = idx===tug5ExpandedIdx;
+                if (!isExpanded) {
+                  return (
+                    <div key={idx} style={{display:"flex",alignItems:"center",gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",marginBottom:8,background:"white",cursor:"pointer"}} onClick={()=>setTug5ExpandedIdx(idx)}>
+                      <span style={{fontSize:11,fontWeight:700,color:C.muted}}>#{idx+1}</span>
+                      <span style={{flex:1,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{kat ? `${kat.name} [${kat.katalog||"-"}]` : <span style={{color:C.muted,fontStyle:"italic"}}>Belum dipilih</span>}</span>
+                      <span style={{fontSize:11,color:C.accent,fontWeight:700}}>Qty: {si.permintaan||0}{kat?.satuan?` ${kat.satuan}`:""}</span>
+                      <span style={{fontSize:11,color:C.muted}}>✏️ Edit</span>
+                      {txnForm.stockItems.length>1 && <button type="button" style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={e=>{e.stopPropagation();removeItemRow(idx);if(tug5ExpandedIdx===idx)setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
+                    </div>
+                  );
+                }
+                return (
+                <div key={idx} style={{border:`2px solid ${C.accent}`,borderRadius:8,padding:10,marginBottom:8,background:"#f9fafb"}}>
                   <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}>
                     <div style={{flex:3}}>
                       <label style={sty.label}>Nama Barang {idx+1}</label>
@@ -6760,29 +7115,48 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         sty={sty} C={C}
                       />
                     </div>
-                    {txnForm.stockItems.length>1 && <button type="button" style={{...sty.btn("danger","sm")}} onClick={()=>removeItemRow(idx)}>✕</button>}
+                    {txnForm.stockItems.length>1 && <button type="button" style={{...sty.btn("danger","sm")}} onClick={()=>{removeItemRow(idx);setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
                   </div>
                   {kat && <div style={{fontSize:10,color:C.muted,marginBottom:8}}>Nomor Normalisasi: {kat.katalog||"-"} • Satuan: {kat.satuan}</div>}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                    <div><label style={sty.label}>Pemakaian/Bulan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.pemakaianBulan||0} onChange={e=>updateItemRow(idx,"pemakaianBulan",Number(e.target.value))}/></div>
-                    <div><label style={sty.label}>Sisa Persediaan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} onChange={e=>updateItemRow(idx,"sisaPersediaan",Number(e.target.value))}/></div>
-                    <div><label style={sty.label}>Jumlah Permintaan</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
-                  </div>
+                  {txnForm.sourceType==="ULTG" ? (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <div><label style={sty.label}>Sisa Persediaan <span style={{color:C.muted,fontWeight:400}}>(stok aktual UPT)</span></label><input style={{...sty.input,background:"#f3f4f6"}} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} disabled/></div>
+                      <div><label style={sty.label}>Jumlah Permintaan {kat?.satuan && <span style={{color:C.muted,fontWeight:400}}>({kat.satuan})</span>}</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
+                    </div>
+                  ) : (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                      <div><label style={sty.label}>Pemakaian/Bulan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.pemakaianBulan||0} onChange={e=>updateItemRow(idx,"pemakaianBulan",Number(e.target.value))}/></div>
+                      <div><label style={sty.label}>Sisa Persediaan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} onChange={e=>updateItemRow(idx,"sisaPersediaan",Number(e.target.value))}/></div>
+                      <div><label style={sty.label}>Jumlah Permintaan</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
+                    </div>
+                  )}
                   <div style={{marginTop:8}}><label style={sty.label}>Keterangan</label><input style={sty.input} value={si.keterangan||""} onChange={e=>updateItemRow(idx,"keterangan",e.target.value)} placeholder="cth: Single Insulator Strings"/></div>
                 </div>
-              );
-            })}
-            <button type="button" style={{...sty.btn("ghost","sm"),marginBottom:14}} onClick={addItemRow}>+ Tambah Material</button>
-
-            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>ADMINISTRASI</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:16}}>
-              <div><label style={sty.label}>Keterangan Umum</label><input style={sty.input} value={txnForm.keteranganUmum||""} onChange={e=>setTxnForm(tf=>({...tf,keteranganUmum:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit UPT Surabaya"/></div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                <div><label style={sty.label}>Perintah Kerja</label><input style={sty.input} value={txnForm.perintahKerja||""} onChange={e=>setTxnForm(tf=>({...tf,perintahKerja:e.target.value}))}/></div>
-                <div><label style={sty.label}>Kode Perkiraan</label><input style={sty.input} value={txnForm.kodePerkiraan||""} onChange={e=>setTxnForm(tf=>({...tf,kodePerkiraan:e.target.value}))}/></div>
-                <div><label style={sty.label}>Fungsi</label><input style={sty.input} value={txnForm.fungsi||""} onChange={e=>setTxnForm(tf=>({...tf,fungsi:e.target.value}))}/></div>
+                );
+              });
+            })()}
+            {txnForm.stockItems.length>5 && (
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <button type="button" style={sty.btn("ghost","sm")} disabled={tug5MaterialPage===0} onClick={()=>setTug5MaterialPage(p=>Math.max(0,p-1))}>← Sebelumnya</button>
+                <span style={{fontSize:11,color:C.muted}}>Halaman {tug5MaterialPage+1} dari {Math.ceil(txnForm.stockItems.length/5)}</span>
+                <button type="button" style={sty.btn("ghost","sm")} disabled={(tug5MaterialPage+1)*5>=txnForm.stockItems.length} onClick={()=>setTug5MaterialPage(p=>p+1)}>Selanjutnya →</button>
               </div>
-            </div>
+            )}
+            <button type="button" style={{...sty.btn("ghost","sm"),marginBottom:14}} disabled={txnForm.stockItems.length>=10} onClick={addItemRow}>+ Tambah Material {txnForm.stockItems.length>=10?"(maks 10)":""}</button>
+
+            {txnForm.sourceType!=="ULTG" && (
+              <>
+                <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>ADMINISTRASI</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:16}}>
+                  <div><label style={sty.label}>Keterangan Umum</label><input style={sty.input} value={txnForm.keteranganUmum||""} onChange={e=>setTxnForm(tf=>({...tf,keteranganUmum:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit UPT Surabaya"/></div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    <div><label style={sty.label}>Perintah Kerja</label><input style={sty.input} value={txnForm.perintahKerja||""} onChange={e=>setTxnForm(tf=>({...tf,perintahKerja:e.target.value}))}/></div>
+                    <div><label style={sty.label}>Kode Perkiraan</label><input style={sty.input} value={txnForm.kodePerkiraan||""} onChange={e=>setTxnForm(tf=>({...tf,kodePerkiraan:e.target.value}))}/></div>
+                    <div><label style={sty.label}>Fungsi</label><input style={sty.input} value={txnForm.fungsi||""} onChange={e=>setTxnForm(tf=>({...tf,fungsi:e.target.value}))}/></div>
+                  </div>
+                </div>
+              </>
+            )}
             <div style={sty.stickyFooter}>
               <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setTxnModal(false)}>Batal</button>
               <button style={{...sty.btn("primary"),flex:2}} onClick={saveTxn}>📋 Ajukan TUG-5</button>
@@ -6914,8 +7288,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
 
             <div style={sty.stickyFooter}>
-              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setTxnModal(false)}>Batal</button>
-              <button style={{...sty.btn("primary"),flex:2}} onClick={saveTxn}>📤 Ajukan {txnForm.docType.replace("TUG","TUG-")}</button>
+              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>{setTxnModal(false);setEditingDraftTxnId(null);}}>Batal</button>
+              <button style={{...sty.btn("primary"),flex:2}} onClick={saveTxn}>{editingDraftTxnId?"📤 Lengkapi & Ajukan TUG-9":`📤 Ajukan ${txnForm.docType.replace("TUG","TUG-")}`}</button>
             </div>
           </div>
         </div>
@@ -7146,7 +7520,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <button style={{...sty.btn("success"),padding:"7px 16px"}} onClick={()=>{
                 if (docPreview.docType==="TUG10") downloadTUG10HTML(docPreview, katalogList, lokasiList, users, showToast);
                 else if (docPreview.docType==="TUG3") downloadTUG3HTML(docPreview, katalogList, lokasiList, timMutuList, users, showToast);
-                else if (docPreview.docType==="TUG5") downloadTUG5HTML(docPreview, katalogList, uitList, users, showToast);
+                else if (docPreview.docType==="TUG5") downloadTUG5HTML(docPreview, katalogList, uitList, users, showToast, ultgList);
                 else if (docPreview.docType==="TUG7") downloadTUG7HTML(docPreview, katalogList, uitList, uptList, users, showToast);
                 else downloadTUG9HTML(docPreview, enrichedStocks, users, satpamList, showToast);
               }}>⬇️ Unduh File (untuk Print/PDF)</button>
@@ -7156,7 +7530,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div style={{flex:1,background:"#e5e7eb",overflow:"hidden"}}>
             <iframe
               title="Document Preview"
-              srcDoc={docPreview.docType==="TUG10" ? buildTUG10HTML(docPreview, katalogList, lokasiList, users) : docPreview.docType==="TUG3" ? buildTUG3HTML(docPreview, katalogList, lokasiList, timMutuList, users) : docPreview.docType==="TUG5" ? buildTUG5HTML(docPreview, katalogList, uitList, users) : docPreview.docType==="TUG7" ? buildTUG7HTML(docPreview, katalogList, uitList, uptList, users) : buildTUG9HTML(docPreview, enrichedStocks, users, satpamList)}
+              srcDoc={docPreview.docType==="TUG10" ? buildTUG10HTML(docPreview, katalogList, lokasiList, users) : docPreview.docType==="TUG3" ? buildTUG3HTML(docPreview, katalogList, lokasiList, timMutuList, users) : docPreview.docType==="TUG5" ? buildTUG5HTML(docPreview, katalogList, uitList, users, ultgList) : docPreview.docType==="TUG7" ? buildTUG7HTML(docPreview, katalogList, uitList, uptList, users) : buildTUG9HTML(docPreview, enrichedStocks, users, satpamList)}
               style={{width:"100%",height:"100%",border:"none"}}
             />
           </div>
@@ -12765,21 +13139,39 @@ function KartuGantungModal({ katalog, stocks, txns, lokasiList, sty, C, onClose 
 function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, uitList, uptList,
   approveTUG5_Asman, rejectTUG5_Asman, approveTUG5_Manager, rejectTUG5_Manager,
   submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik,
-  konfirmasiDraftTUG8, setDocPreview }) {
+  konfirmasiDraftTUG8, setDocPreview,
+  ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, adoptTUG5ULTG, openDraftTug9 }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Modal, setTug7Modal] = useState(null);
   const [tug7Form, setTug7Form] = useState({});
+  const [ultgExpandedId, setUltgExpandedId] = useState(null); // id TUG-5 ULTG yang sedang dibuka penuh
+  const [ultgListPage, setUltgListPage] = useState(0); // 5 per halaman
 
   // Show TUG-5 + TUG-7 drafts + TUG-8 drafts (from TUG-7) all in one view
-  const tug5Txns = txns.filter(t=>t.docType==="TUG5"&&!t.docSubType);
+  const tug5Txns = txns.filter(t=>t.docType==="TUG5"&&!t.docSubType&&t.sourceType!=="ULTG");
+  const tug5UltgTxns = txns.filter(t=>t.docType==="TUG5"&&t.sourceType==="ULTG").sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   const tug7Txns = txns.filter(t=>t.docType==="TUG7");
   const tug8Drafts = txns.filter(t=>t.docType==="TUG8"&&t.stage==="DRAFT_TUG8");
+
+  // Pool pengajuan ULTG yang sudah disetujui Manager ULTG, siap di-adopt Admin/TL UPT induknya.
+  // currentUser.uptId biasanya kosong untuk akun ADMIN/TL biasa — fallback cocokkan nama UPT
+  // konstan global ke Master UPT (sama seperti pola appUptShort di komponen lain).
+  const appUptShort5 = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
+  const currentUserUptId = currentUser?.uptId
+    || (ultgList||[]).find(u=>u.id===currentUser?.ultgId)?.parentUptId
+    || (uptList||[]).find(u=>String(u.nama||"").toUpperCase().includes(appUptShort5.toUpperCase()))?.id;
+  const ultgPoolAdopt = ["ADMIN","TL"].includes(currentUser?.role) ? tug5UltgTxns.filter(t =>
+    t.stage==="APPROVED_ULTG" && !t.adoptedBy &&
+    (ultgList||[]).find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId
+  ) : [];
 
   function stageBadge5(t) {
     const map = {
       PENDING_ASMAN:{label:"Menunggu Asman",bg:"#fef3c7",fg:"#92400e"},
       PENDING_MANAGER:{label:"Menunggu Manager",bg:"#fef3c7",fg:"#92400e"},
+      PENDING_MGR_ULTG:{label:"Menunggu Manager ULTG",bg:"#fef3c7",fg:"#92400e"},
+      APPROVED_ULTG:{label:t.adoptedBy?"Sudah Diadopsi":"Siap Diadopsi UPT",bg:t.adoptedBy?"#dcfce7":"#e0f2fe",fg:t.adoptedBy?"#166534":"#0369a1"},
       APPROVED:{label:"APPROVED",bg:"#dcfce7",fg:"#166534"},
       REJECTED:{label:"DITOLAK",bg:"#fee2e2",fg:"#991b1b"},
     };
@@ -12789,7 +13181,9 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      {/* TUG-5 Permintaan UPT */}
+      {/* TUG-5 Permintaan UPT — disembunyikan untuk role ULTG (tidak relevan bagi mereka) */}
+      {!["ADMIN_ULTG","MGR_ULTG"].includes(currentUser.role) && (
+      <>
       <div style={{fontSize:13,fontWeight:800,color:C.accent,borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginBottom:4}}>📋 TUG-5 — Permintaan Barang UPT</div>
       {tug5Txns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-5.</div>}
       {tug5Txns.map(t=>{
@@ -12829,6 +13223,78 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
           </div>
         );
       })}
+      </>
+      )}
+
+      {/* TUG-5 dari ULTG */}
+      {(["ADMIN_ULTG","MGR_ULTG","ADMIN","TL"].includes(currentUser.role)) && (
+        <>
+          <div style={{fontSize:13,fontWeight:800,color:"#0369a1",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏘️ TUG-5 — Permintaan Material dari ULTG</div>
+          {tug5UltgTxns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-5 dari ULTG.</div>}
+          {tug5UltgTxns.slice(ultgListPage*5, ultgListPage*5+5).map(t=>{
+            const ultg = (ultgList||[]).find(u=>u.id===t.ultgId);
+            const creator = users.find(u=>u.id===t.createdBy)||{};
+            const canApprove = t.stage==="PENDING_MGR_ULTG" && currentUser.role==="MGR_ULTG" && t.ultgId===currentUser.ultgId;
+            const canAdopt = t.stage==="APPROVED_ULTG" && !t.adoptedBy && ["ADMIN","TL"].includes(currentUser.role) &&
+              ultg?.parentUptId === currentUserUptId;
+            const isExpanded = ultgExpandedId===t.id;
+
+            if (!isExpanded) {
+              return (
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderLeft:"3px solid #0369a1",borderRadius:8,padding:"8px 12px",marginBottom:6,background:"white",cursor:"pointer"}} onClick={()=>setUltgExpandedId(t.id)}>
+                  <span style={{fontWeight:700,fontSize:12}}>{t.docNumbers?.tug5}</span>
+                  <span style={{fontSize:11,color:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ultg?.nama||t.ultgId} • {t.namaPekerjaan||t.keteranganUmum||"-"} • {fmtDate(t.createdAt)}</span>
+                  {stageBadge5(t)}
+                  {canAdopt && <span style={{fontSize:10,fontWeight:700,color:"#0369a1"}}>👉 Siap Diadopsi</span>}
+                </div>
+              );
+            }
+
+            return (
+              <div key={t.id} style={{...sty.card,borderLeft:"3px solid #0369a1"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug5}</div>
+                    <div style={{fontSize:11,color:C.muted}}>Dari: {ultg?.nama||t.ultgId} • {fmtDate(t.createdAt)}</div>
+                    <div style={{fontSize:11,color:C.muted}}>👤 {creator.name} • {t.namaPekerjaan||t.keteranganUmum||"-"}</div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    {stageBadge5(t)}
+                    <button type="button" style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>setUltgExpandedId(null)}>▲ Tutup</button>
+                  </div>
+                </div>
+                <div style={{background:"#f9fafb",borderRadius:8,padding:8,marginBottom:8}}>
+                  {(t.stockItems||[]).map((si,idx)=>{
+                    const kat = katalogList.find(k=>k.id===si.katalogId);
+                    return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {kat?.name||"-"} <b>Permintaan: {si.permintaan}</b> {kat?.satuan} {si.keterangan&&<span style={{color:C.muted}}>— {si.keterangan}</span>}</div>;
+                  })}
+                </div>
+                {t.status==="REJECTED" && <div style={{fontSize:11,color:C.red,marginBottom:8}}>❌ {t.rejectReason}</div>}
+                {t.adoptedBy && <div style={{fontSize:11,color:C.green,marginBottom:8}}>✅ Sudah diadopsi, jadi draft TUG-9</div>}
+                {rejectingId===t.id && <div style={{marginBottom:8}}><input style={sty.input} placeholder="Alasan penolakan..." value={reason} onChange={e=>setReason(e.target.value)}/></div>}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {canApprove && (
+                    rejectingId===t.id
+                      ? <><button style={sty.btn("danger","sm")} onClick={()=>{rejectTUG5_MgrULTG(t,reason);setRejectingId(null);setReason("");}}>Konfirmasi Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>setRejectingId(null)}>Batal</button></>
+                      : <><button style={sty.btn("success","sm")} onClick={()=>approveTUG5_MgrULTG(t)}>✅ Setujui (Manager ULTG)</button><button style={{...sty.btn("ghost","sm"),border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ Tolak</button></>
+                  )}
+                  {canAdopt && (
+                    <button style={sty.btn("primary","sm")} onClick={async()=>{ const draft = await adoptTUG5ULTG(t); if(draft) openDraftTug9(draft); }}>📋 Adopt → Buat Draft TUG-9</button>
+                  )}
+                  {(t.stage==="APPROVED_ULTG"||t.status==="APPROVED") && <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat Dokumen TUG-5</button>}
+                </div>
+              </div>
+            );
+          })}
+          {tug5UltgTxns.length>5 && (
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4,marginBottom:8}}>
+              <button type="button" style={sty.btn("ghost","sm")} disabled={ultgListPage===0} onClick={()=>setUltgListPage(p=>Math.max(0,p-1))}>← Sebelumnya</button>
+              <span style={{fontSize:11,color:C.muted}}>Halaman {ultgListPage+1} dari {Math.ceil(tug5UltgTxns.length/5)}</span>
+              <button type="button" style={sty.btn("ghost","sm")} disabled={(ultgListPage+1)*5>=tug5UltgTxns.length} onClick={()=>setUltgListPage(p=>p+1)}>Selanjutnya →</button>
+            </div>
+          )}
+        </>
+      )}
 
       {/* TUG-7 Perintah Penyerahan (UIT) */}
       {(["ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","TL","ASMAN","MANAGER"].includes(currentUser.role)) && (
@@ -13128,7 +13594,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   );
 }
 
-function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange }) {
+function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Form, setTug7Form] = useState({});
@@ -13229,7 +13695,12 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
                 ℹ️ Pengembalian material — stok akan BERTAMBAH saat disetujui.
               </div>
             )}
-            {t.docType==="TUG5" && (
+            {t.docType==="TUG5" && t.sourceType==="ULTG" && (
+              <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:6,padding:"6px 10px",fontSize:11,color:"#1d4ed8",marginBottom:8}}>
+                🏘️ Dari ULTG {(ultgList||[]).find(u=>u.id===t.ultgId)?.nama||t.ultgId||"-"} — setelah disetujui, siap di-adopt Admin/TL UPT induk menjadi TUG-9.
+              </div>
+            )}
+            {t.docType==="TUG5" && t.sourceType!=="ULTG" && (
               <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:6,padding:"6px 10px",fontSize:11,color:"#1d4ed8",marginBottom:8}}>
                 {t.jenisTransfer==="INTRACOMPANY"?"🔄 Intracompany — setelah approved akan generate draft TUG-7 di UIT":"🌐 Intercompany — setelah approved akan generate draft TUG-5 UIT"}
               </div>
@@ -13273,6 +13744,12 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
                 rejectingId===t.id
                   ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG7_MgrLogistik(t)}>✅ SETUJUI TUG-7 → Generate Draft TUG-8</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
+              )}
+              {/* TUG-5 dari ULTG — approval Manager ULTG */}
+              {t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && currentUser.role==="MGR_ULTG" && (
+                rejectingId===t.id
+                  ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG5_MgrULTG(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
+                  : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG5_MgrULTG(t)}>✅ SETUJUI (Manager ULTG)</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
               )}
             </div>
           </div>

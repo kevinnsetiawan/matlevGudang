@@ -177,11 +177,16 @@ create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
   name text not null,
-  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / PENGADAAN / VIEWER
+  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER
   jabatan text,
   avatar text,
+  upt_id text,                  -- diisi untuk role scoped ke 1 UPT tertentu (opsional, biasanya via UPT konstan app)
+  ultg_id text,                 -- WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG — unit ULTG yang dia wakili
   created_at timestamptz default now()
 );
+-- Migrasi installasi lama yang tabelnya sudah ada sebelum kolom ini ditambahkan:
+alter table profiles add column if not exists upt_id text;
+alter table profiles add column if not exists ultg_id text;
 
 alter table profiles enable row level security;
 drop policy if exists "Authenticated read profiles" on profiles;
@@ -234,6 +239,12 @@ create table if not exists upt (
   data jsonb not null,
   created_at bigint
 );
+create table if not exists ultg (
+  id text primary key,
+  upt_id text references upt(id) on delete set null,
+  data jsonb not null,
+  created_at bigint
+);
 create table if not exists gudang (
   id text primary key,
   upt_id text references upt(id) on delete set null,
@@ -268,6 +279,7 @@ create table if not exists tim_mutu (
 
 alter table uit enable row level security;
 alter table upt enable row level security;
+alter table ultg enable row level security;
 alter table gudang enable row level security;
 alter table sub_gudang enable row level security;
 alter table lokasi enable row level security;
@@ -278,6 +290,11 @@ drop policy if exists "Authenticated read sub_gudang" on sub_gudang;
 drop policy if exists "Authenticated write sub_gudang" on sub_gudang;
 create policy "Authenticated read sub_gudang" on sub_gudang for select using (auth.role() = 'authenticated');
 create policy "Authenticated write sub_gudang" on sub_gudang for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+drop policy if exists "Authenticated read ultg" on ultg;
+drop policy if exists "Authenticated write ultg" on ultg;
+create policy "Authenticated read ultg" on ultg for select using (auth.role() = 'authenticated');
+create policy "Authenticated write ultg" on ultg for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Baca: siapa saja yang sudah login boleh baca semua master data (app butuh
 -- ini di banyak tempat — dropdown, laporan, dst). Tulis: dibatasi authenticated
