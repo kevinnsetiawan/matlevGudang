@@ -2280,7 +2280,7 @@ export default function PLNWarehouse() {
       // Master data (UIT/UPT/Gudang/Lokasi/Satpam/Tim Mutu) sekarang sumber
       // utamanya Supabase, bukan localStorage lagi — load dulu (seed dari
       // DEFAULT_* kalau tabelnya masih kosong, mis. instalasi baru).
-      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm] = await Promise.all([
+      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote] = await Promise.all([
         seedMasterTableIfEmpty("uit", DEFAULT_UIT),
         seedMasterTableIfEmpty("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null })),
         loadMasterTable("ultg").then(r => r || []),
@@ -2289,6 +2289,8 @@ export default function PLNWarehouse() {
         seedMasterTableIfEmpty("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null })),
         seedMasterTableIfEmpty("satpam", DEFAULT_SATPAM),
         seedMasterTableIfEmpty("tim_mutu", DEFAULT_TIM_MUTU),
+        loadMasterTable("katalog"),
+        loadMasterTable("stocks"),
       ]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
 
@@ -2307,6 +2309,27 @@ export default function PLNWarehouse() {
           CLOUD.set("pln_stocks_v4", dStk.list);
           syncMasterTable("lokasi", dLok.list, l => ({ gudang_id: l.gudangId || null, status: l.status || null }));
         }
+
+        // Master Katalog & Data Stok sekarang punya "rumah" permanen di Supabase (tabel
+        // katalog/stocks, pola sama seperti uit/upt/dll) — sebelumnya cuma localStorage
+        // (lihat catatan di schema.sql section 1). Supabase jadi sumber utama kalau sudah
+        // ada isinya; kalau masih kosong (instalasi lama yang baru upgrade ke versi ini),
+        // dorong sekali data localStorage yang ada ke Supabase supaya tidak hilang lagi.
+        // Filter `k.name` (bukan cuma length>0): baris `katalog` lama sempat berupa row
+        // kosong (`data:{}`, orphan dari skema sebelum migrasi) yang tidak bisa dihapus
+        // karena masih dirujuk FK tug15_history — jangan sampai baris kosong itu dianggap
+        // "Supabase sudah ada data" dan menimpa data asli di localStorage.
+        const ckatRemoteReal = (ckatRemote||[]).filter(k=>k.name);
+        if (ckatRemoteReal.length > 0) {
+          setKatalogList(dedupeById(ckatRemoteReal).list);
+        } else if (dKat.list.length > 0) {
+          syncMasterTable("katalog", dKat.list);
+        }
+        if (csRemote && csRemote.length > 0) {
+          setStocks(dedupeById(csRemote).list);
+        } else if (dStk.list.length > 0) {
+          syncMasterTable("stocks", dStk.list, s => ({ katalog_id: s.katalogId || null, lokasi_id: s.lokasiId || null }));
+        }
       } else {
         // Check for legacy flat-stock data from older version of the app
         const legacyStocks = await CLOUD.get("pln_stocks_v3");
@@ -2315,7 +2338,9 @@ export default function PLNWarehouse() {
           setStocks(migrated.stocks); setKatalogList(migrated.katalog); setLokasiList(migrated.lokasi);
           showToastRef.current && showToastRef.current("📦 Data lama berhasil dimigrasikan ke struktur Master Data baru!", "success");
         } else {
-          setStocks(DEFAULT_STOCKS); setKatalogList(DEFAULT_KATALOG); setLokasiList(clok || DEFAULT_LOKASI);
+          setStocks((csRemote&&csRemote.length>0) ? csRemote : DEFAULT_STOCKS);
+          setKatalogList((ckatRemote||[]).some(k=>k.name) ? ckatRemote.filter(k=>k.name) : DEFAULT_KATALOG);
+          setLokasiList(clok || DEFAULT_LOKASI);
         }
       }
       setTxns(ct || DEFAULT_TXNS);
@@ -2394,6 +2419,13 @@ export default function PLNWarehouse() {
     ]);
     setLastSaved(Date.now());
     setCloudSaving(false);
+
+    // Master Katalog & Data Stok — sumber utama sekarang Supabase (tabel katalog/stocks),
+    // bukan cuma localStorage lagi (lihat catatan migrasi di schema.sql section 1/1b).
+    // Disinkron langsung (tidak di-debounce) karena ini data inti aplikasi, bukan cuma
+    // kebutuhan bot chat seperti stocks_snapshot/warnoto_state di bawah.
+    if (overrides.katalogList !== undefined) syncMasterTable("katalog", kat);
+    if (overrides.stocks !== undefined) syncMasterTable("stocks", s, item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null }));
 
     // Auto-sync warnoto_state + RAG (bot WA/Telegram) kalau ada perubahan stocks/txns —
     // debounced 90 detik supaya tidak spam Cohere embed API tiap 1 saveToCloud.
@@ -2523,6 +2555,13 @@ export default function PLNWarehouse() {
   async function saveKatalog() {
     if (!katalogForm.name?.trim()) { showToast("Nama barang tidak boleh kosong!","error"); return; }
     if (!katalogForm.katalog?.trim()) { showToast("Nomor Katalog tidak boleh kosong!","error"); return; }
+    // Cegah duplikat: 1 barang fisik seharusnya cuma punya 1 katalogId. Kode katalog (nomor
+    // SAP) harus unik mutlak; nama juga dicek (case-insensitive, exact match) karena barang
+    // yang sama sering ke-input dobel dengan kode beda kalau tidak dicek di sini.
+    const kodeDup = katalogList.find(k => k.id!==katalogForm.id && (k.katalog||"").trim().toLowerCase()===katalogForm.katalog.trim().toLowerCase());
+    if (kodeDup) { showToast(`Nomor Katalog "${katalogForm.katalog}" sudah dipakai oleh "${kodeDup.name}"!`, "error"); return; }
+    const namaDup = katalogList.find(k => k.id!==katalogForm.id && (k.name||"").trim().toLowerCase()===katalogForm.name.trim().toLowerCase());
+    if (namaDup) { showToast(`Nama barang "${katalogForm.name}" sudah ada (kode ${namaDup.katalog||"-"}). Kalau ini barang yang sama, edit yang sudah ada — jangan buat baru.`, "error"); return; }
     let nk;
     if (katalogModal==="edit") nk = katalogList.map(k=>k.id===katalogForm.id?{...katalogForm}:k);
     else nk = [...katalogList, {...katalogForm, createdAt:Date.now()}];

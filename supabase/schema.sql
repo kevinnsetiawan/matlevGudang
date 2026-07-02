@@ -7,19 +7,54 @@
 
 -- ────────────────────────────────────────────────────────────
 -- 1. KATALOG — master barang (cerminan dari Master Katalog di App.jsx)
+--    Pola jsonb (sama seperti uit/upt/gudang/lokasi/satpam/tim_mutu di
+--    section 8) — supaya bisa pakai loadMasterTable/syncMasterTable/
+--    seedMasterTableIfEmpty yang generik, bukan sync bespoke terpisah.
+--
+--    RIWAYAT: tabel ini SEBELUMNYA punya kolom typed (nama/kategori/satuan/
+--    jenis_barang/foto_keseluruhan_url) tapi TIDAK PERNAH benar-benar
+--    disinkron App.jsx (orphan sejak commit feed925 — "Katalog was
+--    explicitly left out of this round"). katalogList/stocks App.jsx cuma
+--    tersimpan di localStorage browser sampai 2026-07-02 (ditemukan saat
+--    audit sebelum migrasi data massal). Data lama di tabel ini AMAN
+--    dihapus (basi/tidak dipakai) — makanya migrasi di bawah pakai
+--    `drop column` langsung, bukan preservasi data lama.
 -- ────────────────────────────────────────────────────────────
 create table if not exists katalog (
   id text primary key,              -- sama dengan id di App.jsx, cth "KAT-1060011"
-  nama text not null,
-  kategori text,
-  satuan text,
-  jenis_barang text,                -- Cadang / Persediaan / Pre Memory / dst
-  foto_keseluruhan_url text,        -- URL publik foto material keseluruhan (bucket material-photos)
-  created_at timestamptz default now()
+  data jsonb not null default '{}'::jsonb,
+  created_at bigint
 );
+-- Migrasi installasi lama (skema typed-column, orphan/basi -- lihat catatan di atas):
+alter table katalog drop column if exists nama;
+alter table katalog drop column if exists kategori;
+alter table katalog drop column if exists satuan;
+alter table katalog drop column if exists jenis_barang;
+alter table katalog drop column if exists foto_keseluruhan_url;
+alter table katalog add column if not exists data jsonb not null default '{}'::jsonb;
+alter table katalog add column if not exists created_at bigint;
 
--- Jika tabel katalog sudah ada dari sebelumnya (skema versi lama), tambahkan kolom baru:
-alter table katalog add column if not exists foto_keseluruhan_url text;
+-- ────────────────────────────────────────────────────────────
+-- 1b. STOCKS — Data Stok aktif (qty per item per lokasi), pola jsonb sama.
+--     BEDA dari stocks_snapshot (tabel ringkas khusus bot chat/cron malam,
+--     lihat section 17) -- tabel ini SUMBER UTAMA Data Stok aplikasi.
+--     katalog_id/lokasi_id dihoist sebagai kolom asli (bukan cuma di jsonb)
+--     supaya bisa di-filter/join langsung di Supabase Studio kalau perlu.
+-- ────────────────────────────────────────────────────────────
+create table if not exists stocks (
+  id text primary key,
+  katalog_id text references katalog(id) on delete set null,
+  lokasi_id text,
+  data jsonb not null default '{}'::jsonb,
+  created_at bigint
+);
+create index if not exists idx_stocks_katalog on stocks(katalog_id);
+create index if not exists idx_stocks_lokasi on stocks(lokasi_id);
+alter table stocks enable row level security;
+drop policy if exists "Authenticated read stocks" on stocks;
+drop policy if exists "Authenticated write stocks" on stocks;
+create policy "Authenticated read stocks" on stocks for select using (auth.role() = 'authenticated');
+create policy "Authenticated write stocks" on stocks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- ────────────────────────────────────────────────────────────
 -- 2. TUG15_HISTORY — riwayat mutasi stok (sumber data training ML
