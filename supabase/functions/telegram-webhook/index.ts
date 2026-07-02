@@ -68,7 +68,15 @@ Deno.serve(async (req) => {
   let logEntry: Record<string, unknown> = {};
 
   try {
-    const update  = await req.json();
+    const update = await req.json();
+
+    // ── Tombol feedback 👍/👎 (callback_query, bukan message biasa) ──
+    const callback = update?.callback_query;
+    if (callback) {
+      await handleFeedbackCallback(callback);
+      return new Response("OK", { status: 200 });
+    }
+
     const message = update?.message;
     if (!message || typeof message.text !== "string") {
       return new Response("OK", { status: 200 });
@@ -135,7 +143,20 @@ Deno.serve(async (req) => {
     logEntry.response_ms    = Date.now() - t0;
 
     await sendTelegramMessage(chatId, reply);
-    await writeLog(logEntry);
+    const savedLog = await writeLog(logEntry);
+
+    // Setiap 4 pertanyaan (bukan tiap kali, biar tidak mengganggu), minta feedback 👍/👎 —
+    // dipakai Admin di panel "Kelola FAQ Bot" untuk cari jawaban yang perlu diperbaiki.
+    if (intent === "rag_query" && savedLog?.id) {
+      const { count } = await supabase
+        .from("tg_agent_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("telegram_user_id", userId)
+        .eq("intent", "rag_query");
+      if (count && count % 4 === 0) {
+        await sendTelegramFeedbackPrompt(chatId, savedLog.id as number);
+      }
+    }
 
   } catch (err) {
     console.error("telegram-webhook error:", err);
@@ -277,10 +298,75 @@ async function sendTelegramMessage(chatId: number | string, text: string) {
 
 // ── Audit log ───────────────────────────────────────────────────────────────
 
-async function writeLog(entry: Record<string, unknown>) {
+async function writeLog(entry: Record<string, unknown>): Promise<{ id: number } | null> {
   try {
-    await supabase.from("tg_agent_logs").insert(entry);
+    const { data, error } = await supabase.from("tg_agent_logs").insert(entry).select("id").single();
+    if (error) throw error;
+    return data as { id: number };
   } catch (e) {
     console.error("Gagal tulis audit log:", e);
+    return null;
   }
+}
+
+// ── Feedback 👍/👎 ────────────────────────────────────────────────────────────
+
+async function sendTelegramFeedbackPrompt(chatId: number | string, logId: number) {
+  const resp = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: "Apakah jawaban-jawaban di atas membantu?",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "👍 Membantu", callback_data: `fb:up:${logId}` },
+          { text: "👎 Kurang Tepat", callback_data: `fb:down:${logId}` },
+        ]],
+      },
+    }),
+  });
+  if (!resp.ok) console.error("Gagal kirim feedback prompt:", resp.status, await resp.text());
+}
+
+async function handleFeedbackCallback(callback: Record<string, any>) {
+  const data = String(callback?.data ?? "");
+  const chatId = callback?.message?.chat?.id;
+  const callbackId = callback?.id;
+  const [, vote, logIdStr] = data.split(":");
+  const logId = Number(logIdStr);
+
+  if (!["up", "down"].includes(vote) || !logId) {
+    if (callbackId) await answerCallbackQuery(callbackId, "");
+    return;
+  }
+
+  try {
+    await supabase.from("tg_agent_logs").update({ feedback: vote }).eq("id", logId);
+  } catch (e) {
+    console.error("Gagal simpan feedback:", e);
+  }
+
+  if (callbackId) await answerCallbackQuery(callbackId, vote === "up" ? "Terima kasih! 🙏" : "Dicatat, akan diperbaiki Admin 🙏");
+
+  // Edit pesan tombol jadi teks statis supaya tidak bisa diklik berkali-kali.
+  if (chatId && callback?.message?.message_id) {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: callback.message.message_id,
+        text: vote === "up" ? "✅ Terima kasih atas feedback-nya!" : "📝 Terima kasih, akan diperbaiki Admin.",
+      }),
+    });
+  }
+}
+
+async function answerCallbackQuery(callbackQueryId: string, text: string) {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+  });
 }

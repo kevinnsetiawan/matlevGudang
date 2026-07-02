@@ -1,0 +1,27 @@
+name: Nightly Knowledge Base Sync (Bot WA/Telegram)
+
+on:
+  schedule:
+    # 02:00 WIB = 19:00 UTC hari sebelumnya (bareng jadwal Train Forecast)
+    - cron: "0 19 * * *"
+  workflow_dispatch: {} # boleh dipicu manual juga dari tab Actions di GitHub
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js
+
+      - name: Run nightly sync job
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+        run: node scripts/nightly_sync.mjs

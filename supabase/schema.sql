@@ -568,3 +568,61 @@ create index if not exists idx_tg_logs_created on tg_agent_logs(created_at desc)
 alter table tg_agent_logs enable row level security;
 drop policy if exists "Authenticated read tg_agent_logs" on tg_agent_logs;
 create policy "Authenticated read tg_agent_logs" on tg_agent_logs for select using (auth.role() = 'authenticated');
+-- feedback: 'up' | 'down' | null — diisi lewat tombol inline Telegram (lihat telegram-webhook)
+alter table tg_agent_logs add column if not exists feedback text check (feedback in ('up','down') or feedback is null);
+-- Edge Function (service_role) perlu UPDATE baris ini saat user klik tombol feedback.
+drop policy if exists "Service write tg_agent_logs" on tg_agent_logs;
+create policy "Service write tg_agent_logs" on tg_agent_logs for update using (true) with check (true);
+
+-- ────────────────────────────────────────────────────────────
+-- 17. STOCKS_SNAPSHOT — salinan qty+harga Data Stok ke Supabase, khusus supaya
+--     cron malam (nightly_sync, jalan di GitHub Actions TANPA browser terbuka)
+--     bisa hitung ulang top-N by value / stok kritis dengan angka Rupiah yang
+--     benar. Sebelum ini, harga material HANYA ada di localStorage/CLOUD tiap
+--     browser Admin — tidak bisa diakses proses server-side sama sekali.
+--     Diisi otomatis dari App.jsx lewat saveToCloud (auto-sync debounced 90
+--     detik, bareng syncRagChunks/syncWarnotoState) — "whole list is the
+--     truth" (upsert + hapus yang tidak ada lagi), sama seperti master data lain.
+-- ────────────────────────────────────────────────────────────
+create table if not exists stocks_snapshot (
+  id text primary key,              -- sama dengan stocks[].id di App.jsx
+  katalog_id text references katalog(id) on delete set null,
+  nama text not null,
+  qty numeric not null default 0,
+  satuan text,
+  harga numeric not null default 0,
+  jenis_barang text,
+  min_qty numeric default 0,
+  updated_at timestamptz default now()
+);
+create index if not exists idx_stocks_snapshot_katalog on stocks_snapshot(katalog_id);
+alter table stocks_snapshot enable row level security;
+drop policy if exists "Authenticated read stocks_snapshot" on stocks_snapshot;
+drop policy if exists "Authenticated write stocks_snapshot" on stocks_snapshot;
+create policy "Authenticated read stocks_snapshot" on stocks_snapshot for select using (auth.role() = 'authenticated');
+create policy "Authenticated write stocks_snapshot" on stocks_snapshot for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+-- Nightly cron (service_role, dari GitHub Actions) juga perlu baca tabel ini -
+-- service_role otomatis bypass RLS, jadi tidak perlu policy tambahan untuk itu.
+
+-- ────────────────────────────────────────────────────────────
+-- 18. AI_FAQ_CURATED — "buku pintar" hasil kurasi Admin dari pertanyaan nyata
+--     yang dijawab buruk oleh bot (lihat panel baru di AI Agent web). Ikut
+--     di-embed ke rag_chunks (source_type='faq') oleh syncRagChunks (client)
+--     maupun nightly_sync.mjs (cron) — supaya pertanyaan serupa besok-besok
+--     langsung dijawab pakai jawaban resmi ini, bukan coba-coba lagi.
+-- ────────────────────────────────────────────────────────────
+create table if not exists ai_faq_curated (
+  id bigint generated always as identity primary key,
+  pertanyaan text not null,
+  jawaban text not null,
+  source_log_table text,            -- 'wa_agent_logs' | 'tg_agent_logs' | null (ditulis manual)
+  source_log_id bigint,
+  created_by text,
+  created_at timestamptz default now(),
+  is_active boolean not null default true
+);
+alter table ai_faq_curated enable row level security;
+drop policy if exists "Authenticated read ai_faq_curated" on ai_faq_curated;
+drop policy if exists "Authenticated write ai_faq_curated" on ai_faq_curated;
+create policy "Authenticated read ai_faq_curated" on ai_faq_curated for select using (auth.role() = 'authenticated');
+create policy "Authenticated write ai_faq_curated" on ai_faq_curated for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');

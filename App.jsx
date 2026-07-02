@@ -2395,6 +2395,7 @@ export default function PLNWarehouse() {
       if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
       autoSyncTimerRef.current = setTimeout(async () => {
         try {
+          await syncStocksSnapshot(true);
           await syncRagChunks(true);
           await syncWarnotoState(true);
         } catch (e) {
@@ -4577,9 +4578,15 @@ export default function PLNWarehouse() {
         if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty:0, price:s.price||0 };
         stockByKatalog[s.katalogId].qty += s.qty||0;
       });
+      // "Buku pintar" hasil kurasi Admin dari pertanyaan nyata yang dijawab buruk oleh bot —
+      // diprioritaskan tinggi karena isinya jawaban resmi untuk pertanyaan yang benar-benar
+      // pernah ditanyakan, bukan cuma deskripsi umum.
+      const { data: faqRows } = await supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true);
+
       const chunks = [
         ...katalogList.map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, content:buildKatalogRagContent(k, stockByKatalog[k.id]) })),
         ...txnRelevant.map(t=>({ id:`txn_${t.id}`, source_type:"txn", source_id:t.id, content:buildTxnRagContent(t) })),
+        ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
       ];
       if (chunks.length===0) { if (!silent) showToast("Tidak ada data untuk di-index.", "error"); if (!silent) setRagSyncing(false); return; }
       // Cohere embed API maks ~96 teks per request — kirim per batch.
@@ -4591,13 +4598,13 @@ export default function PLNWarehouse() {
         const { error } = await supabase.from("rag_chunks").upsert(rows, { onConflict: "id" });
         if (error) throw error;
       }
-      // Hapus chunk lama yang sumbernya sudah tidak ada lagi (katalog/txn terhapus)
+      // Hapus chunk lama yang sumbernya sudah tidak ada lagi (katalog/txn/FAQ terhapus)
       const currentIds = new Set(chunks.map(c=>c.id));
       const { data: existing } = await supabase.from("rag_chunks").select("id");
       const toDelete = (existing||[]).filter(r=>!currentIds.has(r.id)).map(r=>r.id);
       if (toDelete.length) await supabase.from("rag_chunks").delete().in("id", toDelete);
       setRagLastSync(Date.now());
-      if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${chunks.length} item (${katalogList.length} katalog, ${txnRelevant.length} transaksi).`);
+      if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${chunks.length} item (${katalogList.length} katalog, ${txnRelevant.length} transaksi, ${(faqRows||[]).length} FAQ).`);
     } catch (err) {
       if (!silent) showToast("Gagal sinkron Knowledge Base: " + err.message, "error");
       else console.error("Auto-sync RAG gagal:", err.message);
@@ -4656,6 +4663,34 @@ export default function PLNWarehouse() {
     } catch (err) {
       if (!silent) showToast("Gagal sinkron State Gudang (untuk bot WA/Telegram): " + err.message, "error");
       else console.error("Auto-sync warnoto_state gagal:", err.message);
+    }
+  }
+
+  // Salin qty+harga Data Stok ke tabel Supabase `stocks_snapshot` — khusus supaya cron malam
+  // (nightly_sync.mjs, jalan di GitHub Actions tanpa browser terbuka) bisa hitung ulang
+  // top-N/stok kritis dengan harga yang benar. Tanpa ini, harga cuma ada di localStorage
+  // browser, tidak bisa diakses proses server-side sama sekali. "Whole list is the truth"
+  // (upsert + hapus yang sudah tidak ada), sama pola dengan sync master data lain.
+  async function syncStocksSnapshot(silent = false) {
+    if (!supabase) return;
+    try {
+      const rows = enrichedStocks.map(s => ({
+        id: s.id, katalog_id: s.katalogId || null, nama: s.name,
+        qty: s.qty || 0, satuan: s.unit || "", harga: s.price || 0,
+        jenis_barang: s.jenisBarang || "", min_qty: s.minQty || 0,
+        updated_at: new Date().toISOString(),
+      }));
+      if (rows.length > 0) {
+        const { error } = await supabase.from("stocks_snapshot").upsert(rows, { onConflict: "id" });
+        if (error) throw error;
+      }
+      const currentIds = new Set(rows.map(r=>r.id));
+      const { data: existing } = await supabase.from("stocks_snapshot").select("id");
+      const toDelete = (existing||[]).filter(r=>!currentIds.has(r.id)).map(r=>r.id);
+      if (toDelete.length) await supabase.from("stocks_snapshot").delete().in("id", toDelete);
+    } catch (err) {
+      if (!silent) showToast("Gagal sinkron Stocks Snapshot (untuk cron malam bot): " + err.message, "error");
+      else console.error("Auto-sync stocks_snapshot gagal:", err.message);
     }
   }
 
@@ -6548,6 +6583,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             sendChat={sendChat}
             syncRagChunks={syncRagChunks}
             syncWarnotoState={syncWarnotoState}
+            syncStocksSnapshot={syncStocksSnapshot}
             ragSyncing={ragSyncing}
             ragLastSync={ragLastSync}
             currentUser={currentUser}
@@ -8938,9 +8974,123 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
 }
 
 // ─── AI AGENT PAGE (Forecast + Chat terintegrasi) ────────────────────────
+// Panel kurasi FAQ Bot (Admin only) — tampilkan pertanyaan nyata dari bot WA/Telegram
+// yang dijawab buruk (kena feedback 👎 atau jawabannya kedengaran "menyerah"), Admin
+// tulis jawaban resmi → tersimpan ke ai_faq_curated → ikut di-embed ke rag_chunks
+// (lewat syncRagChunks) supaya pertanyaan serupa besok-besok langsung dijawab benar.
+const BAD_ANSWER_KEYWORDS = ["maaf","tidak ada data","tidak bisa","tidak tersedia","kendala","tidak ditemukan"];
+function AIFaqPanel({ sty, C, onSaved }) {
+  const [loading, setLoading] = useState(true);
+  const [badLogs, setBadLogs] = useState([]);
+  const [faqList, setFaqList] = useState([]);
+  const [answeringId, setAnsweringId] = useState(null);
+  const [answerDraft, setAnswerDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [{data: waLogs}, {data: tgLogs}, {data: faq}] = await Promise.all([
+        supabase.from("wa_agent_logs").select("*").eq("intent","rag_query").order("created_at",{ascending:false}).limit(100),
+        supabase.from("tg_agent_logs").select("*").eq("intent","rag_query").order("created_at",{ascending:false}).limit(100),
+        supabase.from("ai_faq_curated").select("*").eq("is_active",true).order("created_at",{ascending:false}),
+      ]);
+      const combined = [
+        ...(waLogs||[]).map(l=>({...l, _table:"wa_agent_logs", _channel:"WA"})),
+        ...(tgLogs||[]).map(l=>({...l, _table:"tg_agent_logs", _channel:"Telegram"})),
+      ];
+      const bad = combined.filter(l=>
+        l.feedback==="down" ||
+        BAD_ANSWER_KEYWORDS.some(kw=>(l.answer_summary||"").toLowerCase().includes(kw))
+      ).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+      setBadLogs(bad);
+      setFaqList(faq||[]);
+    } catch (e) {
+      console.error("Gagal load data FAQ panel:", e);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  async function saveFaq(log) {
+    if (!answerDraft.trim()) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from("ai_faq_curated").insert({
+        pertanyaan: log.message_in,
+        jawaban: answerDraft.trim(),
+        source_log_table: log._table,
+        source_log_id: log.id,
+        created_by: "web-admin",
+      });
+      if (error) throw error;
+      setAnsweringId(null); setAnswerDraft("");
+      await loadData();
+      if (onSaved) await onSaved();
+    } catch (e) {
+      alert("Gagal simpan FAQ: " + e.message);
+    }
+    setSaving(false);
+  }
+
+  async function deactivateFaq(id) {
+    await supabase.from("ai_faq_curated").update({is_active:false}).eq("id", id);
+    loadData();
+  }
+
+  return (
+    <div style={{...sty.card, marginBottom:16}}>
+      <div style={{fontWeight:800,fontSize:14,marginBottom:4}}>🧠 Kelola FAQ Bot</div>
+      <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Pertanyaan nyata dari bot WA/Telegram yang dijawab kurang baik — tulis jawaban resmi supaya besok bot langsung tahu.</p>
+
+      {loading ? <div style={{fontSize:12,color:C.muted}}>Memuat...</div> : (
+        <>
+          <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>⚠️ Perlu Jawaban Resmi ({badLogs.length})</div>
+          {badLogs.length===0 && <div style={{fontSize:12,color:C.muted,marginBottom:16}}>Tidak ada pertanyaan yang perlu diperbaiki saat ini. 👍</div>}
+          {badLogs.slice(0,20).map(log=>(
+            <div key={`${log._table}_${log.id}`} style={{border:`1px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:8,background:"#fffbeb"}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:4}}>
+                <div style={{fontSize:12,fontWeight:700}}>{log.message_in}</div>
+                <span style={{fontSize:10,color:C.muted,whiteSpace:"nowrap"}}>{log._channel} • {log.display_name||log.telegram_username||log.phone_number||"-"}</span>
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Jawaban bot: "{(log.answer_summary||"").slice(0,150)}{(log.answer_summary||"").length>150?"...":""}"{log.feedback==="down" && " (ditandai 👎 oleh user)"}</div>
+              {answeringId===`${log._table}_${log.id}` ? (
+                <div>
+                  <textarea style={{...sty.input,minHeight:70,marginBottom:6}} placeholder="Tulis jawaban resmi yang benar..." value={answerDraft} onChange={e=>setAnswerDraft(e.target.value)}/>
+                  <div style={{display:"flex",gap:6}}>
+                    <button style={sty.btn("success","sm")} disabled={saving} onClick={()=>saveFaq(log)}>{saving?"Menyimpan...":"💾 Simpan Jawaban Resmi"}</button>
+                    <button style={sty.btn("ghost","sm")} onClick={()=>{setAnsweringId(null);setAnswerDraft("");}}>Batal</button>
+                  </div>
+                </div>
+              ) : (
+                <button style={sty.btn("ghost","sm")} onClick={()=>{setAnsweringId(`${log._table}_${log.id}`);setAnswerDraft("");}}>✏️ Tulis Jawaban Resmi</button>
+              )}
+            </div>
+          ))}
+
+          <div style={{fontSize:12,fontWeight:700,marginTop:16,marginBottom:8}}>📚 FAQ Terkurasi ({faqList.length})</div>
+          {faqList.length===0 && <div style={{fontSize:12,color:C.muted}}>Belum ada FAQ yang dikurasi.</div>}
+          {faqList.map(f=>(
+            <div key={f.id} style={{display:"flex",justifyContent:"space-between",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:700}}>{f.pertanyaan}</div>
+                <div style={{fontSize:11,color:C.muted}}>{f.jawaban}</div>
+              </div>
+              <button style={{...sty.btn("ghost","sm"),flexShrink:0}} onClick={()=>deactivateFaq(f.id)}>🗑️ Nonaktifkan</button>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
   rencanaKedatanganList, chatHistory, setChatHistory, chatInput, setChatInput,
-  chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState, ragSyncing, ragLastSync, currentUser, C, sty }) {
+  chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState, syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, C, sty }) {
+
+  const [showFaqPanel, setShowFaqPanel] = useState(false);
 
   const SUGGESTED = [
     "Analisa kondisi stok sekarang dan material yang perlu perhatian",
@@ -8960,13 +9110,20 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
         </div>
         {currentUser?.role==="ADMIN" && (
           <div style={{textAlign:"right"}}>
-            <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={async()=>{await syncRagChunks(); await syncWarnotoState();}}>
-              {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG + Bot WA/Telegram)"}
-            </button>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+              <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot(); await syncRagChunks(); await syncWarnotoState();}}>
+                {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG + Bot WA/Telegram)"}
+              </button>
+              <button style={sty.btn(showFaqPanel?"primary":"ghost","sm")} onClick={()=>setShowFaqPanel(v=>!v)}>
+                🧠 Kelola FAQ Bot
+              </button>
+            </div>
             {ragLastSync && <div style={{fontSize:10,color:C.muted,marginTop:4}}>Terakhir sync: {fmtDate(ragLastSync)}</div>}
           </div>
         )}
       </div>
+
+      {showFaqPanel && currentUser?.role==="ADMIN" && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
 
       {/* ── CHAT AI ── */}
       <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
