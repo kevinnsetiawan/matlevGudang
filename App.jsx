@@ -13229,9 +13229,26 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
     e.target.value = "";
   }
 
-  function buildPreview() {
-    const maraSet = new Set((maraReference||[]).map(r=>r.katalog));
+  // BUG DITEMUKAN 2026-07-02: matchMara sebelumnya cek ke `maraReference` (state session-only,
+  // diisi lewat tombol upload TERPISAH khusus di tab ini) — BUKAN tabel Supabase `mara_catalog`
+  // yang sungguhan dipakai user (42.703 baris, diupload lewat Master Data → Master Katalog).
+  // Karena user tidak pernah upload lewat tombol yang di tab ini, maraReference selalu kosong,
+  // jadi SEMUA baris salah tampil "tidak match MARA". Fix: query mara_catalog langsung, dengan
+  // normalisasi kode (MARA pakai 15 digit zero-padded, App pakai kode pendek tanpa padding —
+  // sama seperti bug yang sudah pernah difix di applyMaraToKatalog/backfill kategori).
+  async function buildPreview() {
+    setBusy(true);
     const warnotoSet = new Set(katalogList.map(k=>normalizeKatalog(k.katalog)));
+
+    let maraSet = new Set();
+    if (supabase) {
+      const { data, error } = await supabase.from("mara_catalog").select("kode_material");
+      if (!error && data) {
+        maraSet = new Set(data.map(m => m.kode_material.replace(/^0+/, "")));
+      } else if (error) {
+        showToast("Gagal cek referensi MARA: " + error.message, "error");
+      }
+    }
 
     const sapResult = sapRows.map(r => ({
       ...r,
@@ -13247,6 +13264,38 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
 
     setPreviewStats({ sapResult, byJenis, totalQty, totalNilai });
     setStep("preview");
+    setBusy(false);
+  }
+
+  // Recompute ringkasan (byJenis/totalQty/totalNilai) setelah sapResult diubah manual di preview.
+  function recomputeStats(sapResult) {
+    const byJenis = {};
+    sapResult.forEach(r => { byJenis[r.jenisBarang] = (byJenis[r.jenisBarang]||0) + 1; });
+    const totalQty = sapResult.reduce((s,r)=>s+r.qty,0);
+    const totalNilai = sapResult.reduce((s,r)=>s+(r.qty*r.harga),0);
+    return { sapResult, byJenis, totalQty, totalNilai };
+  }
+  // Aksi review manual: gabung qty Quality Inspection/Blocked/In Transit ke qty utama (Unrestricted).
+  function moveReviewToUnrestricted(noKat) {
+    setPreviewStats(ps => {
+      if (!ps) return ps;
+      const sapResult = ps.sapResult.map(r => {
+        if (r.noKat !== noKat) return r;
+        const tambahan = (r.qiStock||0) + (r.blockedStock||0) + (r.transitStock||0);
+        return { ...r, qty: r.qty + tambahan, qiStock:0, blockedStock:0, transitStock:0, needsStockReview:false };
+      });
+      return recomputeStats(sapResult);
+    });
+    showToast(`Qty review digabung ke Unrestricted untuk ${noKat}.`, "success");
+  }
+  // Aksi review manual: keluarkan baris ini total dari daftar yang akan diimpor.
+  function removeFromImportList(noKat) {
+    setPreviewStats(ps => {
+      if (!ps) return ps;
+      const sapResult = ps.sapResult.filter(r => r.noKat !== noKat);
+      return recomputeStats(sapResult);
+    });
+    showToast(`${noKat} dihapus dari daftar impor.`, "success");
   }
 
   async function handleBackupAndApply() {
@@ -13427,10 +13476,10 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
           {previewStats.sapResult.some(r=>r.needsStockReview) && (
             <div style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`}}>
               <div style={{fontWeight:700,marginBottom:4,color:C.red}}>⚠️ Perlu Review Manual — Qty di luar "Unrestricted Use Stock"</div>
-              <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Baris ini punya qty di Quality Inspection/Blocked/In Transit Stock — TIDAK otomatis ditambahkan ke Data Stok. Putuskan manual per baris apakah qty ini perlu diikutkan (misal via penyesuaian stok terpisah setelah import) atau diabaikan.</div>
-              <div style={{maxHeight:180,overflowY:"auto"}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Baris ini punya qty di Quality Inspection/Blocked/In Transit Stock — TIDAK otomatis ditambahkan ke Data Stok. Putuskan per baris: gabung ke Unrestricted, atau hapus barisnya dari daftar impor. Kalau dibiarkan, qty tambahan ini tetap diabaikan (cuma qty Unrestricted yang ikut masuk).</div>
+              <div style={{maxHeight:220,overflowY:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead><tr style={{background:"#fef2f2"}}>{["No Katalog","Deskripsi","Unrestricted","Quality Insp.","Blocked","In Transit"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left"}}>{h}</th>)}</tr></thead>
+                  <thead><tr style={{background:"#fef2f2"}}>{["No Katalog","Deskripsi","Unrestricted","Quality Insp.","Blocked","In Transit","Aksi"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left"}}>{h}</th>)}</tr></thead>
                   <tbody>
                     {previewStats.sapResult.filter(r=>r.needsStockReview).map((r,i)=>(
                       <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
@@ -13440,6 +13489,10 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
                         <td style={{padding:"5px 8px",textAlign:"right",color:r.qiStock>0?C.red:C.muted}}>{r.qiStock||"-"}</td>
                         <td style={{padding:"5px 8px",textAlign:"right",color:r.blockedStock>0?C.red:C.muted}}>{r.blockedStock||"-"}</td>
                         <td style={{padding:"5px 8px",textAlign:"right",color:r.transitStock>0?C.red:C.muted}}>{r.transitStock||"-"}</td>
+                        <td style={{padding:"5px 8px",whiteSpace:"nowrap"}}>
+                          <button style={{...sty.btn("ghost","sm"),padding:"3px 8px",marginRight:4}} onClick={()=>moveReviewToUnrestricted(r.noKat)}>➡️ Ke Unrestricted</button>
+                          <button style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={()=>removeFromImportList(r.noKat)}>🗑️ Hapus</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
