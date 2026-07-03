@@ -2577,7 +2577,7 @@ export default function PLNWarehouse() {
     if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
     setMaraSearchLoading(true);
     const { data, error } = await supabase.from("mara_catalog")
-      .select("kode_material,nama,satuan,material_group")
+      .select("kode_material,nama,satuan,material_group,material_group_desc")
       .ilike("nama", `%${q.trim()}%`)
       .limit(20);
     setMaraSearchLoading(false);
@@ -2592,7 +2592,7 @@ export default function PLNWarehouse() {
   function applyMaraToKatalog(item) {
     // _maraLocked: kunci Nomor Katalog/Nama/Kategori/Satuan supaya tidak diketik ulang manual
     // dan jadi tidak konsisten dengan sumber MARA — bisa dibuka lagi lewat tombol "Lepas kunci".
-    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan, category: item.material_group||kf.category, _maraLocked: true }));
+    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan, category: item.material_group_desc||item.material_group||kf.category, _maraLocked: true }));
     setMaraSearchResults([]);
     setMaraSearch("");
   }
@@ -2615,6 +2615,7 @@ export default function PLNWarehouse() {
           kode_material: String(r["Material"]||"").trim(),
           material_type: String(r["Material Type"]||"").trim(),
           material_group: String(r["Material Group"]||"").trim(),
+          material_group_desc: String(r["Material Group Desc"]||"").trim(),
           satuan: String(r["Base Unit of Measure"]||"").trim(),
           status: String(r["X-plant matl status"]||"").trim(),
           nama: String(r["Material Description"]||"").trim(),
@@ -6803,7 +6804,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div>
                 <label style={sty.label}>Kategori</label>
                 {katalogForm._maraLocked ? (
-                  <input style={{...sty.input,background:"#f3f4f6",color:C.muted}} disabled value={katalogForm.category||"-"} title="Material Group dari MARA — bukan kategori standar aplikasi"/>
+                  <input style={{...sty.input,background:"#f3f4f6",color:C.muted}} disabled value={katalogForm.category||"-"} title="Material Group Desc dari MARA — bukan kategori standar aplikasi"/>
                 ) : (
                   <select style={sty.select} value={katalogForm.category||"Lainnya"} onChange={e=>setKatalogForm(kf=>({...kf,category:e.target.value}))}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select>
                 )}

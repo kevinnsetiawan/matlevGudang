@@ -709,10 +709,14 @@ create table if not exists mara_catalog (
   kode_material text primary key,
   material_type text,
   material_group text,
+  material_group_desc text,          -- teks bacaan (cth "TRANSF GENERATOR"), dipakai isi Kategori
+                                      -- di form Tambah Katalog Baru (material_group = kode SAP
+                                      -- mentah spt "ZM0101", kurang enak dibaca)
   satuan text,
   status text,
   nama text
 );
+alter table mara_catalog add column if not exists material_group_desc text;
 alter table mara_catalog enable row level security;
 drop policy if exists "Authenticated read mara_catalog" on mara_catalog;
 drop policy if exists "Authenticated write mara_catalog" on mara_catalog;
