@@ -2220,6 +2220,14 @@ export default function PLNWarehouse() {
         }
       } catch (err) {
         console.error("Auto-sync Supabase gagal:", err.message);
+        // Jangan silent — kegagalan sync bisa berlangsung berhari-hari tanpa
+        // disadari kalau cuma masuk console. Throttle 10 menit supaya tidak
+        // spam toast setiap 2.5 detik selama Supabase down.
+        const now = Date.now();
+        if (now - (lastSyncErrorToastRef.current||0) > 10*60*1000) {
+          lastSyncErrorToastRef.current = now;
+          showToastRef.current && showToastRef.current(`⚠️ Auto-sync Supabase gagal: ${err.message}`, "error");
+        }
       }
     }, 2500);
     return () => clearTimeout(timer);
@@ -2256,6 +2264,7 @@ export default function PLNWarehouse() {
   const [forecastDetailResult, setForecastDetailResult] = useState(null);
   const [forecastDetailLoading, setForecastDetailLoading] = useState(false);
   const showToastRef = useRef(null);
+  const lastSyncErrorToastRef = useRef(0);
 
   useEffect(() => {
     async function loadCloud() {
@@ -2694,18 +2703,16 @@ export default function PLNWarehouse() {
     await syncLokasi(nl);
     showToast(isTL ? (lokasiModal==="edit"?"Master Lokasi diupdate!":"Lokasi gudang baru ditambahkan!") : "📨 Diajukan! Menunggu approval TL.");
   }
+  // Catatan: tombol pemanggil ini (App.jsx render Master Gudang) hanya dirender
+  // untuk role ADMIN, jadi cabang approval-flow "PENDING" di bawah ini
+  // (dulunya ditujukan untuk role non-TL mengajukan approval ke TL) tidak
+  // pernah tereksekusi lewat UI saat ini — ADMIN selalu hapus langsung.
   async function deleteLokasi(id) {
     if (stocks.some(s=>s.lokasiId===id)) { showToast("Tidak bisa hapus: lokasi ini masih dipakai di Data Stok!","error"); return; }
     if (!window.confirm("Hapus lokasi gudang ini dari Master Data?")) return;
-    const isTL = currentUser.role === "TL";
-    let nl;
-    if (isTL) {
-      nl = lokasiList.filter(l=>l.id!==id);
-    } else {
-      nl = lokasiList.map(l=>l.id===id ? {...l, status:"PENDING", pendingAction:"DELETE", requestedBy:currentUser.id, requestedAt:Date.now()} : l);
-    }
+    const nl = lokasiList.filter(l=>l.id!==id);
     setLokasiList(nl); await syncLokasi(nl);
-    showToast(isTL ? "Lokasi dihapus." : "📨 Penghapusan diajukan! Menunggu approval TL.");
+    showToast("Lokasi dihapus.");
   }
 
   // Simpan 1 entri baru riwayat Maturity Level Gudang (khusus Admin, input manual)
@@ -2857,18 +2864,12 @@ export default function PLNWarehouse() {
     await saveToCloud({stocks: ns});
     showToast(`📷 ${field==="fotoNameplate"?"Foto Nameplate":"Foto Keseluruhan"} diperbarui!`);
   }
+  // Catatan: satu-satunya tombol pemanggil ini dirender ADMIN-only, jadi cabang
+  // "ajukan approval TL" di bawah ini tidak pernah tereksekusi lewat UI saat ini.
   async function deleteStock(id) {
     if (!window.confirm("Hapus baris stok ini?")) return;
-    const isTL = currentUser.role === "TL";
-    if (isTL) {
-      const ns = stocks.filter(s=>s.id!==id);
-      setStocks(ns); await saveToCloud({stocks: ns}); showToast("Data Stok dihapus.");
-    } else {
-      const st = stocks.find(s=>s.id===id);
-      const ns = stocks.map(s=>s.id===id ? {...s, deletePending:true, deleteRequestedBy:currentUser.id, deleteRequestedAt:Date.now()} : s);
-      setStocks(ns); await saveToCloud({stocks: ns});
-      showToast(`📨 Penghapusan ${st?.name||""} diajukan! Menunggu approval TL.`);
-    }
+    const ns = stocks.filter(s=>s.id!==id);
+    setStocks(ns); await saveToCloud({stocks: ns}); showToast("Data Stok dihapus.");
   }
 
   // Approve/reject pengajuan Edit (qty/harga/jenis) Data Stok — khusus TL
@@ -3159,7 +3160,8 @@ export default function PLNWarehouse() {
   async function approveCapacityImport(importId) {
     const imp = gudangCapacityImports.find(i=>i.id===importId);
     if (!imp) return;
-    const newList = imp.records.map(r => ({...r, importBatchId: imp.id}));
+    const batchRecords = imp.records.map(r => ({...r, importBatchId: imp.id}));
+    const newList = [...gudangCapacityList.filter(r => r.importBatchId !== imp.id), ...batchRecords];
     const newImports = gudangCapacityImports.map(i => i.id===importId
       ? {...i, status:"APPROVED", approvedBy:currentUser.id, approvedAt:Date.now()} : i);
     const { gList: newGudangList, sgList: newSubGudangList, created, createdSub, skippedNoUpt } = syncGudangCapacityToMasterGudang(newList);
@@ -4034,7 +4036,7 @@ export default function PLNWarehouse() {
       // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
       // Setelah approve, jadi pengajuan yang bisa di-adopt Admin/TL UPT induk (bukan auto-chain TUG-7).
       const nt5u = {
-        id: `TUG5-` + uid().slice(3,9),
+        id: `TUG5-` + uid().slice(-6),
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_MGR_ULTG",
@@ -4057,7 +4059,7 @@ export default function PLNWarehouse() {
       // TUG-5: 2-stage approval: Asman → Manager UPT
       // Then auto-generates: INTRACOMPANY → draft TUG-7, INTERCOMPANY → draft TUG-5 UIT
       const nt5 = {
-        id: `TUG5-` + uid().slice(3,9),
+        id: `TUG5-` + uid().slice(-6),
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_ASMAN",
@@ -4082,7 +4084,7 @@ export default function PLNWarehouse() {
       // PENDING_TL -> (TL approves) -> MENUNGGU_TUG4 -> (TUG-4 filled + Manager approves)
       // -> MENUNGGU_FINAL -> (lampiran final filled) -> PENDING_ASMAN -> (Asman approves) -> APPROVED
       const nt3 = {
-        id: `TUG3-` + uid().slice(3,9),
+        id: `TUG3-` + uid().slice(-6),
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_TL",
@@ -4104,7 +4106,7 @@ export default function PLNWarehouse() {
 
     const requiredApprover = currentUser.role === "ADMIN" ? "TL" : "ASMAN";
     const nt = {
-      id: `${docType}-` + uid().slice(3,9),
+      id: `${docType}-` + uid().slice(-6),
       docType, docSeq: seq, docNumbers,
       ...formData,
       status: "PENDING",
@@ -4178,14 +4180,14 @@ export default function PLNWarehouse() {
           if (existingRow) {
             newStocks = newStocks.map(s => s.id===existingRow.id ? { ...s, qty: s.qty + si.qty } : s);
           } else {
-            const newId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+            const newId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
             newStocks.push({ id:newId, katalogId:si.katalogId, lokasiId:txn.lokasiTujuanId, qty:si.qty, minQty:0, price:0, jenisBarang:jenisBarangFinal, img:si.fotoBarangRetur||null, createdAt:Date.now() });
           }
         } else {
           // Brand-new item: register into Master Katalog first
-          const newKatId = `KAT-${String(nextKatNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+          const newKatId = `KAT-${String(nextKatNum++).padStart(3,"0")}-${uid().slice(-6)}`;
           newKatalog.push({ id:newKatId, katalog:si.katalogBaru||"", name:si.namaBaru, category:si.categoryBaru||"Lainnya", satuan:si.satuanBaru||"unit", createdAt:Date.now() });
-          const newStkId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+          const newStkId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
           newStocks.push({ id:newStkId, katalogId:newKatId, lokasiId:txn.lokasiTujuanId, qty:si.qty, minQty:0, price:0, jenisBarang:jenisBarangFinal, img:si.fotoBarangRetur||null, createdAt:Date.now() });
         }
       });
@@ -4287,13 +4289,13 @@ export default function PLNWarehouse() {
         if (existingRow) {
           newStocks = newStocks.map(s => s.id===existingRow.id ? { ...s, qty: s.qty + si.qty } : s);
         } else {
-          const newId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+          const newId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
           newStocks.push({ id:newId, katalogId:si.katalogId, lokasiId, qty:si.qty, minQty:0, price:si.harga||0, jenisBarang:"Persediaan", img:null, createdAt:Date.now() });
         }
       } else {
-        const newKatId = `KAT-${String(nextKatNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+        const newKatId = `KAT-${String(nextKatNum++).padStart(3,"0")}-${uid().slice(-6)}`;
         newKatalog.push({ id:newKatId, katalog:si.katalogBaru||"", name:si.namaBaru, category:si.categoryBaru||"Lainnya", satuan:si.satuanBaru||"unit", createdAt:Date.now() });
-        const newStkId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(3,6)}`;
+        const newStkId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
         newStocks.push({ id:newStkId, katalogId:newKatId, lokasiId, qty:si.qty, minQty:0, price:si.harga||0, jenisBarang:"Persediaan", img:null, createdAt:Date.now() });
       }
     });
@@ -4343,7 +4345,7 @@ export default function PLNWarehouse() {
       const seq = docSeq;
       const docNumbers = generateDocNumbers(seq, Date.now());
       const newTug7 = {
-        id: `TUG7-` + uid().slice(3,9),
+        id: `TUG7-` + uid().slice(-6),
         docType: "TUG7",
         docSeq: seq, docNumbers,
         tug5Id: txn.id,
@@ -4373,7 +4375,7 @@ export default function PLNWarehouse() {
       const seq = docSeq;
       const docNumbers = generateDocNumbers(seq, Date.now());
       const draftTug5UIT = {
-        id: `TUG5UIT-` + uid().slice(3,9),
+        id: `TUG5UIT-` + uid().slice(-6),
         docType: "TUG5",
         docSubType: "UIT_INTERCOMPANY",
         docSeq: seq, docNumbers,
@@ -4412,6 +4414,7 @@ export default function PLNWarehouse() {
 
   async function approveTUG5_MgrULTG(txn) {
     if (currentUser.role !== "MGR_ULTG") { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
+    if (!currentUser.ultgId) { showToast("Akun kamu belum terhubung ke unit ULTG manapun. Hubungi Admin untuk melengkapi profil.","error"); return; }
     if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
     if (txn.stage !== "PENDING_MGR_ULTG") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED_ULTG", status:"APPROVED", approvedByMgrUltg:currentUser.id, approvedAtMgrUltg:Date.now()} : t);
@@ -4438,7 +4441,7 @@ export default function PLNWarehouse() {
     // qty terbesar untuk katalog tsb) — supaya list material TIDAK hilang saat masuk draft TUG-9,
     // karena form TUG-9 me-render item lewat stocks.find(s=>s.id===si.stockId), bukan katalogId.
     const draftTug9 = {
-      id: `TUG9-` + uid().slice(3,9),
+      id: `TUG9-` + uid().slice(-6),
       docType: "TUG9", docSeq: seq, docNumbers,
       tug5Id: txn.id, tug5DocNo: txn.docNumbers.tug5,
       namaPekerjaan: txn.keteranganUmum || "Permintaan Material ULTG",
@@ -4509,7 +4512,7 @@ export default function PLNWarehouse() {
     const uptPengirim = uptList.find(u=>u.id===txn.uptPengirimId);
     const tug5Ref = txns.find(t=>t.id===txn.tug5Id);
     const newTug8Draft = {
-      id: `TUG8-` + uid().slice(3,9),
+      id: `TUG8-` + uid().slice(-6),
       docType: "TUG8",
       docSeq: seq, docNumbers,
       tug7Id: txn.id,
@@ -8032,11 +8035,17 @@ async function syncTUG15ToSupabase(rows, katalogList) {
   const katalogIds = [...new Set(newRows.map(r=>r.katalogId))];
   const katalogPayload = katalogIds.map(kid => {
     const kat = katalogList.find(k=>k.id===kid);
-    return { id: kid, nama: kat?.name||kid, kategori: kat?.katalog||null, satuan: kat?.satuan||null, jenis_barang: kat?.jenisBarang||null };
+    return { id: kid, data: { name: kat?.name||kid, katalog: kat?.katalog||null, satuan: kat?.satuan||null, jenisBarang: kat?.jenisBarang||null } };
   });
+  // ignore-duplicates (bukan merge-duplicates): baris katalog yang sudah ada
+  // (disinkron lewat syncMasterTable("katalog",...) di jalur utama) TIDAK BOLEH
+  // ditimpa payload minimal di sini — kalau di-merge, field data jsonb lengkap
+  // (merk/type/keterangan/dst) bisa hilang, cuma menyisakan 4 field ini.
+  // Insert ini murni jaga-jaga FK (katalog_id di tug15_history) untuk id yang
+  // belum sempat tersinkron dari jalur utama.
   const katRes = await fetch(`${SUPABASE_URL}/rest/v1/katalog?on_conflict=id`, {
     method: "POST",
-    headers: { ...headers, "Prefer": "resolution=merge-duplicates" },
+    headers: { ...headers, "Prefer": "resolution=ignore-duplicates" },
     body: JSON.stringify(katalogPayload),
   });
   if (!katRes.ok) throw new Error(`Gagal sync katalog: ${await katRes.text()}`);
@@ -8087,14 +8096,15 @@ async function syncStockQtyToSupabase(stocks, katalogList) {
   const katalogIds = Object.keys(qtyMap);
   if (katalogIds.length === 0) return { katalogCount: 0, stockCount: 0 };
 
-  // Pastikan katalog-nya ada dulu (FK target)
+  // Pastikan katalog-nya ada dulu (FK target). ignore-duplicates supaya tidak
+  // menimpa data jsonb lengkap milik baris yang sudah tersinkron via jalur utama.
   const katalogPayload = katalogIds.map(kid => {
     const kat = katalogList.find(k=>k.id===kid);
-    return { id: kid, nama: kat?.name||kid, kategori: kat?.katalog||null, satuan: kat?.satuan||null, jenis_barang: kat?.jenisBarang||null };
+    return { id: kid, data: { name: kat?.name||kid, katalog: kat?.katalog||null, satuan: kat?.satuan||null, jenisBarang: kat?.jenisBarang||null } };
   });
   const katRes = await fetch(`${SUPABASE_URL}/rest/v1/katalog?on_conflict=id`, {
     method: "POST",
-    headers: { ...headers, "Prefer": "resolution=merge-duplicates" },
+    headers: { ...headers, "Prefer": "resolution=ignore-duplicates" },
     body: JSON.stringify(katalogPayload),
   });
   if (!katRes.ok) throw new Error(`Gagal sync katalog: ${await katRes.text()}`);
@@ -8155,10 +8165,13 @@ async function syncFotoMaterialToSupabase(stocks, katalogList) {
     if (!upRes.ok) throw new Error(`Gagal upload foto ${kat.name}: ${await upRes.text()}`);
 
     const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/material-photos/${path}`;
+    // Kirim seluruh objek `kat` (state React, sudah lengkap) + fotoKeseluruhanUrl
+    // sebagai `data` jsonb — BUKAN payload minimal — supaya merge-duplicates di
+    // sini tidak menghapus field lain (merk/type/keterangan/dst) milik baris ini.
     const katRes = await fetch(`${SUPABASE_URL}/rest/v1/katalog?on_conflict=id`, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" },
-      body: JSON.stringify([{ id: kat.id, nama: kat.name||kat.id, kategori: kat.katalog||null, satuan: kat.satuan||null, jenis_barang: stockRow.jenisBarang||null, foto_keseluruhan_url: publicUrl }]),
+      body: JSON.stringify([{ id: kat.id, data: { ...kat, fotoKeseluruhanUrl: publicUrl } }]),
     });
     if (!katRes.ok) throw new Error(`Gagal simpan URL foto ke katalog: ${await katRes.text()}`);
 
@@ -8208,7 +8221,9 @@ function ScanPublicView({ katalogId }) {
           historyWithSisa[i] = { ...h, sisa: running };
           running -= (h.jenis_transaksi === "MASUK" ? h.qty : -h.qty);
         }
-        setState({ loading:false, error:"", katalog:katArr[0], qty:currentQty, history:historyWithSisa });
+        const katRow = katArr[0];
+        const katFlat = { ...(katRow.data||{}), id: katRow.id };
+        setState({ loading:false, error:"", katalog:katFlat, qty:currentQty, history:historyWithSisa });
       } catch (err) {
         if (!cancelled) setState({ loading:false, error:err.message, katalog:null, qty:0, history:[] });
       }
@@ -8228,10 +8243,10 @@ function ScanPublicView({ katalogId }) {
     <div style={wrap}>
       <div style={card}>
         <div style={{fontSize:11,color:"#6b7280",fontWeight:700,letterSpacing:.5}}>PT PLN (PERSERO) UPT SURABAYA — WARNOTO</div>
-        <h2 style={{fontSize:17,fontWeight:800,margin:"4px 0 2px"}}>🏷️ {katalog.nama}</h2>
-        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>No. Katalog: {katalog.kategori||"-"} • Satuan: {katalog.satuan||"-"} • {katalog.jenis_barang||"-"}</div>
-        {katalog.foto_keseluruhan_url && (
-          <img src={katalog.foto_keseluruhan_url} alt="Foto Material Keseluruhan" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:10,marginBottom:14,border:"1px solid #e5e7eb"}}/>
+        <h2 style={{fontSize:17,fontWeight:800,margin:"4px 0 2px"}}>🏷️ {katalog.name}</h2>
+        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>No. Katalog: {katalog.katalog||"-"} • Satuan: {katalog.satuan||"-"} • {katalog.jenisBarang||"-"}</div>
+        {katalog.fotoKeseluruhanUrl && (
+          <img src={katalog.fotoKeseluruhanUrl} alt="Foto Material Keseluruhan" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:10,marginBottom:14,border:"1px solid #e5e7eb"}}/>
         )}
         <div style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:10,padding:"10px 14px",marginBottom:16,textAlign:"center"}}>
           <div style={{fontSize:11,color:"#047857",fontWeight:700}}>QTY STOK SAAT INI</div>
@@ -10881,217 +10896,6 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
   );
 }
 
-// Legacy implementasi awal. Menu aktif sekarang memakai HeavyEquipmentTabV2,
-// fungsi ini sengaja belum dihapus agar mudah dibandingkan saat migrasi ke Claude.
-function HeavyEquipmentTab({ equipmentList, loans, currentUser, users, sty, C, handleImg, savePhoto, createLoan, approveLoan, rejectLoan, completeLoan }) {
-  const [activeTab, setActiveTab] = useState("list");
-  const [uptFilter, setUptFilter] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [loanForm, setLoanForm] = useState({equipmentId:"", toUpt:"", tanggalMulai:"", tanggalSelesai:"", keperluan:"", catatan:""});
-  const [rejectingId, setRejectingId] = useState(null);
-  const [reason, setReason] = useState("");
-
-  const uptOptions = Array.from(new Set(equipmentList.map(e=>e.upt).filter(Boolean))).sort();
-  const filtered = equipmentList.filter(e =>
-    (uptFilter==="ALL" || e.upt===uptFilter) &&
-    (statusFilter==="ALL" || e.statusAlat===statusFilter || e.availabilityStatus===statusFilter)
-  );
-  const pendingCount = loans.filter(l=>l.status==="PENDING_ASMAN").length;
-  const borrowedCount = equipmentList.filter(e=>e.availabilityStatus==="DIPINJAM").length;
-  const issueCount = equipmentList.filter(e=>["PERLU_SERVICE","BUTUH_PERBAIKAN","BUTUH_PEREMAJAAN"].includes(e.statusAlat)).length;
-  const noPermitCount = equipmentList.filter(e=>!e.suratIzinAlat).length;
-  const canManage = ["ADMIN","TL"].includes(currentUser.role);
-
-  const statusMeta = {
-    LAYAK:{label:"Layak", bg:"#dcfce7", fg:C.green},
-    PERLU_SERVICE:{label:"Perlu Service", bg:"#fef3c7", fg:"#92400e"},
-    BUTUH_PERBAIKAN:{label:"Butuh Perbaikan", bg:"#fee2e2", fg:C.red},
-    BUTUH_PEREMAJAAN:{label:"Butuh Peremajaan", bg:"#f3e8ff", fg:"#7c3aed"},
-    TERSEDIA:{label:"Tersedia", bg:"#e0f2fe", fg:"#0369a1"},
-    DIPINJAM:{label:"Dipinjam", bg:"#ffedd5", fg:"#c2410c"},
-  };
-  const loanMeta = {
-    PENDING_ASMAN:{label:"Menunggu Asman", bg:"#fef3c7", fg:"#92400e"},
-    APPROVED:{label:"Disetujui", bg:"#dcfce7", fg:C.green},
-    REJECTED:{label:"Ditolak", bg:"#fee2e2", fg:C.red},
-    SELESAI:{label:"Selesai", bg:"#e0f2fe", fg:"#0369a1"},
-  };
-  const Badge = ({metaKey}) => {
-    const m = statusMeta[metaKey] || loanMeta[metaKey] || {label:metaKey, bg:"#f3f4f6", fg:C.muted};
-    return <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:800,background:m.bg,color:m.fg,whiteSpace:"nowrap"}}>{m.label}</span>;
-  };
-
-  function resetLoanForm() {
-    setLoanForm({equipmentId:"", toUpt:"", tanggalMulai:"", tanggalSelesai:"", keperluan:"", catatan:""});
-  }
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-        <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🚜 Alat Berat & Peminjaman UPT</h1>
-          <p style={{color:C.muted,fontSize:13}}>Monitoring alat angkat/angkut per UPT, status kelayakan, foto alat, dan peminjaman antar UPT dengan approval Asman.</p>
-        </div>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:16}}>
-        {[
-          {label:"Total Alat", val:equipmentList.length, color:C.accent},
-          {label:"Dipinjam", val:borrowedCount, color:"#c2410c"},
-          {label:"Perlu Tindakan", val:issueCount, color:C.red},
-          {label:"Izin Kosong", val:noPermitCount, color:C.yellow},
-          {label:"Pending Asman", val:pendingCount, color:"#92400e"},
-        ].map(k=>(
-          <div key={k.label} style={{...sty.card,padding:14}}>
-            <div style={{fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{k.label}</div>
-            <div style={{fontSize:26,fontWeight:900,color:k.color}}>{k.val}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-        {[{id:"list",label:"List Alat"},{id:"loans",label:"Peminjaman"}].map(t=>(
-          <button key={t.id} style={{padding:"7px 14px",borderRadius:20,border:`1px solid ${activeTab===t.id?C.accent:C.border}`,background:activeTab===t.id?C.accent:"white",color:activeTab===t.id?"white":C.muted,fontSize:12,fontWeight:700,cursor:"pointer"}} onClick={()=>setActiveTab(t.id)}>{t.label}</button>
-        ))}
-      </div>
-
-      {activeTab==="list" && (
-        <>
-          <div style={{...sty.card,marginBottom:14,padding:14}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
-              <div>
-                <label style={sty.label}>Filter UPT</label>
-                <select style={sty.select} value={uptFilter} onChange={e=>setUptFilter(e.target.value)}>
-                  <option value="ALL">Semua UPT</option>
-                  {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={sty.label}>Filter Status</label>
-                <select style={sty.select} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
-                  <option value="ALL">Semua Status</option>
-                  <option value="LAYAK">Layak</option>
-                  <option value="PERLU_SERVICE">Perlu Service</option>
-                  <option value="BUTUH_PERBAIKAN">Butuh Perbaikan</option>
-                  <option value="BUTUH_PEREMAJAAN">Butuh Peremajaan</option>
-                  <option value="TERSEDIA">Tersedia</option>
-                  <option value="DIPINJAM">Dipinjam</option>
-                </select>
-              </div>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
-            {filtered.map(eq=>(
-              <div key={eq.id} style={{...sty.card,padding:14,display:"flex",flexDirection:"column",gap:10}}>
-                <div style={{height:150,borderRadius:10,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                  {eq.foto ? <img src={eq.foto} alt={eq.nama} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <div style={{fontSize:38,color:"#9ca3af"}}>🚜</div>}
-                </div>
-                <div>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
-                    <div>
-                      <div style={{fontSize:14,fontWeight:900}}>{eq.nama}</div>
-                      <div style={{fontSize:11,color:C.muted}}>{eq.upt} • {eq.lokasi}</div>
-                    </div>
-                    <Badge metaKey={eq.availabilityStatus || "TERSEDIA"}/>
-                  </div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
-                    <Badge metaKey={eq.statusAlat}/>
-                    <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:"#f3f4f6",color:C.muted}}>{eq.jenis}</span>
-                  </div>
-                </div>
-                <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
-                  Merk/Type: <b>{eq.merkType||"-"}</b><br/>
-                  Kapasitas: <b>{eq.kapasitas||"-"}</b> • Tahun: <b>{eq.tahun||"-"}</b><br/>
-                  No Seri: <b>{eq.nomorSeri||"-"}</b><br/>
-                  Kondisi: <b>{eq.kondisi||"-"}</b><br/>
-                  Surat Izin: <b>{eq.suratIzinAlat||"Belum ada data"}</b>
-                </div>
-                {canManage && (
-                  <label style={{...sty.btn("ghost","sm"),textAlign:"center"}}>
-                    📷 Upload Foto
-                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>handleImg(e, img=>savePhoto(eq.id, img))}/>
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {activeTab==="loans" && (
-        <div style={{display:"grid",gridTemplateColumns:canManage?"minmax(280px,360px) 1fr":"1fr",gap:16,alignItems:"start"}}>
-          {canManage && (
-            <div style={sty.card}>
-              <div style={{fontSize:15,fontWeight:900,marginBottom:12}}>Ajukan Peminjaman Alat</div>
-              <div style={{marginBottom:10}}>
-                <label style={sty.label}>Alat</label>
-                <select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value}))}>
-                  <option value="">-- Pilih alat tersedia --</option>
-                  {equipmentList.filter(e=>e.availabilityStatus!=="DIPINJAM").map(e=><option key={e.id} value={e.id}>{e.upt} - {e.nama} ({e.kapasitas||"-"}) @ {e.lokasi}</option>)}
-                </select>
-              </div>
-              <div style={{marginBottom:10}}>
-                <label style={sty.label}>UPT Peminjam</label>
-                <select style={sty.select} value={loanForm.toUpt} onChange={e=>setLoanForm(f=>({...f,toUpt:e.target.value}))}>
-                  <option value="">-- Pilih UPT --</option>
-                  {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                <div><label style={sty.label}>Mulai</label><input style={sty.input} type="date" value={loanForm.tanggalMulai} onChange={e=>setLoanForm(f=>({...f,tanggalMulai:e.target.value}))}/></div>
-                <div><label style={sty.label}>Selesai</label><input style={sty.input} type="date" value={loanForm.tanggalSelesai} onChange={e=>setLoanForm(f=>({...f,tanggalSelesai:e.target.value}))}/></div>
-              </div>
-              <div style={{marginBottom:10}}><label style={sty.label}>Keperluan</label><textarea style={{...sty.input,minHeight:70}} value={loanForm.keperluan} onChange={e=>setLoanForm(f=>({...f,keperluan:e.target.value}))}/></div>
-              <div style={{marginBottom:12}}><label style={sty.label}>Catatan</label><input style={sty.input} value={loanForm.catatan} onChange={e=>setLoanForm(f=>({...f,catatan:e.target.value}))}/></div>
-              <button style={{...sty.btn("primary"),width:"100%"}} onClick={async()=>{await createLoan(loanForm); resetLoanForm();}}>Ajukan ke Asman</button>
-            </div>
-          )}
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {loans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted}}>Belum ada peminjaman alat.</div>}
-            {loans.map(loan=>{
-              const eq = equipmentList.find(e=>e.id===loan.equipmentId);
-              const requester = users.find(u=>u.id===loan.requestedBy);
-              return (
-                <div key={loan.id} style={{...sty.card,padding:14,borderLeft:`4px solid ${loan.status==="PENDING_ASMAN"?C.yellow:loan.status==="APPROVED"?C.green:loan.status==="REJECTED"?C.red:"#0369a1"}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:8}}>
-                    <div>
-                      <div style={{fontWeight:900,fontSize:14}}>{eq?.nama||loan.equipmentId}</div>
-                      <div style={{fontSize:11,color:C.muted}}>{loan.fromUpt} → {loan.toUpt} • {loan.tanggalMulai} s/d {loan.tanggalSelesai}</div>
-                    </div>
-                    <Badge metaKey={loan.status}/>
-                  </div>
-                  <div style={{fontSize:12,color:C.text,marginBottom:6}}>{loan.keperluan}</div>
-                  <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Diajukan oleh {requester?.name||"-"} • {fmtDate(loan.requestedAt)}{loan.catatan ? ` • ${loan.catatan}` : ""}</div>
-                  {loan.status==="PENDING_ASMAN" && currentUser.role==="ASMAN" && (
-                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                      {rejectingId===loan.id ? (
-                        <>
-                          <input style={{...sty.input,flex:"1 1 220px"}} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Alasan penolakan"/>
-                          <button style={sty.btn("danger","sm")} onClick={()=>{rejectLoan(loan.id, reason); setRejectingId(null); setReason("");}}>Konfirmasi Tolak</button>
-                          <button style={sty.btn("ghost","sm")} onClick={()=>{setRejectingId(null); setReason("");}}>Batal</button>
-                        </>
-                      ) : (
-                        <>
-                          <button style={sty.btn("success","sm")} onClick={()=>approveLoan(loan.id)}>Setujui</button>
-                          <button style={sty.btn("danger","sm")} onClick={()=>setRejectingId(loan.id)}>Tolak</button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {loan.status==="APPROVED" && ["ADMIN","TL","ASMAN"].includes(currentUser.role) && (
-                    <button style={sty.btn("ghost","sm")} onClick={()=>completeLoan(loan.id)}>Tandai Sudah Kembali</button>
-                  )}
-                  {loan.status==="REJECTED" && <div style={{fontSize:11,color:C.red}}>Alasan: {loan.rejectReason}</div>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, sty, C, currentUser, gudangCapacityList }) {
   const [selectedGudangId, setSelectedGudangId] = useState(gudangList[0]?.id||"");
   const [hoveredLokasi, setHoveredLokasi] = useState(null);
@@ -11124,8 +10928,8 @@ function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, sty, C, 
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🗺️ Peta Gudang</h1>
-          <p style={{color:C.muted,fontSize:13}}>Visualisasi lokasi blok dan material di denah gudang</p>
+          <h1 style={{fontSize:22,fontWeight:900}}>🗺️ Peta Utilisasi Gudang</h1>
+          <p style={{color:C.muted,fontSize:13}}>Visualisasi lokasi blok dan material di denah gudang — data kapasitas m² dari import Excel. Untuk atur titik koordinat blok di denah, buka Master Data → Master Gudang.</p>
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <label style={{fontSize:12,color:C.muted,display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
@@ -12669,7 +12473,7 @@ function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangList, lok
   const TABS = [
     {id:"dashboard",label:"📊 Dashboard"},
     {id:"data",label:"📋 Data Kapasitas"},
-    {id:"peta",label:"🗺️ Peta Gudang"},
+    {id:"peta",label:"🗺️ Peta Utilisasi Gudang"},
   ];
 
   return (
@@ -13525,6 +13329,11 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       {(["ADMIN_ULTG","MGR_ULTG","ADMIN","TL"].includes(currentUser.role)) && (
         <>
           <div style={{fontSize:13,fontWeight:800,color:"#0369a1",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏘️ TUG-5 — Permintaan Material dari ULTG</div>
+          {currentUser.role==="MGR_ULTG" && !currentUser.ultgId && (
+            <div style={{...sty.card,background:"#fef2f2",border:"1px solid #fecaca",color:"#991b1b",fontSize:12,padding:12,marginBottom:8}}>
+              ⚠️ Akun kamu belum terhubung ke unit ULTG manapun, jadi tombol "Setujui" tidak akan muncul di list manapun. Hubungi Admin untuk melengkapi field ULTG di profil kamu.
+            </div>
+          )}
           {tug5UltgTxns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-5 dari ULTG.</div>}
           {tug5UltgTxns.slice(ultgListPage*5, ultgListPage*5+5).map(t=>{
             const ultg = (ultgList||[]).find(u=>u.id===t.ultgId);
