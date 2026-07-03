@@ -683,3 +683,38 @@ drop policy if exists "Authenticated read ai_faq_curated" on ai_faq_curated;
 drop policy if exists "Authenticated write ai_faq_curated" on ai_faq_curated;
 create policy "Authenticated read ai_faq_curated" on ai_faq_curated for select using (auth.role() = 'authenticated');
 create policy "Authenticated write ai_faq_curated" on ai_faq_curated for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ────────────────────────────────────────────────────────────
+-- 19. MARA_CATALOG — referensi Katalog MARA (upload XLSX ribuan baris via
+--     Master Data → Master Katalog → "Upload MARA"), dipakai autofill/search
+--     saat tambah katalog baru (searchMaraCatalog/applyMaraToKatalog di
+--     App.jsx) dan referensi di UsulanKatalogTab/MaterialCadangTab. Read-only
+--     reference — TIDAK PERNAH jadi master katalog aktif (`katalog`/`stocks`
+--     terpisah total).
+--
+--     CATATAN: tabel ini sebelumnya HIDUP DI SUPABASE (dipakai aktif oleh
+--     App.jsx via uploadMaraToDB) TAPI TIDAK PERNAH terdokumentasi di file
+--     ini — ditemukan orphan-dari-schema.sql (bukan orphan-dari-app, beda
+--     dari kasus tabel `katalog` sebelumnya) saat audit 2026-07-02. Lebih
+--     parah lagi: RLS aktif tapi TANPA SATUPUN POLICY (`enable row level
+--     security` ter-set entah kapan, tapi policy read/write tidak pernah
+--     dibuat) — artinya tabel TERKUNCI TOTAL, upload MARA maupun autofill
+--     search tidak akan pernah berhasil sampai policy di bawah dijalankan.
+--     Definisi `create table` di bawah pakai `if not exists` (aman kalau
+--     tabel sudah ada), tapi PK/kolom TIDAK diverifikasi ulang di sini kalau
+--     tabel sudah ada dengan struktur beda — cek `information_schema.columns`
+--     dulu kalau curiga skema live berbeda dari definisi ini.
+-- ────────────────────────────────────────────────────────────
+create table if not exists mara_catalog (
+  kode_material text primary key,
+  material_type text,
+  material_group text,
+  satuan text,
+  status text,
+  nama text
+);
+alter table mara_catalog enable row level security;
+drop policy if exists "Authenticated read mara_catalog" on mara_catalog;
+drop policy if exists "Authenticated write mara_catalog" on mara_catalog;
+create policy "Authenticated read mara_catalog" on mara_catalog for select using (auth.role() = 'authenticated');
+create policy "Authenticated write mara_catalog" on mara_catalog for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
