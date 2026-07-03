@@ -13129,12 +13129,16 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   // Parse CSV SAP format PEMAT
   // Referensi format export SAP (diajarkan user 2026-07-02, lihat memory
   // warnoto_sap_export_format.md): Plant=kode UPT (3611=UPT Surabaya),
-  // Material Type ZST1=Persediaan/ZCAD=Cadang (lebih reliable daripada tebak
-  // dari panjang kode katalog — dipakai sebagai sumber utama, panjang kode
-  // cuma fallback kalau Material Type tidak dikenali). Quality Inspection/
-  // Blocked/In Transit Stock TIDAK auto-include maupun auto-exclude ke qty
-  // utama — cuma di-flag `needsStockReview` supaya Admin yang putuskan
-  // manual di preview, sesuai instruksi eksplisit user.
+  // Material Type ZST1=Persediaan/ZCAD=Cadang (sumber utama), panjang kode
+  // katalog (10 digit=Cadang) TETAP dipakai sebagai referensi pembanding/
+  // validasi silang (bukan cuma fallback) — kalau dua sinyal ini beda,
+  // di-flag `materialTypeMismatch` untuk direview, bukan diam-diam dipilih
+  // salah satu. Valuation Type (BURSA/PRE-MEMORY) HANYA berlaku untuk
+  // sub-klasifikasi material Persediaan (ZST1) — kalau ZCAD (Cadang), jangan
+  // di-override jadi Bursa/Pre-Memory walau valType kebetulan cocok string-nya.
+  // Quality Inspection/Blocked/In Transit Stock TIDAK auto-include maupun
+  // auto-exclude ke qty utama — cuma di-flag `needsStockReview` supaya Admin
+  // yang putuskan manual di preview, sesuai instruksi eksplisit user.
   function parseSAPMigration(rows) {
     return rows.map(row => {
       const material = String(row["Material"]||row["material"]||"").trim();
@@ -13151,17 +13155,25 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       const blockedStock = parseFloat(String(row["Blocked Stock"]||"0").replace(/\./g,"").replace(",",".")) || 0;
       const transitStock = parseFloat(String(row["In Transit Stock"]||"0").replace(/\./g,"").replace(",",".")) || 0;
 
+      const kodePanjang10 = noKat.length === 10;
       let jenisBarang;
       if (materialType === "ZCAD") jenisBarang = "Cadang";
       else if (materialType === "ZST1") jenisBarang = "Persediaan";
-      else jenisBarang = noKat.length === 10 ? "Cadang" : "Persediaan"; // fallback lama, Material Type tidak dikenali
-      if (valType === "BURSA") jenisBarang = "Persediaan Bursa";
-      else if (valType === "PRE-MEMORY") jenisBarang = "Pre Memory";
+      else jenisBarang = kodePanjang10 ? "Cadang" : "Persediaan"; // Material Type tidak dikenali, andalkan panjang kode
+      // Valuation Type cuma sub-klasifikasi untuk jalur Persediaan (ZST1) — default "Persediaan"
+      // (normal) kalau bukan BURSA/PRE-MEMORY. Tidak berlaku untuk Cadang (ZCAD).
+      if (jenisBarang === "Persediaan") {
+        if (valType === "BURSA") jenisBarang = "Persediaan Bursa";
+        else if (valType === "PRE-MEMORY") jenisBarang = "Pre Memory";
+      }
+      // Validasi silang: Material Type vs panjang kode katalog beda sinyal -> flag review,
+      // bukan diam-diam pilih salah satu (cuma relevan kalau Material Type dikenali).
+      const materialTypeMismatch = (materialType==="ZCAD" && !kodePanjang10) || (materialType==="ZST1" && kodePanjang10);
 
       const plantMismatch = !!(plant && plant !== "3611");
       const needsStockReview = qiStock>0 || blockedStock>0 || transitStock>0;
 
-      return { noKat, material, desc, satuan, qty, jenisBarang, harga, valType, materialType, plant, qiStock, blockedStock, transitStock, plantMismatch, needsStockReview, _valid: noKat.length > 0 && qty >= 0 };
+      return { noKat, material, desc, satuan, qty, jenisBarang, harga, valType, materialType, plant, qiStock, blockedStock, transitStock, plantMismatch, needsStockReview, materialTypeMismatch, _valid: noKat.length > 0 && qty >= 0 };
     }).filter(r => r.noKat);
   }
 
@@ -13375,6 +13387,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               {label:"Baru (tidak di WARNOTO)",val:previewStats.sapResult.filter(r=>!r.matchWarnoto).length,color:"#f59e0b"},
               {label:"⚠️ Perlu Review Stok",val:previewStats.sapResult.filter(r=>r.needsStockReview).length,color:C.red},
               {label:"⚠️ Plant ≠ 3611",val:previewStats.sapResult.filter(r=>r.plantMismatch).length,color:C.red},
+              {label:"⚠️ Jenis Barang Beda Sinyal",val:previewStats.sapResult.filter(r=>r.materialTypeMismatch).length,color:C.red},
             ].map(kpi=>(
               <div key={kpi.label} style={{...sty.card,borderTop:`3px solid ${kpi.color}`,padding:14}}>
                 <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{kpi.label}</div>
@@ -13421,6 +13434,12 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               <div style={{fontSize:11,color:C.muted,marginTop:4}}>Data ini tetap ikut diproses sebagai UPT Surabaya — kalau ini sebenarnya milik UPT lain, hapus dulu barisnya dari file sebelum upload ulang.</div>
             </div>
           )}
+          {previewStats.sapResult.some(r=>r.materialTypeMismatch) && (
+            <div style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`}}>
+              <div style={{fontWeight:700,color:C.red}}>⚠️ {previewStats.sapResult.filter(r=>r.materialTypeMismatch).length} baris: Material Type dan panjang kode katalog beda sinyal</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:4}}>Contoh: Material Type bilang ZCAD (Cadang) tapi kodenya bukan 10 digit, atau sebaliknya ZST1 (Persediaan) tapi kodenya 10 digit. Jenis barang yang dipakai sistem tetap ikut Material Type (kolom "Jenis" di tabel) — cek manual baris ini sebelum apply, siapa tahu ada data yang salah input.</div>
+            </div>
+          )}
           <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:16,maxHeight:350,overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:700}}>
               <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
@@ -13432,7 +13451,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               </thead>
               <tbody>
                 {previewStats.sapResult.slice(0,200).map((r,i)=>(
-                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:r.needsStockReview||r.plantMismatch?"#fef2f2":!r.matchWarnoto?"#fefce8":"white"}}>
+                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:r.needsStockReview||r.plantMismatch||r.materialTypeMismatch?"#fef2f2":!r.matchWarnoto?"#fefce8":"white"}}>
                     <td style={{padding:"5px 8px",fontWeight:700,color:"#0098da"}}>{r.noKat}</td>
                     <td style={{padding:"5px 8px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.desc}</td>
                     <td style={{padding:"5px 8px",fontSize:10}}>{r.jenisBarang}</td>
@@ -13440,7 +13459,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
                     <td style={{padding:"5px 8px",textAlign:"right"}}>{r.harga?fmtNum(r.harga):"-"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.matchWarnoto?"✅":"🆕"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.matchMara?"✅":"-"}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center"}}>{r.needsStockReview?"⚠️ Stok":r.plantMismatch?"⚠️ Plant":""}</td>
+                    <td style={{padding:"5px 8px",textAlign:"center"}}>{r.needsStockReview?"⚠️ Stok":r.plantMismatch?"⚠️ Plant":r.materialTypeMismatch?"⚠️ Jenis":""}</td>
                   </tr>
                 ))}
               </tbody>
