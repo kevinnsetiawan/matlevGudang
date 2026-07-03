@@ -2808,10 +2808,9 @@ export default function PLNWarehouse() {
   }
 
   // ── DATA STOK CRUD (junction: katalog x lokasi, qty/harga/jenis) ──
-  function openAddStock() {
-    setStockForm({ id:`STK-${uid().slice(-6)}`, katalogId:"", lokasiId:"", qty:0, minQty:0, price:0, jenisBarang:"Cadang", img:null });
-    setStockModal("add");
-  }
+  // openAddStock (tombol "+ Tambah Data Stok") dihapus 2026-07-02 — kebijakan bisnis: semua
+  // material masuk WAJIB lewat TUG (TUG-3/9/dst), tidak boleh input langsung ke Data Stok.
+  // stockModal/saveStock tetap ada, cuma dipakai "edit" sekarang (lihat openEditStock).
   function openEditStock(s) { setStockForm({...s}); setStockModal("edit"); }
   async function saveStock() {
     if (!stockForm.katalogId) { showToast("Pilih barang dari Master Katalog!","error"); return; }
@@ -3481,67 +3480,11 @@ export default function PLNWarehouse() {
     }
   }
 
-  const [importSAPModal, setImportSAPModal] = useState(false);
-
-  // ── Import SAP (PEMAT CSV) → Master Katalog + Data Stok ──
-  // FIX 2026-07-02: dulu newStocks selalu direset total (let newStocks=[]) lalu cuma diisi
-  // dari baris di-import sekarang — jadi upload kedua kalinya (mis. batch berbeda) MENIMPA
-  // TOTAL data stok existing, bukan menggabung (bug yang sama persis ditemukan & difix di
-  // handleBackupAndApply/wizard Migrasi Data). Juga category tidak pernah diisi saat bikin
-  // katalog baru (selalu fallback tampil "Lainnya"). Kedua ini sekarang diperbaiki: merge ke
-  // katalogList/stocks existing, category diisi dari segmen pertama nama (format "X;Y;Z...").
-  async function importFromSAP(sapRows) {
-    const now = Date.now();
-    const katalogById = new Map(katalogList.map(k=>[k.katalog, k]));
-    const stocksById = new Map(stocks.map(s=>[s.katalog, s])); // key by kode SAP, bukan id — konsisten sama pola lama fitur ini
-
-    sapRows.forEach(row => {
-      if (!row.katalog) return;
-      const existingKat = katalogById.get(row.katalog);
-      const kat = existingKat
-        ? { ...existingKat, jenisBarang: row.jenisBarang, name: row.nama, satuan: row.satuan, sapBaselineQty: row.qty, sapBaselineAt: now }
-        : {
-            id: "KAT-"+row.katalog,
-            name: row.nama,
-            katalog: row.katalog,
-            category: (row.nama||"").split(";")[0].trim() || "Material",
-            satuan: row.satuan,
-            jenisBarang: row.jenisBarang,
-            merk: "",
-            type: "",
-            keterangan: row.valuationDesc,
-            createdAt: now,
-            sapBaselineQty: row.qty, sapBaselineAt: now,
-          };
-      katalogById.set(row.katalog, kat);
-
-      const existingStock = stocksById.get(row.katalog);
-      stocksById.set(row.katalog, {
-        id: existingStock?.id || ("STK-SAP-"+row.katalog),
-        katalogId: kat.id,
-        lokasiId: existingStock?.lokasiId || "",
-        name: row.nama,
-        katalog: row.katalog,
-        satuan: row.satuan,
-        unit: row.satuan,
-        qty: row.qty,
-        price: row.harga,
-        minQty: existingStock?.minQty || 0,
-        jenisBarang: row.jenisBarang,
-        lokasi: existingStock?.lokasi || "— Belum diisi —",
-        createdAt: existingStock?.createdAt || now,
-      });
-    });
-
-    const newKatalogList = Array.from(katalogById.values());
-    const newStocks = Array.from(stocksById.values());
-
-    setKatalogList(newKatalogList);
-    setStocks(newStocks);
-    await saveToCloud({ katalogList: newKatalogList, stocks: newStocks });
-    showToast(`✅ Import selesai! ${sapRows.length} material berhasil dimuat (digabung dengan data existing).`);
-    return { katalogCount: newKatalogList.length, stockCount: newStocks.length, sapRows };
-  }
+  // "Import dari SAP (PEMAT)" (importFromSAP) dihapus 2026-07-02 — digabung jadi satu dengan
+  // wizard "Migrasi Data" (MigrasiDataTab/handleBackupAndApply) yang lebih aman (ada preview,
+  // backup otomatis, panel review manual). Jangan bikin ulang fitur input Data Stok manual di
+  // luar wizard itu — kebijakan bisnis: semua material masuk WAJIB lewat TUG, kecuali migrasi
+  // data awal yang memang lewat wizard khusus itu.
   async function saveOpname(opn) {
     const exists = opnameList.find(o=>o.id===opn.id);
     const nl = exists ? opnameList.map(o=>o.id===opn.id?opn:o) : [...opnameList, opn];
@@ -5569,8 +5512,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {stocks.filter(s=>!s.lokasiId).length>0 && <span style={{color:"#f59e0b",fontWeight:700,marginLeft:8}}>• ⚠️ {stocks.filter(s=>!s.lokasiId).length} material belum ada lokasi</span>}
                 </p>
               </div>
-              {currentUser.role==="ADMIN" && <button style={sty.btn("primary")} onClick={openAddStock}>+ Tambah Data Stok</button>}
-              {currentUser.role==="ADMIN" && <button style={{...sty.btn("ghost"),border:`1px solid #0098da`,color:"#0098da"}} onClick={()=>setImportSAPModal(true)}>⬆️ Import dari SAP (PEMAT)</button>}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
               <div style={{position:"relative",width:"100%"}}>
@@ -7090,15 +7031,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       )}
 
       {/* UIT MODAL */}
-      {/* IMPORT SAP MODAL */}
-      {importSAPModal && (
-        <ImportSAPModal
-          lokasiList={lokasiList}
-          sty={sty} C={C}
-          onImport={importFromSAP}
-          onClose={()=>setImportSAPModal(false)}
-        />
-      )}
 
       {/* GUDANG MODAL — mode "edit" satu langkah; mode "add" wizard 3 langkah (Data → Denah → Blok) */}
       {gudangModal==="edit" && (
@@ -9652,204 +9584,6 @@ function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setTopN, pe
 }
 
 // ─── STOCK OPNAME TAB ────────────────────────────────────────────────────
-// ─── STOCK OPNAME TAB (Fase 1 — tanpa foto, paginasi 10 item/halaman) ──────
-// ─── IMPORT SAP MODAL ────────────────────────────────────────────────────
-function ImportSAPModal({ lokasiList, sty, C, onImport, onClose }) {
-  const [step, setStep] = useState("upload");
-  const [previewData, setPreviewData] = useState([]);
-  const [sapRows, setSapRows] = useState([]);
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState(null);
-  const [filterJenis, setFilterJenis] = useState("semua");
-
-
-  async function handleFile(e) {
-    const f = e.target.files[0]; if(!f) return;
-    setPreviewData([]); setSapRows([]);
-    try {
-      const rows = await parseSAPFile(f);
-      setSapRows(rows);
-      setPreviewData(rows);
-      setStep("preview");
-    } catch(err) {
-      alert("Gagal membaca file: " + err.message);
-    }
-  }
-
-  async function confirmImport() {
-    setImporting(true);
-    const res = await onImport(sapRows);
-    setResult(res);
-    setStep("done");
-    setImporting(false);
-  }
-
-  const filtered = filterJenis==="semua" ? previewData : previewData.filter(r=>r.jenisBarang===filterJenis);
-  const totalNilai = previewData.reduce((a,r)=>a+r.qty*r.harga,0);
-  const byJenis = previewData.reduce((a,r)=>({...a,[r.jenisBarang]:(a[r.jenisBarang]||0)+1}),{});
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}}>
-      <div style={{...sty.card,width:"90vw",maxWidth:900,maxHeight:"92vh",overflowY:"auto"}}>
-
-        {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-          <div>
-            <h2 style={{fontSize:18,fontWeight:900}}>⬆️ Import Data Stok dari SAP</h2>
-            <p style={{fontSize:12,color:C.muted}}>Format: CSV export SAP MM (PEMAT_DDMMYYYY.csv) • Lokasi diisi manual setelah import</p>
-          </div>
-          <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer"}} onClick={onClose}>✕ Tutup</button>
-        </div>
-
-        {/* Step indicator */}
-        <div style={{display:"flex",gap:0,marginBottom:20}}>
-          {["upload","preview","done"].map((s,i)=>(
-            <div key={s} style={{flex:1,display:"flex",alignItems:"center"}}>
-              <div style={{width:28,height:28,borderRadius:"50%",
-                background:step===s?"#003087":(["preview","done"].includes(step)&&i===0)||(step==="done"&&i===1)?"#16a34a":"#e5e7eb",
-                color:step===s||(["preview","done"].includes(step)&&i===0)||(step==="done"&&i===1)?"white":"#9ca3af",
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,flexShrink:0}}>
-                {(["preview","done"].includes(step)&&i===0)||(step==="done"&&i===1)?"✓":i+1}
-              </div>
-              <div style={{fontSize:11,fontWeight:600,marginLeft:6,color:step===s?C.accent:C.muted}}>
-                {s==="upload"?"Upload File":s==="preview"?"Preview & Konfirmasi":"Selesai"}
-              </div>
-              {i<2 && <div style={{flex:1,height:1,background:C.border,margin:"0 8px"}}/>}
-            </div>
-          ))}
-        </div>
-
-        {/* STEP 1: Upload */}
-        {step==="upload" && (
-          <div>
-            <div style={{border:`2px dashed ${C.border}`,borderRadius:12,padding:40,textAlign:"center",marginBottom:16}}>
-              <div style={{fontSize:36,marginBottom:12}}>📂</div>
-              <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>Upload File CSV SAP (PEMAT)</div>
-              <div style={{fontSize:11,color:C.muted,marginBottom:16}}>Format: PEMAT_DDMMYYYY.csv • Export dari SAP MM modul Material Management</div>
-              <input type="file" accept=".csv,.CSV,.xlsx,.XLSX,.xls" onChange={handleFile} style={{fontSize:13}}/>
-            </div>
-            <div style={{background:"#fef3c7",border:`1px solid #fde68a`,borderRadius:8,padding:12,fontSize:12,color:"#92400e",marginBottom:10}}>
-              ⚠️ <b>Perhatian:</b> Import ini akan <b>mengganti semua Data Stok yang ada</b> dengan data dari SAP. Pastikan file CSV sudah benar sebelum melanjutkan.
-            </div>
-            <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:8,padding:12,fontSize:12,color:"#1d4ed8"}}>
-              ℹ️ <b>Lokasi material</b> tidak perlu diisi saat import. Admin Gudang akan mengisi lokasi masing-masing material secara manual di halaman Data Stok setelah import selesai.
-            </div>
-          </div>
-        )}
-
-        {/* STEP 2: Preview */}
-        {step==="preview" && (
-          <div>
-            {/* Summary cards */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
-              {[
-                {label:"Total Material",val:previewData.length,color:C.accent},
-                {label:"Cadang",val:byJenis["Cadang"]||0,color:"#dc2626"},
-                {label:"Persediaan",val:byJenis["Persediaan"]||0,color:"#16a34a"},
-                {label:"Persediaan Bursa",val:byJenis["Persediaan Bursa"]||0,color:"#ea580c"},
-                {label:"Pre Memory",val:byJenis["Pre Memory"]||0,color:"#1d4ed8"},
-              ].map((s,i)=>(
-                <div key={i} style={{...sty.card,borderTop:`3px solid ${s.color}`,padding:12,textAlign:"center"}}>
-                  <div style={{fontSize:18,fontWeight:900,color:s.color}}>{s.val}</div>
-                  <div style={{fontSize:10,color:C.muted}}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Info lokasi */}
-            <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:8,padding:10,marginBottom:14,fontSize:12,color:"#1d4ed8"}}>
-              📍 Semua material akan diimport <b>tanpa lokasi</b>. Setelah import, Admin Gudang mengisi lokasi per material di halaman Data Stok.
-            </div>
-
-            {/* Filter */}
-            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-              {["semua","Cadang","Persediaan","Persediaan Bursa","Pre Memory"].map(j=>{
-                const count = j==="semua" ? previewData.length : (byJenis[j]||0);
-                return (
-                  <button key={j} onClick={()=>setFilterJenis(j)}
-                    style={{padding:"4px 12px",borderRadius:20,border:`1px solid ${filterJenis===j?C.accent:C.border}`,
-                      background:filterJenis===j?C.accent:"white",color:filterJenis===j?"white":C.muted,fontSize:11,cursor:"pointer"}}>
-                    {j==="semua"?"Semua":j} ({count})
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Preview table */}
-            <div style={{maxHeight:320,overflow:"auto",marginBottom:14,border:`1px solid ${C.border}`,borderRadius:8}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:680}}>
-                <thead style={{position:"sticky",top:0}}>
-                  <tr style={{background:"#003087",color:"white"}}>
-                    {["No","No Katalog","Nama Material","Sat","Qty SAP","Harga Satuan","Jenis Barang","Kategori SAP"].map(h=>(
-                      <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row,i)=>(
-                    <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"white":"#f9fafb"}}>
-                      <td style={{padding:"5px 8px",color:C.muted}}>{i+1}</td>
-                      <td style={{padding:"5px 8px",fontFamily:"monospace",fontSize:10}}>{row.katalog}</td>
-                      <td style={{padding:"5px 8px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={row.nama}>{row.nama}</td>
-                      <td style={{padding:"5px 8px",textAlign:"center"}}>{row.satuan}</td>
-                      <td style={{padding:"5px 8px",textAlign:"center",fontWeight:700}}>{row.qty}</td>
-                      <td style={{padding:"5px 8px",textAlign:"right"}}>{row.harga>0?`Rp ${fmtNum(row.harga)}`:"—"}</td>
-                      <td style={{padding:"5px 8px"}}>
-                        <span style={{padding:"2px 6px",borderRadius:10,fontSize:9,fontWeight:700,
-                          background:row.jenisBarang==="Cadang"?"#f3e8ff":row.jenisBarang==="Pre Memory"?"#dbeafe":row.jenisBarang==="Persediaan Bursa"?"#fff7ed":"#dcfce7",
-                          color:row.jenisBarang==="Cadang"?"#7c3aed":row.jenisBarang==="Pre Memory"?"#1d4ed8":row.jenisBarang==="Persediaan Bursa"?"#ea580c":"#166534"}}>
-                          {row.jenisBarang}
-                        </span>
-                      </td>
-                      <td style={{padding:"5px 8px",fontSize:10,color:C.muted}}>{row.valuationDesc||"-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Action buttons */}
-            <div style={{display:"flex",gap:10}}>
-              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setStep("upload")}>← Ganti File</button>
-              <button style={{...sty.btn("primary"),flex:3}} disabled={importing} onClick={confirmImport}>
-                {importing?"⏳ Mengimport...":"✅ Konfirmasi Import — Masukkan ke Database"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 3: Done */}
-        {step==="done" && result && (
-          <div style={{textAlign:"center",padding:30}}>
-            <div style={{fontSize:48,marginBottom:16}}>✅</div>
-            <div style={{fontSize:20,fontWeight:900,color:C.green,marginBottom:8}}>Import Berhasil!</div>
-            <div style={{fontSize:13,color:C.muted,marginBottom:6}}>{result.sapRows?.length||0} material dari SAP berhasil dimuat ke sistem.</div>
-            <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:8,padding:10,marginBottom:20,fontSize:12,color:"#1d4ed8"}}>
-              📍 <b>Langkah selanjutnya:</b> Buka halaman Data Stok dan isi lokasi untuk masing-masing material.
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:24}}>
-              {[
-                {label:"Master Katalog",val:result.katalogCount,icon:"🗂️"},
-                {label:"Data Stok",val:result.stockCount,icon:"📦"},
-                {label:"Nilai Total",val:`Rp ${fmtNum(Math.round((result.sapRows||[]).reduce((a,r)=>a+r.qty*r.harga,0)/1e6))}M`,icon:"💰"},
-              ].map((s,i)=>(
-                <div key={i} style={{...sty.card,padding:14}}>
-                  <div style={{fontSize:24,marginBottom:4}}>{s.icon}</div>
-                  <div style={{fontSize:18,fontWeight:900}}>{s.val}</div>
-                  <div style={{fontSize:11,color:C.muted}}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-            <button style={{...sty.btn("primary"),padding:"12px 32px"}} onClick={onClose}>
-              Buka Data Stok → Isi Lokasi
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 
 function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
   saveOpname, submitOpname, approveOpname_Asman, approveOpname_Manager, rejectOpname, deleteOpname }) {
