@@ -2588,7 +2588,7 @@ export default function PLNWarehouse() {
     setMaraSearchResults(data || []);
   }
   function applyMaraToKatalog(item) {
-    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan }));
+    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan, category: item.material_group||kf.category }));
     setMaraSearchResults([]);
     setMaraSearch("");
   }
