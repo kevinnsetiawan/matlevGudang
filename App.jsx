@@ -13266,32 +13266,45 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       aBackup.download = `warnoto_backup_pre_migrasi_${new Date().toISOString().slice(0,10)}.json`;
       aBackup.click();
 
-      // 2. Build katalog baru dari SAP
+      // 2. Build katalog — MERGE ke katalogList existing, BUKAN timpa total. Bug lama: array
+      // hasil cuma berisi baris dari file yang lagi diupload (previewStats.sapResult), jadi
+      // upload kedua (mis. file Material Cadang setelah Persediaan) menghapus semua katalog/
+      // stok dari upload pertama yang tidak ada di file kedua. Sekarang mulai dari list
+      // existing, cuma upsert baris yang ada di file ini — baris lain yang tidak disentuh
+      // TETAP ada.
       const now = Date.now();
-      const newKatalog = previewStats.sapResult.map(r => {
-        const existing = katalogList.find(k=>normalizeKatalog(k.katalog)===r.noKat);
-        if (existing) return { ...existing, jenisBarang: r.jenisBarang, satuan: r.satuan || existing.satuan };
-        return {
-          id: "KAT-MIG-"+r.noKat,
-          katalog: r.noKat,
-          name: r.desc,
-          category: r.desc.split(";")[0].trim() || "Material",
-          jenisBarang: r.jenisBarang,
-          satuan: r.satuan,
-          keterangan: "Import migrasi SAP " + (sapFile||""),
-          createdAt: now,
-        };
+      const katalogById = new Map(katalogList.map(k=>[normalizeKatalog(k.katalog), k]));
+      previewStats.sapResult.forEach(r => {
+        const existing = katalogById.get(r.noKat);
+        if (existing) {
+          katalogById.set(r.noKat, { ...existing, jenisBarang: r.jenisBarang, satuan: r.satuan || existing.satuan });
+        } else {
+          katalogById.set(r.noKat, {
+            id: "KAT-MIG-"+r.noKat,
+            katalog: r.noKat,
+            name: r.desc,
+            category: r.desc.split(";")[0].trim() || "Material",
+            jenisBarang: r.jenisBarang,
+            satuan: r.satuan,
+            keterangan: "Import migrasi SAP " + (sapFile||""),
+            createdAt: now,
+          });
+        }
       });
+      const newKatalog = Array.from(katalogById.values());
 
-      // 3. Build stocks baru (satu lokasi default per item)
+      // 3. Build stocks — sama, MERGE ke stocks existing (satu lokasi default per item baru).
       const defaultLokasi = lokasiList[0];
-      const newStocks = previewStats.sapResult.filter(r=>r.qty>0).map(r => {
-        const kat = newKatalog.find(k=>k.katalog===r.noKat);
-        const existing = stocks.find(s=>{
-          const k = katalogList.find(kk=>kk.id===s.katalogId);
-          return k && normalizeKatalog(k.katalog)===r.noKat;
-        });
-        return {
+      const stockByKode = new Map();
+      stocks.forEach(s => {
+        const k = katalogList.find(kk=>kk.id===s.katalogId);
+        if (k) stockByKode.set(normalizeKatalog(k.katalog), s);
+      });
+      const stocksById = new Map(stocks.map(s=>[s.id, s]));
+      previewStats.sapResult.filter(r=>r.qty>0).forEach(r => {
+        const kat = katalogById.get(r.noKat);
+        const existing = stockByKode.get(r.noKat);
+        const row = {
           id: existing?.id || ("STK-MIG-"+r.noKat+"-"+now),
           katalogId: kat?.id || ("KAT-MIG-"+r.noKat),
           lokasiId: existing?.lokasiId || defaultLokasi?.id || null,
@@ -13308,25 +13321,31 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
           createdAt: existing?.createdAt || now,
           updatedAt: now,
         };
+        stocksById.set(row.id, row);
       });
+      const newStocks = Array.from(stocksById.values());
 
-      // 4. Simpan histori TUG-15 lama sebagai migrasi
-      const migHistory = txns.map(t => ({...t, _migrasiSource:"WARNOTO_TEST"}));
-      setMigratedTug15History(migHistory);
+      // 4. Arsipkan histori TUG lama sebagai migrasi — cuma sekali (run pertama). Kalau wizard
+      // ini dijalankan berkali-kali (mis. Persediaan lalu Cadang), jangan wipe txns aktif yang
+      // sudah berjalan normal di antara 2 proses migrasi itu.
+      const isFirstMigration = (migratedTug15History||[]).length === 0;
+      const migHistory = isFirstMigration ? txns.map(t => ({...t, _migrasiSource:"WARNOTO_TEST"})) : migratedTug15History;
+      if (isFirstMigration) setMigratedTug15History(migHistory);
+      const newTxns = isFirstMigration ? [] : txns;
 
       // 5. Apply cutover
       setKatalogList(newKatalog);
       setStocks(newStocks);
-      setTxns([]);
+      setTxns(newTxns);
       await saveToCloud({
         katalogList: newKatalog,
         stocks: newStocks,
-        txns: [],
+        txns: newTxns,
         migratedTug15History: migHistory,
       });
 
       setStep("done");
-      showToast(`Cutover berhasil! ${newKatalog.length} katalog, ${newStocks.length} baris stok.`, "success");
+      showToast(`Cutover berhasil! ${newKatalog.length} katalog, ${newStocks.length} baris stok (digabung dengan data existing).`, "success");
     } catch(err) {
       showToast("Cutover gagal: " + err.message, "error");
     }
