@@ -13663,11 +13663,16 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   // lokasiList[0]?.id — tapi urutan baris dari Supabase TIDAK terjamin stabil
   // antar reload (query lokasi tidak pakai ORDER BY), jadi lokasiList[0] bisa
   // beda tiap kali app dimuat, dan panel jadi tidak menangkap baris yang
-  // sebelumnya memang salah. Fix: tangkap SEMUA baris hasil migrasi
-  // (id STK-MIG-) yang punya lokasi tapi belum direview — tidak bergantung ke
-  // lokasi mana pun secara spesifik.
+  // sebelumnya memang salah. Fix: tangkap SEMUA baris hasil migrasi yang
+  // punya lokasi tapi belum direview — tidak bergantung ke lokasi mana pun.
+  //
+  // PERBAIKAN 2026-07-04 (ketiga): filter cuma cek prefix "STK-MIG-", tapi
+  // banyak baris ternyata berasal dari fitur "Import dari SAP" LAMA (sudah
+  // dihapus tombolnya, lihat commit 5958153) yang pakai prefix "STK-SAP-" —
+  // baris-baris itu masih ada di data existing dan ikut kena bug lokasi yang
+  // sama. Fix: terima kedua prefix.
   const locationReviewCandidates = (stocks||[]).filter(s =>
-    String(s.id||"").startsWith("STK-MIG-") && s.lokasiId && !s.locationReviewed
+    /^STK-(MIG|SAP)-/.test(String(s.id||"")) && s.lokasiId && !s.locationReviewed
   );
 
   async function keepMigrasiLocation(stockId) {
@@ -13695,10 +13700,9 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
 
   return (
     <div>
-      <div style={{marginBottom:16}}>
-        <h1 style={{fontSize:22,fontWeight:900,marginBottom:4}}>🔄 Migrasi Data SAP/Non-SAP</h1>
-        <p style={{color:C.muted,fontSize:13}}>Cutover terkontrol data stok dari SAP ke WARNOTO. <strong style={{color:C.red}}>⚠️ Hanya untuk ADMIN — backup wajib sebelum apply!</strong></p>
-      </div>
+      {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
+          di atas (lihat App.jsx ~line 5769) — h1 di sini dihapus supaya tidak
+          dobel (ditemukan user 2026-07-04). */}
 
       {(migrasiPendingReview||[]).some(i=>i.status==="PENDING") && (
         <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid #f59e0b`}}>
