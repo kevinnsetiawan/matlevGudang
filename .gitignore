@@ -10,3 +10,8 @@ supabase/.temp/
 # jangan pernah commit, cuma template-nya (users.template.csv) yang boleh.
 scripts/users.csv
 scripts/*.users.csv
+
+# Backup/export hasil generate lokal (ratusan MB, ZIP) — jangan masuk git,
+# simpan di luar repo (Drive/eksternal) kalau perlu disimpan jangka panjang.
+outputs/
+migration-tools/node_modules/
