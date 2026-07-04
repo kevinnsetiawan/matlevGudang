@@ -13325,11 +13325,34 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       if (fetchError) showToast("Gagal cek referensi MARA: " + fetchError.message, "error");
     }
 
-    const sapResult = sapRows.map(r => ({
-      ...r,
-      matchWarnoto: warnotoSet.has(r.noKat),
-      matchMara: maraSet.has(r.noKat),
-    }));
+    // Qty existing di aplikasi per No Katalog (dijumlah semua lokasi) — dipakai
+    // untuk banding qty file upload vs qty aplikasi (permintaan user 2026-07-04):
+    // sama persis → "Match", beda → otomatis tandai opsi Timpa (bukan cuma
+    // tersedia, tapi di-pre-check) supaya Admin sadar ada selisih qty.
+    const qtyByKatalog = new Map();
+    stocks.forEach(s => {
+      const k = katalogList.find(kk=>kk.id===s.katalogId);
+      if (!k) return;
+      const kode = normalizeKatalog(k.katalog);
+      qtyByKatalog.set(kode, (qtyByKatalog.get(kode)||0) + (s.qty||0));
+    });
+
+    const sapResult = sapRows.map(r => {
+      const matchWarnoto = warnotoSet.has(r.noKat);
+      const existingQty = matchWarnoto ? (qtyByKatalog.get(r.noKat)||0) : null;
+      const qtyMatch = matchWarnoto ? existingQty === r.qty : null;
+      return {
+        ...r,
+        matchWarnoto,
+        matchMara: maraSet.has(r.noKat),
+        existingQty,
+        qtyMatch,
+      };
+    });
+    // Baris matched dengan qty BEDA otomatis di-pre-check "Timpa" (bukan dipaksa,
+    // Admin masih bisa un-check kalau memang mau pertahankan qty existing) —
+    // baris dengan qty SAMA tidak perlu keputusan apa-apa, dibiarkan default.
+    setOverwriteRows(new Set(sapResult.filter(r=>r.matchWarnoto && r.qtyMatch===false).map(r=>r.noKat)));
 
     const byJenis = {};
     sapResult.forEach(r => { byJenis[r.jenisBarang] = (byJenis[r.jenisBarang]||0) + 1; });
@@ -13677,7 +13700,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:700}}>
               <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
                 <tr>
-                  {["No Katalog","Deskripsi","Jenis","Qty","Harga","Match WARNOTO","Match MARA","Timpa?","Review"].map(h=>(
+                  {["No Katalog","Deskripsi","Jenis","Qty File","Qty Aplikasi","Harga","Match WARNOTO","Match MARA","Timpa?","Review"].map(h=>(
                     <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
@@ -13689,17 +13712,22 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
                     <td style={{padding:"5px 8px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.desc}</td>
                     <td style={{padding:"5px 8px",fontSize:10}}>{r.jenisBarang}</td>
                     <td style={{padding:"5px 8px",textAlign:"right"}}>{r.qty}</td>
+                    <td style={{padding:"5px 8px",textAlign:"right",color:r.qtyMatch===false?C.red:r.qtyMatch===true?C.green:C.muted,fontWeight:r.qtyMatch===false?700:400}}>
+                      {r.matchWarnoto ? r.existingQty : "-"}
+                    </td>
                     <td style={{padding:"5px 8px",textAlign:"right"}}>{r.harga?fmtNum(r.harga):"-"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.matchWarnoto?"✅":"🆕"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.matchMara?"✅":"-"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>
-                      {r.matchWarnoto ? (
+                      {!r.matchWarnoto ? (
+                        <span style={{fontSize:10,color:"#f59e0b",fontWeight:700}}>📋 Review Admin</span>
+                      ) : r.qtyMatch ? (
+                        <span style={{fontSize:10,color:C.green,fontWeight:700}}>✅ Qty sama</span>
+                      ) : (
                         <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer",fontSize:10,color:overwriteRows.has(r.noKat)?C.red:C.muted}}>
                           <input type="checkbox" checked={overwriteRows.has(r.noKat)} onChange={()=>toggleOverwriteRow(r.noKat)} />
                           Timpa
                         </label>
-                      ) : (
-                        <span style={{fontSize:10,color:"#f59e0b",fontWeight:700}}>📋 Review Admin</span>
                       )}
                     </td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.needsStockReview?"⚠️ Stok":r.plantMismatch?"⚠️ Plant":r.materialTypeMismatch?"⚠️ Jenis":""}</td>
@@ -13709,8 +13737,10 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
             </table>
           </div>
           <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.accent}`,fontSize:12}}>
-            <strong>ℹ️ Aturan Apply:</strong> baris <strong>Match WARNOTO ✅</strong> (sudah ada di katalog) akan <strong>DIBIARKAN apa adanya</strong> secara default —
-            kecuali Anda centang "Timpa" di baris itu ({overwriteRows.size} baris ditandai timpa saat ini).
+            <strong>ℹ️ Aturan Apply:</strong> baris <strong>Match WARNOTO ✅</strong> dengan qty file = qty aplikasi otomatis
+            <strong> "✅ Qty sama"</strong> — tidak ada yang perlu diputuskan, dibiarkan apa adanya.
+            Kalau qty-nya <strong>beda</strong>, kotak "Timpa" otomatis TERCENTANG (Admin bisa un-check kalau tetap mau
+            pertahankan qty aplikasi) — total <strong>{overwriteRows.size} baris</strong> ditandai timpa saat ini.
             Baris <strong>🆕 baru</strong> (belum ada di katalog) TIDAK langsung ditambahkan — masuk ke antrian "Menunggu Review Admin"
             di bawah, baru dibuat setelah di-approve satu-per-satu.
           </div>
