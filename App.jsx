@@ -13657,9 +13657,17 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   // di Master Lokasi, bukan hasil pembacaan file). Tidak bisa dibedakan otomatis
   // mana yang memang ditinggal begitu vs yang sudah sengaja dikonfirmasi manual
   // oleh Admin ke lokasi yang sama — jadi ditampilkan sebagai daftar review,
-  // Admin putuskan satu-per-satu: pertahankan atau kosongkan lagi.
+  // Admin putuskan satu-per-satu (atau sekaligus) pertahankan/kosongkan.
+  //
+  // PERBAIKAN 2026-07-04 (kedua): filter awal membandingkan ke lokasiId ===
+  // lokasiList[0]?.id — tapi urutan baris dari Supabase TIDAK terjamin stabil
+  // antar reload (query lokasi tidak pakai ORDER BY), jadi lokasiList[0] bisa
+  // beda tiap kali app dimuat, dan panel jadi tidak menangkap baris yang
+  // sebelumnya memang salah. Fix: tangkap SEMUA baris hasil migrasi
+  // (id STK-MIG-) yang punya lokasi tapi belum direview — tidak bergantung ke
+  // lokasi mana pun secara spesifik.
   const locationReviewCandidates = (stocks||[]).filter(s =>
-    String(s.id||"").startsWith("STK-MIG-") && s.lokasiId && s.lokasiId === lokasiList[0]?.id && !s.locationReviewed
+    String(s.id||"").startsWith("STK-MIG-") && s.lokasiId && !s.locationReviewed
   );
 
   async function keepMigrasiLocation(stockId) {
@@ -13674,6 +13682,15 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
     setStocks(newStocks);
     await saveToCloud({ stocks: newStocks });
     showToast("Lokasi dikosongkan — isi manual lewat Data Stok.", "success");
+  }
+
+  async function clearAllMigrasiLocations() {
+    if (!window.confirm(`Kosongkan lokasi untuk SEMUA ${locationReviewCandidates.length} baris ini sekaligus? Tindakan ini tidak bisa di-undo.`)) return;
+    const ids = new Set(locationReviewCandidates.map(s=>s.id));
+    const newStocks = stocks.map(s => ids.has(s.id) ? {...s, lokasiId:null, locationReviewed:true} : s);
+    setStocks(newStocks);
+    await saveToCloud({ stocks: newStocks });
+    showToast(`${ids.size} baris dikosongkan — isi manual lewat Data Stok.`, "success");
   }
 
   return (
@@ -13705,14 +13722,18 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
 
       {locationReviewCandidates.length > 0 && (
         <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid #dc2626`}}>
-          <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#991b1b"}}>
-            📍 Review Lokasi Otomatis ({locationReviewCandidates.length} baris stok)
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:6}}>
+            <div style={{fontWeight:800,fontSize:14,color:"#991b1b"}}>
+              📍 Review Lokasi Otomatis ({locationReviewCandidates.length} baris stok)
+            </div>
+            <button style={sty.btn("danger","sm")} onClick={clearAllMigrasiLocations}>🗑️ Kosongkan Semua ({locationReviewCandidates.length})</button>
           </div>
           <div style={{fontSize:11,color:C.muted,marginBottom:10}}>
             Baris-baris ini pernah dibuat migrasi lalu dengan lokasi ditebak otomatis (bug yang sudah diperbaiki) —
             sebagian mungkin sudah Anda konfirmasi/set manual, sebagian mungkin belum. Cek satu-satu:
             kalau lokasinya memang benar, klik "Pertahankan". Kalau bukan, klik "Kosongkan" lalu isi lokasi yang
-            benar manual lewat Data Stok.
+            benar manual lewat Data Stok. Kalau Anda yakin SEMUA baris ini memang belum pernah diisi manual,
+            pakai "Kosongkan Semua" di kanan atas.
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:320,overflowY:"auto"}}>
             {locationReviewCandidates.map(s=>{
