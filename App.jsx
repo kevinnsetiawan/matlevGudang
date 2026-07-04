@@ -5666,7 +5666,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                 onChange={async e=>{
                                   const newLokasiId = e.target.value;
                                   const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  const pindahGudang = (lokSel?.gudangId||null) !== (lok?.gudangId||null);
+                                  // BUG DITEMUKAN 2026-07-04: kalau baris ini belum punya lokasi sama
+                                  // sekali (lok undefined, mis. baris hasil "Kosongkan" dari Migrasi
+                                  // Data), lok?.gudangId jadi undefined -> null, dan gudangId lokasi
+                                  // manapun yang dipilih Admin PASTI beda dari null -> pindahGudang
+                                  // SELALU true, jadi pengisian PERTAMA KALI ke baris kosong dianggap
+                                  // "pindah gudang" dan wajib approval TL — padahal tidak ada gudang
+                                  // lama yang benar-benar dipindah dari mana pun. Fix: hanya anggap
+                                  // "pindah gudang" (butuh approval) kalau memang SUDAH ada lokasi
+                                  // sebelumnya (lok ada isinya).
+                                  const pindahGudang = !!lok && (lokSel?.gudangId||null) !== (lok?.gudangId||null);
                                   let updated, msg;
                                   if (pindahGudang) {
                                     // Pindah ke Gudang lain wajib approval TL.
