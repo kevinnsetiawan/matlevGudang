@@ -13501,25 +13501,35 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       const stocksById = new Map(stocks.map(s=>[s.id, s]));
       previewStats.sapResult.filter(r=>r.qty>0 && overwriteRows.has(r.noKat)).forEach(r => {
         const kat = katalogById.get(r.noKat);
+        if (!kat) return; // baru/tidak match — ditangani lewat pending review
         const rows = stocksByKode.get(r.noKat) || [];
-        if (!kat || rows.length === 0) return; // baru/tidak match — ditangani lewat pending review
         if (rows.length > 1) {
           multiLokasiSkipped.push({ noKat: r.noKat, desc: r.desc, qtyFile: r.qty, lokasiCount: rows.length });
           return; // ambigu, jangan auto-timpa salah satu lokasi — Admin sesuaikan manual
         }
-        const existing = rows[0];
+        // rows.length===0: BUG DITEMUKAN 2026-07-04 — sebelumnya kasus ini malah
+        // di-skip diam-diam (katalog match tapi belum pernah punya baris stok
+        // sama sekali), jadi katalog "masuk" tapi Data Stok Gudang tetap 0 baris.
+        // Sekarang: kalau belum ada baris stok, BUAT baris baru (bukan cuma
+        // update baris existing) — sama seperti perilaku untuk item benar-benar
+        // baru, cuma katalog-nya sudah ada duluan.
+        const existing = rows[0] || null;
         const row = {
-          ...existing,
-          id: existing.id,
+          ...(existing || {}),
+          id: existing?.id || ("STK-MIG-"+r.noKat+"-"+now),
           katalogId: kat.id,
+          lokasiId: existing?.lokasiId || lokasiList[0]?.id || null,
           qty: r.qty,
-          price: r.harga || existing.price || 0,
+          price: r.harga || existing?.price || 0,
+          minQty: existing?.minQty || 0,
           unit: r.satuan,
           jenisBarang: r.jenisBarang,
           name: r.desc,
           katalog: r.noKat,
+          category: existing?.category || r.desc.split(";")[0].trim() || "Material",
           sapBaselineQty: r.qty,
           sapBaselineAt: now,
+          createdAt: existing?.createdAt || now,
           updatedAt: now,
         };
         stocksById.set(row.id, row);
