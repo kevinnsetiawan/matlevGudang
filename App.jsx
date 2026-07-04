@@ -13183,6 +13183,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   // import ini (2026-07-04, permintaan user: jangan pernah timpa data existing
   // diam-diam).
   const [overwriteRows, setOverwriteRows] = useState(new Set());
+  const [applyProgress, setApplyProgress] = useState(""); // teks progres tahap-per-tahap saat Apply Cutover, supaya kelihatan jalan/stuck
   const [nonSapRows, setNonSapRows] = useState([]);
   const [parsedSAP, setParsedSAP] = useState([]);
   const [parsedNonSAP, setParsedNonSAP] = useState([]);
@@ -13302,28 +13303,35 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   // sama seperti bug yang sudah pernah difix di applyMaraToKatalog/backfill kategori).
   async function buildPreview() {
     setBusy(true);
+    setApplyProgress("🔄 Menyiapkan perbandingan data...");
     const warnotoSet = new Set(katalogList.map(k=>normalizeKatalog(k.katalog)));
 
     // BUG DITEMUKAN 2026-07-04: query tanpa .range() cuma balikin ~1000 baris
     // pertama (default limit PostgREST/Supabase) — mara_catalog punya 42.703
     // baris, jadi kode yang bukan di 1000 baris pertama SELALU "tidak match"
     // walau sebenarnya ada di referensi MARA (dikonfirmasi manual oleh user).
-    // Fix: ambil semua baris per halaman 1000 sampai habis.
+    // Fix: ambil semua baris per halaman 1000 sampai habis. Ini butuh puluhan
+    // request berurutan (~43 halaman untuk 42.703 baris) — kasih progress teks
+    // per halaman supaya kelihatan jalan, bukan stuck (permintaan user 2026-07-04).
     let maraSet = new Set();
     if (supabase) {
       let from = 0;
       const pageSize = 1000;
       let fetchError = null;
+      let page = 1;
       while (true) {
+        setApplyProgress(`📥 Memuat referensi MARA (halaman ${page}, ${maraSet.size} kode terbaca)...`);
         const { data, error } = await supabase.from("mara_catalog").select("kode_material").range(from, from + pageSize - 1);
         if (error) { fetchError = error; break; }
         if (!data || data.length === 0) break;
         data.forEach(m => maraSet.add(m.kode_material.replace(/^0+/, "")));
         if (data.length < pageSize) break;
         from += pageSize;
+        page++;
       }
       if (fetchError) showToast("Gagal cek referensi MARA: " + fetchError.message, "error");
     }
+    setApplyProgress("🧮 Menghitung status match & selisih qty...");
 
     // Qty existing di aplikasi per No Katalog (dijumlah semua lokasi) — dipakai
     // untuk banding qty file upload vs qty aplikasi (permintaan user 2026-07-04):
@@ -13363,6 +13371,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
     setPreviewStats({ sapResult, byJenis, totalQty, totalNilai });
     setStep("preview");
     setBusy(false);
+    setApplyProgress("");
   }
 
   // Recompute ringkasan (byJenis/totalQty/totalNilai) setelah sapResult diubah manual di preview.
@@ -13399,6 +13408,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   async function handleBackupAndApply() {
     if (!previewStats) return;
     setBusy(true);
+    setApplyProgress("⏳ Menyiapkan backup JSON...");
     try {
       // 1. Backup data sebelum cutover
       const backup = {
@@ -13412,6 +13422,8 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       aBackup.href = URL.createObjectURL(blobBackup);
       aBackup.download = `warnoto_backup_pre_migrasi_${new Date().toISOString().slice(0,10)}.json`;
       aBackup.click();
+
+      setApplyProgress("🔄 Menghitung baris yang perlu diperbarui...");
 
       // 2. Build katalog — MERGE ke katalogList existing, BUKAN timpa total. Bug lama: array
       // hasil cuma berisi baris dari file yang lagi diupload (previewStats.sapResult), jadi
@@ -13497,6 +13509,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       setStocks(newStocks);
       setTxns(newTxns);
       setMigrasiPendingReview(updatedPendingReview);
+      setApplyProgress("☁️ Menyimpan ke localStorage & Supabase (katalog, stok, antrian review)...");
       await saveToCloud({
         katalogList: newKatalog,
         stocks: newStocks,
@@ -13505,6 +13518,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
         migrasiPendingReview: updatedPendingReview,
       });
 
+      setApplyProgress("✅ Selesai.");
       setStep("done");
       const overwriteCount = previewStats.sapResult.filter(r => katalogById.has(r.noKat) && overwriteRows.has(r.noKat)).length;
       showToast(
@@ -13514,6 +13528,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       );
     } catch(err) {
       showToast("Cutover gagal: " + err.message, "error");
+      setApplyProgress("");
     }
     setBusy(false);
   }
@@ -13621,10 +13636,13 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               ⚠️ Upload file SAP terlebih dahulu (langkah 1) agar tombol aktif.
             </div>
           )}
-          <button style={sty.btn("primary")} disabled={sapRows.length===0||busy} onClick={buildPreview}>
-            {busy ? "⏳ Memproses..." : "Lanjut → Preview Rekonsiliasi"}
-          </button>
-          {busy && <button style={{...sty.btn("ghost","sm"),marginLeft:8}} onClick={()=>setBusy(false)}>Reset (jika stuck)</button>}
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <button style={sty.btn("primary")} disabled={sapRows.length===0||busy} onClick={buildPreview}>
+              {busy ? "⏳ Memproses..." : "Lanjut → Preview Rekonsiliasi"}
+            </button>
+            {busy && <button style={{...sty.btn("ghost","sm")}} onClick={()=>{setBusy(false);setApplyProgress("");}}>Reset (jika stuck)</button>}
+            {busy && applyProgress && <span style={{fontSize:12,color:C.accent,fontWeight:700}}>{applyProgress}</span>}
+          </div>
         </div>
       )}
 
@@ -13751,7 +13769,26 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
         </div>
       )}
 
-      {step==="backup" && (
+      {step==="backup" && (() => {
+        const newItemCount = previewStats?.sapResult?.filter(r=>!r.matchWarnoto).length || 0;
+        const nothingToChange = overwriteRows.size === 0 && newItemCount === 0;
+        if (nothingToChange) {
+          return (
+            <div style={{...sty.card,textAlign:"center",padding:30}}>
+              <div style={{fontSize:36,marginBottom:10}}>✅</div>
+              <div style={{fontWeight:800,fontSize:15,marginBottom:6}}>Tidak ada perubahan yang perlu di-apply</div>
+              <div style={{fontSize:12,color:C.muted,marginBottom:16}}>
+                Semua {previewStats?.sapResult?.length||0} baris di file ini sudah cocok 100% dengan data di aplikasi
+                (qty sama, tidak ada item baru) — tidak perlu backup/cutover, data existing tidak disentuh sama sekali.
+              </div>
+              <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                <button style={sty.btn("ghost")} onClick={()=>setStep("preview")}>← Kembali ke Preview</button>
+                <button style={sty.btn("primary")} onClick={()=>{ setStep("upload"); setSapFile(null); setSapRows([]); setPreviewStats(null); }}>Selesai, Upload File Lain</button>
+              </div>
+            </div>
+          );
+        }
+        return (
         <div style={{...sty.card}}>
           <div style={{fontWeight:700,fontSize:16,marginBottom:12}}>⚠️ Konfirmasi Backup & Apply Cutover</div>
           <div style={{background:"#fef9c3",border:"1px solid #fbbf24",borderRadius:8,padding:14,marginBottom:16,fontSize:13}}>
@@ -13760,19 +13797,22 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
               <li>Mendownload backup JSON lengkap data sebelum cutover</li>
               <li>Baris <strong>Match WARNOTO</strong> yang TIDAK dicentang "Timpa" akan dibiarkan apa adanya (aman)</li>
               <li>Baris <strong>Match WARNOTO</strong> yang dicentang "Timpa" ({overwriteRows.size} baris) akan diperbarui dengan data dari file ini</li>
-              <li>Baris <strong>baru</strong> ({previewStats?.sapResult?.filter(r=>!r.matchWarnoto).length||0} item) masuk antrian "Menunggu Review Admin" — belum masuk Master Katalog/Data Stok</li>
+              <li>Baris <strong>baru</strong> ({newItemCount} item) masuk antrian "Menunggu Review Admin" — belum masuk Master Katalog/Data Stok</li>
               <li>Mengosongkan transaksi TUG test lama (disimpan ke histori migrasi, hanya sekali di run pertama)</li>
               <li>Data yang ditimpa <strong>tidak bisa di-undo</strong> kecuali restore dari backup</li>
             </ul>
           </div>
-          <div style={{display:"flex",gap:10}}>
+          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
             <button style={{...sty.btn("danger"),opacity:busy?0.6:1}} onClick={handleBackupAndApply} disabled={busy}>
               {busy?"⏳ Memproses...":"📥 Download Backup & Apply Cutover"}
             </button>
             <button style={sty.btn("ghost")} onClick={()=>setStep("preview")} disabled={busy}>← Batal</button>
+            {busy && <button style={{...sty.btn("ghost","sm")}} onClick={()=>{setBusy(false);setApplyProgress("");}}>Reset (jika stuck)</button>}
+            {busy && applyProgress && <span style={{fontSize:12,color:C.accent,fontWeight:700}}>{applyProgress}</span>}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {step==="done" && (
         <div style={{...sty.card,textAlign:"center",padding:40}}>
