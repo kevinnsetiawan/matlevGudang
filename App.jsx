@@ -13513,12 +13513,18 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
         // Sekarang: kalau belum ada baris stok, BUAT baris baru (bukan cuma
         // update baris existing) — sama seperti perilaku untuk item benar-benar
         // baru, cuma katalog-nya sudah ada duluan.
+        // BUG DITEMUKAN 2026-07-04 (laporan kedua): default ke lokasiList[0] (lokasi
+        // PERTAMA di seluruh Master Lokasi, tidak ada hubungannya dengan file yang
+        // diupload — kolom Storage Location di SAP memang sengaja diabaikan, jadi
+        // WARNOTO tidak punya info lokasi real untuk item baru). Sekarang dibiarkan
+        // KOSONG ("— Belum diisi —") — Admin isi manual lewat dropdown Gudang/Blok
+        // yang sudah ada di Data Stok, bukan ditebak sistem.
         const existing = rows[0] || null;
         const row = {
           ...(existing || {}),
           id: existing?.id || ("STK-MIG-"+r.noKat+"-"+now),
           katalogId: kat.id,
-          lokasiId: existing?.lokasiId || lokasiList[0]?.id || null,
+          lokasiId: existing?.lokasiId || null,
           qty: r.qty,
           price: r.harga || existing?.price || 0,
           minQty: existing?.minQty || 0,
@@ -13621,9 +13627,11 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       createdAt: now,
     }];
     const finalKatId = existingKat?.id || katId;
+    // Sama seperti fix di handleBackupAndApply: JANGAN tebak lokasi — kosongkan,
+    // Admin isi manual (lihat catatan bug 2026-07-04 di atas).
     const newStocksList = item.qty > 0 ? [...stocks, {
       id: "STK-MIG-" + item.noKat + "-" + now,
-      katalogId: finalKatId, lokasiId: lokasiList[0]?.id || null,
+      katalogId: finalKatId, lokasiId: null,
       qty: item.qty, price: item.harga || 0, minQty: 0, unit: item.satuan,
       jenisBarang: item.jenisBarang, name: item.desc, katalog: item.noKat,
       category: item.desc.split(";")[0].trim() || "Material",
@@ -13642,6 +13650,30 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
     setMigrasiPendingReview(newPending);
     await saveToCloud({ migrasiPendingReview: newPending });
     showToast("Item ditolak, tidak ditambahkan ke Master Katalog.", "success");
+  }
+
+  // Bug lokasi ditemukan 2026-07-04: sebelum fix di atas, baris stok baru hasil
+  // migrasi (id berawalan "STK-MIG-") auto-diisi lokasiList[0] (lokasi PERTAMA
+  // di Master Lokasi, bukan hasil pembacaan file). Tidak bisa dibedakan otomatis
+  // mana yang memang ditinggal begitu vs yang sudah sengaja dikonfirmasi manual
+  // oleh Admin ke lokasi yang sama — jadi ditampilkan sebagai daftar review,
+  // Admin putuskan satu-per-satu: pertahankan atau kosongkan lagi.
+  const locationReviewCandidates = (stocks||[]).filter(s =>
+    String(s.id||"").startsWith("STK-MIG-") && s.lokasiId && s.lokasiId === lokasiList[0]?.id && !s.locationReviewed
+  );
+
+  async function keepMigrasiLocation(stockId) {
+    const newStocks = stocks.map(s => s.id===stockId ? {...s, locationReviewed:true} : s);
+    setStocks(newStocks);
+    await saveToCloud({ stocks: newStocks });
+    showToast("Lokasi dipertahankan.", "success");
+  }
+
+  async function clearMigrasiLocation(stockId) {
+    const newStocks = stocks.map(s => s.id===stockId ? {...s, lokasiId:null, locationReviewed:true} : s);
+    setStocks(newStocks);
+    await saveToCloud({ stocks: newStocks });
+    showToast("Lokasi dikosongkan — isi manual lewat Data Stok.", "success");
   }
 
   return (
@@ -13667,6 +13699,37 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
                 <button style={sty.btn("danger","sm")} onClick={()=>rejectMigrasiPending(item.id)}>✕ Tolak</button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {locationReviewCandidates.length > 0 && (
+        <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid #dc2626`}}>
+          <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#991b1b"}}>
+            📍 Review Lokasi Otomatis ({locationReviewCandidates.length} baris stok)
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:10}}>
+            Baris-baris ini pernah dibuat migrasi lalu dengan lokasi ditebak otomatis (bug yang sudah diperbaiki) —
+            sebagian mungkin sudah Anda konfirmasi/set manual, sebagian mungkin belum. Cek satu-satu:
+            kalau lokasinya memang benar, klik "Pertahankan". Kalau bukan, klik "Kosongkan" lalu isi lokasi yang
+            benar manual lewat Data Stok.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:320,overflowY:"auto"}}>
+            {locationReviewCandidates.map(s=>{
+              const kat = katalogList.find(k=>k.id===s.katalogId);
+              const lok = lokasiList.find(l=>l.id===s.lokasiId);
+              const gudang = lok?.gudangId;
+              return (
+                <div key={s.id} style={{display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",background:"white"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name||kat?.name}</div>
+                    <div style={{fontSize:10,color:C.muted}}>No. Katalog {s.katalog||kat?.katalog} • Qty {s.qty} • Lokasi saat ini: {lok?.kode||"-"}</div>
+                  </div>
+                  <button style={sty.btn("primary","sm")} onClick={()=>keepMigrasiLocation(s.id)}>✅ Pertahankan</button>
+                  <button style={sty.btn("danger","sm")} onClick={()=>clearMigrasiLocation(s.id)}>🗑️ Kosongkan</button>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
