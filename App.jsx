@@ -13185,6 +13185,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
   const [overwriteRows, setOverwriteRows] = useState(new Set());
   const [applyProgress, setApplyProgress] = useState(""); // teks progres tahap-per-tahap saat Apply Cutover, supaya kelihatan jalan/stuck
   const [applyProgressPct, setApplyProgressPct] = useState(0); // 0-100, dipakai bareng applyProgress untuk progress bar bernomor
+  const [lastCutoverSummary, setLastCutoverSummary] = useState(null); // ringkasan hasil cutover terakhir, ditampilkan di step "done"
   const [nonSapRows, setNonSapRows] = useState([]);
   const [parsedSAP, setParsedSAP] = useState([]);
   const [parsedNonSAP, setParsedNonSAP] = useState([]);
@@ -13480,16 +13481,33 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       // 3. Build stocks — HANYA update qty/harga baris yang match DAN ditandai timpa.
       // Baris baru TIDAK dibuat di sini (masuk migrasiPendingReview di atas, baru
       // dibuat stok-nya kalau Admin approve).
-      const stockByKode = new Map();
+      // BUG DITEMUKAN 2026-07-04: kalau 1 katalog punya >1 baris stok (beda lokasi/blok),
+      // Map stockByKode dulu cuma nyimpen baris TERAKHIR (yang lain ketiban/hilang dari
+      // Map) — qty SAP (angka total, bukan per-lokasi) ditimpakan ke SATU baris lokasi
+      // secara acak, baris lokasi lain dibiarkan basi. User laporkan "data stock tidak
+      // update" — akar masalahnya kemungkinan ini untuk katalog yang stoknya tersebar di
+      // banyak lokasi. Fix: kalau katalog ini py >1 baris stok, JANGAN auto-update (kita
+      // tidak tahu qty SAP itu harus dialokasikan ke lokasi mana) — masukkan ke daftar
+      // multiLokasiSkipped, biar Admin sesuaikan manual per lokasi lewat Edit Data Stok.
+      const stocksByKode = new Map(); // kode -> array baris stok
       stocks.forEach(s => {
         const k = katalogList.find(kk=>kk.id===s.katalogId);
-        if (k) stockByKode.set(normalizeKatalog(k.katalog), s);
+        if (!k) return;
+        const kode = normalizeKatalog(k.katalog);
+        if (!stocksByKode.has(kode)) stocksByKode.set(kode, []);
+        stocksByKode.get(kode).push(s);
       });
+      const multiLokasiSkipped = [];
       const stocksById = new Map(stocks.map(s=>[s.id, s]));
       previewStats.sapResult.filter(r=>r.qty>0 && overwriteRows.has(r.noKat)).forEach(r => {
         const kat = katalogById.get(r.noKat);
-        const existing = stockByKode.get(r.noKat);
-        if (!existing || !kat) return; // baru/tidak match — ditangani lewat pending review
+        const rows = stocksByKode.get(r.noKat) || [];
+        if (!kat || rows.length === 0) return; // baru/tidak match — ditangani lewat pending review
+        if (rows.length > 1) {
+          multiLokasiSkipped.push({ noKat: r.noKat, desc: r.desc, qtyFile: r.qty, lokasiCount: rows.length });
+          return; // ambigu, jangan auto-timpa salah satu lokasi — Admin sesuaikan manual
+        }
+        const existing = rows[0];
         const row = {
           ...existing,
           id: existing.id,
@@ -13534,10 +13552,13 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       setApplyProgressPct(100);
       setApplyProgress("✅ Selesai.");
       setStep("done");
-      const overwriteCount = previewStats.sapResult.filter(r => katalogById.has(r.noKat) && overwriteRows.has(r.noKat)).length;
+      const overwriteCount = previewStats.sapResult.filter(r => katalogById.has(r.noKat) && overwriteRows.has(r.noKat)).length - multiLokasiSkipped.length;
+      setLastCutoverSummary({ overwriteCount, newItemCount: newPendingReview.length, multiLokasiSkipped });
       showToast(
-        `Cutover selesai. ${overwriteCount} baris existing ditimpa (sesuai pilihan Anda), ` +
-        `${newPendingReview.length} item baru masuk antrian review Admin, sisanya data existing dibiarkan apa adanya.`,
+        `Cutover selesai. ${overwriteCount} baris stok diperbarui, ` +
+        `${newPendingReview.length} item baru masuk antrian review Admin` +
+        (multiLokasiSkipped.length ? `, ${multiLokasiSkipped.length} baris DILEWATI karena tersebar di >1 lokasi (perlu update manual)` : "") +
+        `. Sisanya data existing dibiarkan apa adanya.`,
         "success"
       );
     } catch(err) {
@@ -13850,10 +13871,29 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
       {step==="done" && (
         <div style={{...sty.card,textAlign:"center",padding:40}}>
           <div style={{fontSize:40,marginBottom:12}}>✅</div>
-          <div style={{fontWeight:800,fontSize:18,marginBottom:8,color:C.green}}>Cutover Berhasil!</div>
-          <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Data stok dan katalog sudah diganti dengan data SAP. Histori TUG lama tersimpan di "Migrasi TUG-15".</div>
+          <div style={{fontWeight:800,fontSize:18,marginBottom:8,color:C.green}}>Cutover Selesai!</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:12}}>
+            Data existing yang TIDAK dicentang "Timpa" dibiarkan apa adanya. Histori TUG lama tersimpan di "Migrasi TUG-15".
+          </div>
+          {lastCutoverSummary && (
+            <div style={{textAlign:"left",display:"inline-block",background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:8,padding:14,marginBottom:16,fontSize:12}}>
+              <div>✅ <strong>{lastCutoverSummary.overwriteCount}</strong> baris stok diperbarui (sesuai centang "Timpa")</div>
+              <div>📋 <strong>{lastCutoverSummary.newItemCount}</strong> item baru masuk antrian Menunggu Review Admin</div>
+              {lastCutoverSummary.multiLokasiSkipped.length > 0 && (
+                <div style={{marginTop:8,color:"#b91c1c"}}>
+                  <div>⚠️ <strong>{lastCutoverSummary.multiLokasiSkipped.length}</strong> baris DILEWATI — katalog ini tersebar di lebih dari 1 lokasi, sistem tidak tahu qty file SAP harus dialokasikan ke lokasi mana. Sesuaikan manual lewat Edit Data Stok:</div>
+                  <ul style={{marginTop:4,paddingLeft:18}}>
+                    {lastCutoverSummary.multiLokasiSkipped.slice(0,10).map((m,i)=>(
+                      <li key={i}>{m.noKat} — {m.desc} (qty file: {m.qtyFile}, tersebar di {m.lokasiCount} lokasi)</li>
+                    ))}
+                    {lastCutoverSummary.multiLokasiSkipped.length > 10 && <li>...dan {lastCutoverSummary.multiLokasiSkipped.length-10} lainnya</li>}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
           <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-            <button style={sty.btn("primary")} onClick={()=>setStep("upload")}>Lakukan Migrasi Lagi</button>
+            <button style={sty.btn("primary")} onClick={()=>{setStep("upload");setLastCutoverSummary(null);}}>Lakukan Migrasi Lagi</button>
           </div>
         </div>
       )}
