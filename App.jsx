@@ -6662,6 +6662,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="forecastStok" && (
           <ForecastStokPage
             katalogList={katalogList}
+            setKatalogList={setKatalogList}
             stocks={stocks}
             txns={txns}
             forecastDetail={forecastDetail}
@@ -9292,7 +9293,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
 }
 
 // ─── FORECAST STOK PAGE — heuristik lokal + AI Groq (kiri) vs ML Prophet (kanan), berdampingan ──
-function ForecastStokPage({ katalogList, stocks, txns, forecastDetail, setForecastDetail,
+function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, forecastDetail, setForecastDetail,
   forecastDetailResult, setForecastDetailResult, forecastDetailLoading, forecastDrillDown,
   setTab, sendChat,
   materialCadangData, setMaterialCadangData, maraReference, setMaraReference,
