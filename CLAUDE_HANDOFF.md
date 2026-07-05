@@ -60,6 +60,13 @@ Data terkontrol (lihat section 4).
 
 ## 4. STATUS TERKINI (2026-07-05) — baca ini sebelum ubah apa pun
 
+### ⏳ PENDING — lanjutan dari sesi 2026-07-04 malam (belum dikerjakan hari ini)
+- **Prioritas:** data history TUG UPT Surabaya sebagai basis forecasting.
+- File acuan: `outputs/warnoto-history-clean-upt-surabaya/WARNOTO_History_TUG_Clean_Import_UPT_Surabaya.xlsx` (701 baris `tug15_history_import`, baru 300 baris katalognya `MATCH_OK`, 399 masih `REVIEW_NON_SAP` dan butuh keputusan mapping).
+- **Belum ada apa pun yang dieksekusi ke Supabase** — masih tahap review data user, jangan asumsikan sudah masuk `tug15_history`.
+- Sheet lain di file yang sama untuk direview: `README`, `Ringkasan`, `mapping_material_review` (325 baris), `anomali_data`, `master_material_clean`.
+- **Pending terpisah:** folder `WARNOTOV2-2757983` (hasil ekstrak zip AppSheet di `D:\CLAUDE\WARNOTO data\Appsheet\_extracted`) belum diputuskan mau dihapus atau disimpan.
+
 ### Login & User Management
 - Login sudah pindah dari array password polos ke **Supabase Auth** (`auth.users` + tabel `profiles`), username disintesis jadi email lewat `usernameToAuthEmail()` (domain `@warnoto.pln.local`).
 - Daftarkan banyak akun sekaligus: `scripts/bulk_create_users.mjs` (baca CSV, service_role key via env var, jangan pernah expose key ini ke browser/App.jsx).
