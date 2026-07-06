@@ -286,6 +286,16 @@ async function syncMasterTable(table, list, extraCols) {
     const { error } = await supabase.from(table).upsert(rows, { onConflict: "id" });
     if (error) { console.error(`syncMasterTable upsert(${table})`, error); return false; }
   }
+  // PENGAMANAN KRITIS (2026-07-07): kalau `list` yang dikirim KOSONG, JANGAN lanjut ke
+  // reconciliation-delete di bawah. Ditemukan lewat bug nyata: state React (mis. opnameList)
+  // sempat kosong karena race/stale closure saat submit, ke-pass sebagai [] ke sini — hasilnya
+  // SEMUA baris tabel (termasuk sesi Stock Opname 217 item yang sudah lengkap) ikut terhapus,
+  // padahal user tidak pernah minta hapus apa pun. Data yang state-nya benar-benar kosong akan
+  // gagal keluar dari cabang ini, tapi itu jauh lebih aman daripada menghapus data produksi
+  // karena state belum sempat ter-load. Hapus satu sesi tetap aman (deleteOpname dkk.
+  // menghasilkan list yang masih berisi N-1 item, bukan kosong, kecuali baris terakhir — kasus
+  // itu sengaja dibiarkan tidak terhapus dari Supabase, harus dihapus manual kalau memang perlu).
+  if (list.length === 0) return true;
   const { data: existing, error: selErr } = await supabase.from(table).select("id");
   if (selErr) { console.error(`syncMasterTable select(${table})`, selErr); return false; }
   const currentIds = new Set(list.map(i => i.id));
