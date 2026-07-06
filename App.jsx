@@ -10396,7 +10396,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
   const [validationErrors, setValidationErrors] = useState([]);
   const [highlightIdx, setHighlightIdx] = useState(null); // baris hasil scan QR — cuma bantu temukan & fokus, bukan pengganti hitung fisik
   const qtyInputRefs = useRef({});
-  const PAGE_SIZE = 10;
+  const [pageSize, setPageSize] = useState(10);
 
   // Scan QR label material (Kartu Gantung TUG-2) untuk LOMPAT ke baris yang benar di tabel opname
   // ini — TIDAK mengisi qty otomatis, cuma navigasi. Angka hasil hitung fisik tetap wajib diketik
@@ -10408,7 +10408,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
       let idx = scannedKatalogId ? items.findIndex(it => it.katalogId === scannedKatalogId) : -1;
       if (idx < 0) idx = items.findIndex(it => it.noKatalog && normalizeKatalog(it.noKatalog) === normalizeKatalog(code));
       if (idx < 0) { showToast(`Kode ${code} tidak ditemukan di daftar item opname ini`, "error"); return; }
-      setPage(Math.floor(idx / PAGE_SIZE));
+      setPage(Math.floor(idx / pageSize));
       setHighlightIdx(idx);
       showToast(`📷 Ditemukan: ${items[idx].namaBarang} — ketik qty hasil hitung fisik.`);
       setTimeout(() => {
@@ -10441,11 +10441,11 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
 
     // Items in SAP but not in sistem
     sapRows.forEach(sr=>{
-      const kat = katalogByNo[sr.katalogStripped];
+      const kat = katalogByNo[sr.katalog];
       if(!kat) {
         items.push({
-          katalogId: null, namaBarang: sr.namaBarangSAP, noKatalog: sr.katalogStripped, satuan: sr.satuanSAP,
-          qtySistem: 0, qtySAP: sr.qtySAP, qtsFisik: 0, selisih: 0,
+          katalogId: null, namaBarang: sr.nama, noKatalog: sr.katalog, satuan: sr.satuan,
+          qtySistem: 0, qtySAP: sr.qty, qtsFisik: 0, selisih: 0,
           statusItem: "TIDAK_ADA_DI_SISTEM", keterangan: "",
         });
       }
@@ -10532,29 +10532,21 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
     const isSAP = activeOpname.jenisAlur==="SAP";
     const isReadOnly = activeOpname.status!=="DRAFT";
     const items = activeOpname.items||[];
-    const totalPages = Math.ceil(items.length/PAGE_SIZE);
-    const pageItems = items.slice(page*PAGE_SIZE, (page+1)*PAGE_SIZE);
+    const totalPages = Math.ceil(items.length/pageSize);
+    const pageItems = items.slice(page*pageSize, (page+1)*pageSize);
     const prog = getProgress();
     const selisihCount = items.filter(i=>i.selisih!==0).length;
 
     return (
       <div>
-        {/* Header */}
+        {/* Header — cuma navigasi & judul. Tombol Simpan/Submit sengaja HANYA di bawah tabel
+            (dulu sempat dobel atas+bawah, membingungkan user — keluhan 2026-07-07). */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div>
             <button style={{...sty.btn("ghost","sm"),marginBottom:6}} onClick={()=>{setActiveTab("list");setActiveOpname(null);}}>← Kembali ke Daftar</button>
             <h1 style={{fontSize:20,fontWeight:900}}>Stock Opname — {activeOpname.jenisAlur}</h1>
             <p style={{color:C.muted,fontSize:12}}>Semester {activeOpname.semester} • {activeOpname.kategori}</p>
           </div>
-          {!isReadOnly && (
-            <div style={{display:"flex",gap:8}}>
-              <button style={sty.btn("ghost")} onClick={()=>saveOpname(activeOpname)}>💾 Simpan Draft</button>
-              <button style={{...sty.btn("primary"), opacity:prog.pct<100?0.5:1}}
-                onClick={()=>{ if(!validate()) return; saveOpname(activeOpname); submitOpname(activeOpname); setActiveTab("list"); setActiveOpname(null); }}>
-                📋 Submit ke Asman
-              </button>
-            </div>
-          )}
           {isReadOnly && activeOpname.status==="SELESAI" && (
             <button style={sty.btn("ghost")} onClick={()=>downloadBeritaAcara(activeOpname)}>📄 Download Berita Acara</button>
           )}
@@ -10623,12 +10615,23 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
 
             {/* Tabel item */}
             <div style={{overflowX:"auto",marginBottom:12}}>
-              {!isReadOnly && (
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <button style={sty.btn("ghost","sm")} onClick={handleScanQty}>📷 Scan QR untuk cari baris</button>
-                  <span style={{fontSize:10,color:C.muted}}>Scan cuma membantu temukan & lompat ke barisnya — qty hasil hitung fisik tetap wajib diketik manual.</span>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                {!isReadOnly ? (
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <button style={sty.btn("ghost","sm")} onClick={handleScanQty}>📷 Scan QR untuk cari baris</button>
+                    <span style={{fontSize:10,color:C.muted}}>Scan cuma membantu temukan & lompat ke barisnya — qty hasil hitung fisik tetap wajib diketik manual.</span>
+                  </div>
+                ) : <div/>}
+                <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.muted}}>
+                  Tampilkan:
+                  {[10,20,50].map(n=>(
+                    <button key={n} onClick={()=>{setPageSize(n);setPage(0);}}
+                      style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${pageSize===n?C.accent:C.border}`,background:pageSize===n?C.accent:"white",color:pageSize===n?"white":C.text,fontSize:11,fontWeight:pageSize===n?700:400,cursor:"pointer"}}>
+                      {n}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead>
                   <tr style={{background:"#003087",color:"white"}}>
@@ -10642,11 +10645,12 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Selisih</th>
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Status</th>
                     <th style={{padding:"7px 8px",textAlign:"left"}}>Keterangan</th>
+                    <th style={{padding:"7px 8px",textAlign:"center"}}>📷 Foto</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageItems.map((item,pageIdx)=>{
-                    const realIdx = page*PAGE_SIZE + pageIdx;
+                    const realIdx = page*pageSize + pageIdx;
                     const isHighlighted = highlightIdx===realIdx;
                     const rowBg = isHighlighted ? "#dbeafe" : item.statusItem==="SESUAI"?"white":item.statusItem==="TIDAK_ADA_DI_SISTEM"?"#fefce8":item.statusItem==="TIDAK_ADA_DI_SAP"?"#f8fafc":"#fff5f5";
                     const statusBadge = item.statusItem==="SESUAI"
@@ -10693,6 +10697,27 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                                 style={{width:130,padding:"3px 6px",border:`1px solid ${item.selisih!==0&&!item.keterangan?C.red:C.border}`,borderRadius:4,fontSize:10}}/>
                             : <span style={{fontSize:10,color:C.muted}}>{item.keterangan||"-"}</span>}
                         </td>
+                        <td style={{padding:"4px 6px"}}>
+                          <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                            {[["fotoKeseluruhan","🖼️","Foto Keseluruhan"],["fotoNameplate","🏷️","Foto Nameplate"]].map(([field,icon,label])=>(
+                              <label key={field} title={label}
+                                style={{width:28,height:28,borderRadius:5,border:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",cursor:isReadOnly?"default":"pointer",overflow:"hidden",background:item[field]?"transparent":"#f9fafb",flexShrink:0}}>
+                                {item[field]
+                                  ? <img src={item[field]} alt={label} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                                  : <span style={{fontSize:12,color:"#9ca3af"}}>{icon}</span>}
+                                {!isReadOnly && (
+                                  <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
+                                    onChange={e=>{
+                                      const f=e.target.files[0]; if(!f) return;
+                                      const r=new FileReader();
+                                      r.onload=ev=>updateItem(realIdx,field,ev.target.result);
+                                      r.readAsDataURL(f);
+                                    }}/>
+                                )}
+                              </label>
+                            ))}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -10717,6 +10742,18 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                 </div>
                 <button style={{...sty.btn("ghost","sm"),opacity:page===totalPages-1?0.4:1}} disabled={page===totalPages-1} onClick={()=>setPage(p=>p+1)}>Berikutnya →</button>
                 <span style={{fontSize:11,color:C.muted}}>Hal {page+1} dari {totalPages}</span>
+              </div>
+            )}
+
+            {/* Aksi Simpan/Submit — sengaja HANYA di sini (bawah tabel), bukan di header juga,
+                supaya tidak dobel/membingungkan (keluhan user 2026-07-07). */}
+            {!isReadOnly && (
+              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:16}}>
+                <button style={sty.btn("ghost")} onClick={()=>saveOpname(activeOpname)}>💾 Simpan Draft</button>
+                <button style={{...sty.btn("primary"), opacity:prog.pct<100?0.5:1}}
+                  onClick={()=>{ if(!validate()) return; saveOpname(activeOpname); submitOpname(activeOpname); setActiveTab("list"); setActiveOpname(null); }}>
+                  📋 Submit ke Asman
+                </button>
               </div>
             )}
           </>

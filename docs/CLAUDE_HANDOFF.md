@@ -63,6 +63,50 @@ Data terkontrol (lihat section 4).
 
 ## 4. STATUS TERKINI (2026-07-05) — baca ini sebelum ubah apa pun
 
+### ✅ SELESAI — Stock Opname: 1 tombol Simpan/Submit, pilihan jumlah baris, foto per item (2026-07-07)
+- **Tombol Simpan Draft/Submit ke Asman dobel** (sempat ada di header ATAS dan bawah tabel sekaligus
+  setelah perbaikan sebelumnya) — user minta disederhanakan jadi 1. Sekarang HANYA ada di bawah
+  tabel (setelah paginasi), header cuma navigasi + judul (+ tombol Download Berita Acara kalau
+  status Selesai).
+- **Pilihan jumlah baris per halaman**: `PAGE_SIZE` yang dulu hardcode 10 sekarang jadi pilihan
+  10/20/50 (tombol toggle di atas tabel, sebelah kiri tombol Scan QR). Mengurangi kebutuhan
+  gonta-ganti halaman untuk sesi opname dengan banyak item.
+- **Foto per material** (fitur baru): kolom "📷 Foto" di tabel item — 2 slot per baris, **Foto
+  Keseluruhan** (🖼️) dan **Foto Nameplate** (🏷️), pola sama persis dengan foto Data Stok yang sudah
+  ada (`fotoKeseluruhan`/`fotoNameplate`, `capture="environment"` supaya langsung buka kamera di
+  HP). Disimpan sebagai base64 di item (ikut tersimpan otomatis lewat sync `stock_opname` yang
+  sudah ada — TIDAK perlu perubahan skema). **Belum wajib diisi** (tidak ada validasi blocking) —
+  cuma capability upload, alur hitung tetap 1 material 1 kali difoto sambil dihitung.
+- **⏳ PENDING (scope masa depan, disepakati BUKAN dikerjakan sekarang)**: user berencana foto-foto
+  ini nantinya dipindah/disimpan ke folder Google Drive terpisah per semester, dengan format nama
+  file `Catalog_Tanggal_Status` per item. Saat ini foto masih base64 inline di `data` JSONB
+  Supabase (sama seperti foto Data Stok) — belum ada integrasi Google Drive. Kalau nanti dikerjakan,
+  perlu: OAuth/service account Google Drive, upload per-foto ke folder semester yang sesuai, ganti
+  field foto dari base64 jadi URL Drive, dan strategi migrasi foto lama yang sudah kadung base64.
+- Sudah `npm run build` sukses. Belum dites manual di browser.
+
+### ✅ SELESAI — Fix bug lama: Stock Opname SAP salah tandai material terdaftar sebagai "material baru" (2026-07-07, bug KRITIS)
+User lapor: banyak baris di Stock Opname SAP berstatus "🆕 Material baru", padahal nama materialnya
+tidak ada baik di file yang diupload maupun di data aplikasi (nama tampil kosong/tidak masuk akal).
+- **Akar masalah**: `buildItemsFromSAP` (`StockOpnameTab`, App.jsx ~10443) — loop "Items in SAP but
+  not in sistem" memakai nama field yang **tidak pernah ada** di hasil `mapSAPRow`: `sr.katalogStripped`,
+  `sr.namaBarangSAP`, `sr.satuanSAP`, `sr.qtySAP`. `mapSAPRow` sebenarnya mengembalikan `katalog`,
+  `nama`, `satuan`, `qty`. Karena `sr.katalogStripped` selalu `undefined`, `katalogByNo[undefined]`
+  selalu gagal ketemu → **SETIAP baris SAP yang diupload dianggap "tidak ada di sistem"**, walau
+  materialnya sudah terdaftar di Master Katalog — hasilnya baris duplikat palsu dengan nama/no
+  katalog/satuan kosong (`undefined`), persis yang dilaporkan user.
+- **Ini bug LAMA** — ada sejak fungsi ini pertama dibuat (bukan regresi dari perubahan sesi ini),
+  dikonfirmasi lewat `git log -p` (field mismatch sudah ada di commit paling awal fitur Stock
+  Opname). Stock Count TIDAK terdampak — logika perbandingannya terpisah dan sudah memakai nama
+  field yang benar (`r.katalog`/`r.qty`).
+- **Perbaikan**: field disamakan jadi `sr.katalog`, `sr.nama`, `sr.satuan`, `sr.qty` (App.jsx ~10444-10448).
+- Sudah `npm run build` sukses. Belum dites manual di browser — user perlu upload ulang file SAP
+  yang sama di Stock Opname dan pastikan sekarang cuma material yang BENAR-BENAR baru (nama valid,
+  tidak ada di uploaded file secara ganda) yang muncul sebagai "🆕 Material baru".
+- **⚠️ Sesi Opname yang SUDAH dibuat sebelum fix ini** (kalau ada, berstatus DRAFT) kemungkinan
+  masih mengandung baris phantom "material baru" berdasarkan snapshot lama — sarankan user buat
+  ulang sesi (upload ulang SAP) daripada melanjutkan draft lama yang sudah datanya salah.
+
 ### ✅ SELESAI — Stock Opname/Stock Count disinkron ke Supabase (2026-07-07)
 User lapor: widget persentase akurasi Stock Count tidak muncul di Dashboard padahal sesi sudah
 disubmit lengkap.
