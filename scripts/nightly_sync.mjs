@@ -57,6 +57,51 @@ function getSAPLabel(kodeKatalog) {
   return "Non-SAP";
 }
 
+// Replika CATEGORY_SYNONYMS di App.jsx (dari sheet PLN-Terminology, file CATALOG
+// MASTER.xlsx, 2026-07-06) -- aman diduplikasi di sini karena App.jsx bukan modul
+// Node biasa. Dipakai supaya bot Telegram/WA (RAG berbasis embedding, bukan
+// keyword) tetap paham kalau user tanya pakai bahasa awam ("pemutus", "penangkal
+// petir") padahal nama material di data cuma singkatan teknis ("CB", "LA").
+const CATEGORY_SYNONYMS = {
+  trf: "transformator trafo", cb: "circuit breaker pemutus tenaga pmt",
+  ds: "disconnecting switch pemisah pms", pt: "potential transformer trafo tegangan",
+  ct: "current transformer trafo arus", acc: "accessories aksesoris",
+  al: "aluminium", cu: "tembaga copper",
+  ngr: "neutral grounding resistance resistor pentanahan",
+  cond: "conductor kawat penghantar", gsw: "galvanized steel wire kawat baja",
+  sw: "switch saklar", cub: "kubikel cubicle", relay: "rele",
+  la: "lightning arrester penangkal petir", gis: "gas insulation substation",
+  oh: "over head line saluran udara", ug: "under ground bawah tanah saluran tanah",
+  od: "out door outdoor terpasang di luar ruang gedung",
+  id: "indoor terpasang di dalam ruang gedung", iso: "isolated isolasi",
+  distan: "distance relay rele jarak", ocr: "over current relay rele arus lebih",
+  ovr: "over voltage relay rele tegangan lebih",
+  lw: "live working pekerjaan tanpa pemadaman",
+  lvsb: "low voltage switch board papan hubung bagi rak tegangan rendah",
+  mccb: "molded case circuit breaker", mcb: "mini circuit breaker pembatas arus",
+  circl: "circular bulat bundar", strg: "straight lurus", pier: "piercing bergigi",
+  wp: "water proof kedap air", cap: "capacity kapasitas", comb: "combo kombinasi",
+  card: "modul module", mtr: "meter", rtu: "remote terminal unit",
+  plc: "power line carrier", recl: "recloser",
+  saco: "switch automatic change over", sclv: "single core low voltage",
+  scmv: "single core medium voltage", nclbl: "non clamp block",
+  llc: "live line connector", clv: "connector low voltage", conn: "connector",
+  term: "termination terminal", diff: "differential", dist: "distribution",
+  dt: "double tarif", ef: "earth fault", flv: "for low voltage",
+  ind: "inductive", co: "cut out", cr: "capacitor",
+};
+
+// Nama katalog PLN pakai struktur "ITEM;SUBTIPE;SPEK..." penuh singkatan teknis --
+// tambahkan padanan bahasa awam/Indonesia di teks yang di-embed (bukan mengubah
+// nama aslinya), supaya pencarian semantik bot tetap kena walau user tidak tahu
+// istilah teknisnya.
+function expandNamaForEmbedding(nama) {
+  const words = String(nama || "").toLowerCase().replace(/[;,\-]/g, " ").replace(/\s+/g, " ").trim().split(" ");
+  const extra = new Set();
+  words.forEach((w) => { if (CATEGORY_SYNONYMS[w]) CATEGORY_SYNONYMS[w].split(" ").forEach((s) => extra.add(s)); });
+  return extra.size ? ` Juga dikenal sebagai: ${Array.from(extra).join(", ")}.` : "";
+}
+
 async function main() {
   console.log("=== WARNOTO nightly_sync mulai ===", new Date().toISOString());
 
@@ -88,7 +133,7 @@ async function main() {
       id: `katalog_${katalogId}`,
       source_type: "katalog",
       source_id: katalogId,
-      content: `Material: ${d.nama}. Nomor Katalog: ${d.kodeKatalog || "-"}. Jenis Barang: ${d.jenisBarang || "-"}. Satuan: ${d.satuan || "-"}. Status: ${sap}.${angka}${lokasiText}`,
+      content: `Material: ${d.nama}. Nomor Katalog: ${d.kodeKatalog || "-"}. Jenis Barang: ${d.jenisBarang || "-"}. Satuan: ${d.satuan || "-"}. Status: ${sap}.${angka}${lokasiText}${expandNamaForEmbedding(d.nama)}`,
     };
   });
 

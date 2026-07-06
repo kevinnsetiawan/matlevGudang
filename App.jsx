@@ -984,6 +984,52 @@ const CATEGORY_SYNONYMS = {
   sw: "switch saklar",
   cub: "kubikel cubicle",
   relay: "rele",
+  // Ditambah dari sheet PLN-Terminology, file CATALOG MASTER.xlsx (2026-07-06) —
+  // sengaja TIDAK memasukkan singkatan 1 huruf (K/M/N/P/H) atau 2 huruf yang
+  // terlalu ambigu (ST/PR/PB) karena berisiko salah cocok dengan kata lain yang
+  // tidak berhubungan (lihat aturan exact-match utk kata <=2 huruf di
+  // matchesMaterialSearch).
+  la: "lightning arrester penangkal petir",
+  gis: "gas insulation substation",
+  oh: "over head line saluran udara",
+  ug: "under ground bawah tanah saluran tanah",
+  od: "out door outdoor terpasang di luar ruang gedung",
+  id: "indoor terpasang di dalam ruang gedung",
+  iso: "isolated isolasi",
+  distan: "distance relay rele jarak",
+  ocr: "over current relay rele arus lebih",
+  ovr: "over voltage relay rele tegangan lebih",
+  lw: "live working pekerjaan tanpa pemadaman",
+  lvsb: "low voltage switch board papan hubung bagi rak tegangan rendah",
+  mccb: "molded case circuit breaker",
+  mcb: "mini circuit breaker pembatas arus",
+  circl: "circular bulat bundar",
+  strg: "straight lurus",
+  pier: "piercing bergigi",
+  wp: "water proof kedap air",
+  cap: "capacity kapasitas",
+  comb: "combo kombinasi",
+  card: "modul module",
+  mtr: "meter",
+  rtu: "remote terminal unit",
+  plc: "power line carrier",
+  recl: "recloser",
+  saco: "switch automatic change over",
+  sclv: "single core low voltage",
+  scmv: "single core medium voltage",
+  nclbl: "non clamp block",
+  llc: "live line connector",
+  clv: "connector low voltage",
+  conn: "connector",
+  term: "termination terminal",
+  diff: "differential",
+  dist: "distribution",
+  dt: "double tarif",
+  ef: "earth fault",
+  flv: "for low voltage",
+  ind: "inductive",
+  co: "cut out",
+  cr: "capacitor",
 };
 
 // Pasangan istilah 1:1 (awam <-> teknis) yang AMAN dipakai dua arah karena
@@ -1052,13 +1098,39 @@ function queryTokenGroups(query) {
 // memunculkan barang yang salah klasifikasi. Kata yang lebih panjang (>=3
 // huruf) tetap dicocokkan sebagai prefix supaya bisa diketik sebagian
 // ("trans" -> "transformator", "550" -> "550mm2").
-function matchesStockSearch(stock, query) {
+// Untuk pencarian server-side (Supabase `.ilike`, mis. cari referensi MARA) yang
+// tidak bisa memakai expandHaystackSynonyms/queryTokenGroups di sisi klien
+// (haystack-nya ada di database, bukan di memori). Cari padanan tiap kata yang
+// diketik lewat QUERY_SYNONYMS (1:1) DAN CATEGORY_SYNONYMS (reverse lookup: kalau
+// kata yang diketik ada di deskripsi suatu kategori, ikutkan singkatannya juga —
+// mis. "pemutus" -> ikut cari "cb"). Dibatasi 6 istilah biar query `.or()` tidak
+// terlalu panjang.
+function expandQueryForIlikeSearch(query) {
+  const words = normalizeSearchText(query).split(" ").filter(Boolean);
+  const terms = new Set([query.trim()]);
+  words.forEach(w => {
+    if (QUERY_SYNONYMS[w]) QUERY_SYNONYMS[w].split(" ").forEach(s => terms.add(s));
+    Object.entries(CATEGORY_SYNONYMS).forEach(([abbr, desc]) => {
+      if (desc.split(" ").includes(w)) terms.add(abbr);
+    });
+  });
+  return Array.from(terms).filter(Boolean).slice(0, 6);
+}
+function matchesMaterialSearch(fields, query) {
   if (!query || !query.trim()) return true;
   const haystackWords = expandHaystackSynonyms(normalizeSearchText(
-    [stock.name, stock.id, stock.katalog, stock.lokasi, stock.merk, stock.category].filter(Boolean).join(" ")
+    fields.filter(Boolean).join(" ")
   )).split(" ").filter(Boolean);
   const groups = queryTokenGroups(query);
   return groups.every(alts => alts.some(t => haystackWords.some(w => (t.length <= 2 ? w === t : w.startsWith(t)))));
+}
+function matchesStockSearch(stock, query) {
+  return matchesMaterialSearch([stock.name, stock.id, stock.katalog, stock.lokasi, stock.merk, stock.category], query);
+}
+// Master Katalog Barang: sama persis mesinnya dengan Data Stok (matchesStockSearch),
+// dipakai untuk kotak pencarian yang sebelumnya tidak ada sama sekali di halaman ini.
+function matchesKatalogSearch(k, query) {
+  return matchesMaterialSearch([k.name, k.katalog, k.id, k.category, k.jenisBarang, k.keterangan], query);
 }
 // Total quantity of a catalog item across ALL locations (used for forecast /
 // dashboard totals where "this item" should mean the sum, not one location).
@@ -1185,10 +1257,11 @@ function SearchableSelect({ options, value, onChange, getLabel, getSearchText, r
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? options.filter(o => (getSearchText?getSearchText(o):getLabel(o)).toLowerCase().includes(q))
-    : options;
+  // Dipakai di semua form TUG (TUG-5/7/8/9/10, Stock Opname) buat pilih material —
+  // dulu cuma substring polos, sekarang pakai mesin sinonim PLN yang sama dengan
+  // Data Stok/Master Katalog (matchesMaterialSearch), biar user yang ketik bahasa
+  // awam ("pemutus", "penangkal petir") tetap nemu barangnya di sini juga.
+  const filtered = options.filter(o => matchesMaterialSearch([getSearchText?getSearchText(o):getLabel(o)], query));
 
   return (
     <div ref={wrapRef} style={{position:"relative"}}>
@@ -2178,6 +2251,7 @@ export default function PLNWarehouse() {
   const [stockPageSize, setStockPageSize] = useState(10);
   const [katalogPage, setKatalogPage] = useState(1);
   const [katalogPageSize, setKatalogPageSize] = useState(10);
+  const [katalogSearch, setKatalogSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   // Filter jenis approval (TUG/Alat Berat/Stok/dst) + pagination tiap section —
@@ -2571,7 +2645,7 @@ export default function PLNWarehouse() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
   useEffect(() => { setStockPage(1); }, [search, filterJenis, stockPageSize]);
-  useEffect(() => { setKatalogPage(1); }, [katalogPageSize]);
+  useEffect(() => { setKatalogPage(1); }, [katalogPageSize, katalogSearch]);
 
   // Auto-gabungkan Gudang/Sub Gudang duplikat sekali per sesi setelah data dimuat — supaya
   // denah/koordinat yang "nyasar" ke ID duplikat langsung ketemu tanpa perlu klik manual.
@@ -2702,9 +2776,14 @@ export default function PLNWarehouse() {
     if (!q || q.trim().length < 2) { setMaraSearchResults([]); return; }
     if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
     setMaraSearchLoading(true);
+    // Perkaya query dengan sinonim istilah PLN (mis. ketik "pemutus" ikut cari
+    // "cb"/"circuit breaker") — sama kamus dengan matchesMaterialSearch di Data
+    // Stok/Master Katalog, biar konsisten di 3 tempat pencarian material.
+    const terms = expandQueryForIlikeSearch(q);
+    const orFilter = terms.map(t => `nama.ilike.%${t}%`).join(",");
     const { data, error } = await supabase.from("mara_catalog")
       .select("kode_material,nama,satuan,material_group,material_group_desc")
-      .ilike("nama", `%${q.trim()}%`)
+      .or(orFilter)
       .limit(20);
     setMaraSearchLoading(false);
     if (error) {
@@ -4926,6 +5005,13 @@ Selalu jawab dalam format terstruktur berikut (gunakan emoji dan baris baru):
 Sumber: Data WARNOTO per ${now.toLocaleDateString("id-ID")}
 
 ---
+GLOSARIUM SINGKATAN & ISTILAH MATERIAL PLN (dari CATALOG MASTER PLN — pakai ini untuk
+memahami nama material di data di bawah maupun pertanyaan user yang pakai bahasa awam
+atau singkatan teknis, mis. user tanya "pemutus" artinya cari "CB"/circuit breaker,
+"penangkal petir" artinya "LA"/lightning arrester):
+${Object.entries(CATEGORY_SYNONYMS).map(([abbr,desc])=>`${abbr.toUpperCase()}=${desc}`).join("; ")}
+
+---
 SNAPSHOT DATA SISTEM SAAT INI:
 
 INVENTORI (${enrichedStocks.length} item total):
@@ -5095,9 +5181,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
   const pagedStocks = filteredStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
-  const katalogTotalPages = Math.max(1, Math.ceil(katalogList.length / katalogPageSize));
+  const filteredKatalog = katalogList.filter(k => matchesKatalogSearch(k, katalogSearch));
+  const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
-  const pagedKatalog = katalogList.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
+  const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
   const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
 
   // ── DESIGN TOKENS ──
@@ -5862,7 +5949,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi (UIT / UPT / ULTG)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
                 </h1>
                 <p style={{color:C.muted,fontSize:13}}>
-                  {stockSubTab==="katalog"?`${katalogList.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </p>
               </div>
               {currentUser.role==="ADMIN" && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
@@ -5923,9 +6010,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
 
+            {stockSubTab==="katalog" && katalogList.length>0 && (
+              <div style={{marginBottom:12,position:"relative",maxWidth:420}}>
+                <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama barang, no. katalog, kategori, jenis..." value={katalogSearch} onChange={e=>setKatalogSearch(e.target.value)}/>
+                {katalogSearch && (
+                  <button
+                    onClick={()=>setKatalogSearch("")}
+                    title="Hapus pencarian"
+                    style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
+                  >✕</button>
+                )}
+              </div>
+            )}
+
             {stockSubTab==="katalog" && (
               katalogList.length===0
               ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Katalog. {currentUser.role==="ADMIN" && "Klik \"+ Tambah Katalog Barang\" untuk menambahkan."}</div>
+              : filteredKatalog.length===0
+              ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Tidak ada hasil untuk "{katalogSearch}".</div>
               : (
               <div style={{...sty.card,padding:0,overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:860}}>

@@ -1416,17 +1416,17 @@ Warna per kategori:
 
 #### 14.4 Yang Belum Diimplementasikan (Deferred)
 
+**Catatan (2026-07-06):** item Fase 3 (True ML Forecasting XGBoost, SAP API integration,
+Retrain model otomatis) dan 2 item Fase 2 (Foto Stock Opname, Multi-UPT data terisolasi)
+diputuskan **sudah tidak relevan** sebagai prioritas roadmap dan dihapus dari tabel di
+bawah — prioritas project sudah berubah total sejak roadmap ini ditulis.
+
 | Fitur | Alasan Defer | Target |
 | :--- | :--- | :--- |
-| Foto Stock Opname | Butuh server PLN + API endpoint | Fase 2 |
-| Multi-UPT data terisolasi | Butuh backend nyata | Fase 2 |
 | Material Cadang | Spesifikasi konsep, format import, hidden Catalog Master/MARA reference, dashboard manajemen, dan approval Asman untuk apply `minQty` sudah dipisah di `MATERIAL_CADANG_SPEC.md` | Fase 2 |
 | WA AI Agent | Spesifikasi integrasi AI Agent ke WhatsApp Cloud API, read-only, whitelist nomor, server-side state, RAG sync harian, dan audit log sudah dipisah di `WA_AI_AGENT_SPEC.md` | Fase 2 |
 | Migrasi Stok SAP/Non-SAP + TUG-15 | Planning cutover data, cleansing Non-SAP, staging review, histori migrasi `MIGRASI`, dan backup wajib terdokumentasi di bagian 20 | Fase 2 |
 | Monitoring Kapasitas Gudang | Spesifikasi import laporan UIT berbasis m2, dashboard manajemen, mapping peta gudang, dan storage Supabase sudah dipisah di `GUDANG_CAPACITY_SPEC.md` | Fase 2 |
-| True ML Forecasting (XGBoost) | Butuh Python server | Fase 3 |
-| SAP API integration | Butuh middleware | Fase 3 |
-| Retrain model otomatis | Butuh Fase 3 selesai | Fase 3 |
 
 #### 14.5 Roadmap Selanjutnya
 
@@ -1444,15 +1444,10 @@ Warna per kategori:
 
 **Fase 2 (1 bulan):**
 - Enhanced Claude API forecasting (sudah ada di v31)
-- Python ML preparation lokal (paralel)
-- Foto opname saat server PLN tersedia
 
-**Fase 3 (3-6 bulan):**
-- Python FastAPI ML server
-- XGBoost model per material
-- Integrasi API ke WARNOTO
-- Integrasi SAP
-
+(Fase 3 — Python FastAPI ML server/XGBoost/integrasi SAP API, serta item Foto Stock
+Opname & Multi-UPT data terisolasi — dihapus dari roadmap 2026-07-06, sudah tidak
+relevan sebagai prioritas.)
 
 ---
 

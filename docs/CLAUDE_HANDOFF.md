@@ -3,8 +3,8 @@
 Dokumen ini adalah pintu masuk singkat saat project WARNOTO dipindahkan/dilanjutkan
 di sesi Claude yang berbeda (termasuk Claude Code CLI di terminal). Baca ini duluan.
 
-**Handoff terakhir diperbarui: 2026-07-05** (menggantikan versi 30 Juni 2026 yang sudah
-sangat basi — banyak fitur besar berubah sejak itu, lihat bagian 4 di bawah).
+**Handoff terakhir diperbarui: 2026-07-06** (menggantikan versi 5 Juli 2026 — ada 3
+commit signifikan tanggal 6 Juli yang belum terangkum, lihat bagian 4 di bawah).
 
 ---
 
@@ -63,17 +63,35 @@ Data terkontrol (lihat section 4).
 
 ## 4. STATUS TERKINI (2026-07-05) — baca ini sebelum ubah apa pun
 
+### ✅ SELESAI — Pencarian material sinonim-aware PLN (2026-07-06)
+- **Kamus istilah** `CATEGORY_SYNONYMS`/`QUERY_SYNONYMS` (`App.jsx`, sekitar baris 972) diperkaya dari sheet `PLN-Terminology` di `D:\CLAUDE\WARNOTO data\tester\CATALOG MASTER.xlsx` (~45 singkatan baru, mis. LA=lightning arrester/penangkal petir, GIS, OH/UG, dll). Sengaja **tidak** memasukkan singkatan 1 huruf atau 2 huruf yang ambigu (K/M/N/P/ST/PR/PB) untuk hindari salah cocok.
+- Mesin pencarian (dulu `matchesStockSearch`, khusus Data Stok) digeneralisasi jadi `matchesMaterialSearch` + dipakai di beberapa tempat baru:
+  - **Master Katalog Barang** — sebelumnya sama sekali tidak ada kotak pencarian, sekarang ada (`katalogSearch` state, `matchesKatalogSearch`).
+  - **Pencarian MARA** di form Tambah/Edit Katalog Barang (`searchMaraCatalog`) — query Supabase `.ilike` diperkaya jadi multi-term via `expandQueryForIlikeSearch` (query "pemutus" ikut cari "cb").
+  - **`SearchableSelect`** (komponen dropdown pilih material, dipakai di SEMUA form TUG-5/7/8/9/10 + Stock Opname untuk pilih Nama Barang/Barang dari Katalog) — sebelumnya substring polos, sekarang pakai `matchesMaterialSearch` juga.
+- **AI Agent (Tanya AI, web)** — glosarium `CATEGORY_SYNONYMS` disuntikkan ke `systemPrompt` supaya AI paham istilah awam vs singkatan teknis saat menjawab.
+- **Bot Telegram/WA (RAG)** — `scripts/nightly_sync.mjs` diperkaya: teks yang di-embed per katalog sekarang menyertakan padanan istilah (`expandNamaForEmbedding`, duplikat kamus yang sama karena `App.jsx` bukan modul Node). **Belum pernah dijalankan ulang** sejak perubahan ini (butuh secret `SUPABASE_SECRET_KEY`/`COHERE_API_KEY` yang tidak ada di `.env` lokal) — efeknya baru kepakai bot setelah nightly cron GitHub Actions jalan berikutnya, atau kalau dijalankan manual dengan secret yang benar.
+- Sudah `npm run build` sukses **dan sudah dites manual di browser oleh user (2026-07-06) — konfirmasi berhasil** (Master Katalog + form TUG, pencarian istilah awam seperti "pemutus"/"penangkal petir" berhasil menemukan barangnya).
+
 ### ⏳ PENDING — update 2026-07-05 (lanjut nanti)
 - **Prioritas:** data history TUG UPT Surabaya sebagai basis forecasting.
 - File acuan: `outputs/warnoto-history-clean-upt-surabaya/WARNOTO_History_TUG_Clean_Import_UPT_Surabaya.xlsx` (701 baris `tug15_history_import`, sheet `mapping_material_review` 325 baris material: 147 `MATCH_OK`, 154 `REVIEW_NON_SAP`, 21 `HOLD_NON_SAP`, 3 `WARNING_REVIEW` — total 178 baris material butuh keputusan manual, mewakili 399 baris transaksi).
-- **Sudah dibuatkan alat bantu review:** `outputs/warnoto-history-clean-upt-surabaya/USULAN_PENCOCOKAN_MARA_UPT_SURABAYA.xlsx` — 178 nama material di atas sudah dicocokkan otomatis (token overlap nama) ke 42.703 baris `mara_catalog` di Supabase: 98 baris skor kuat (≥2 kata kunci sama, ditandai hijau), 72 baris skor lemah (1 kata kunci, putih), 8 baris tanpa kandidat sama sekali (ditandai merah, kemungkinan barang non-SAP asli). Kolom `keputusan_admin`/`keputusan_tl`/`catatan_review` masih kosong, menunggu direview manual satu-satu oleh Admin/TL.
+- **Sudah dibuatkan alat bantu review:** `outputs/warnoto-history-clean-upt-surabaya/USULAN_PENCOCOKAN_MARA_UPT_SURABAYA.xlsx` — 178 nama material di atas sudah dicocokkan otomatis (token overlap nama) ke 42.703 baris `mara_catalog` di Supabase: 98 baris skor kuat (≥2 kata kunci sama, ditandai hijau), 72 baris skor lemah (1 kata kunci, putih), 8 baris tanpa kandidat sama sekali (ditandai merah, kemungkinan barang non-SAP asli).
+- **Update 2026-07-06:** kolom `keputusan_admin` & `catatan_review` sudah diisi **draft otomatis** untuk semua 178 baris (format `DRAFT-MATCH <kode> (perlu dicek)` untuk skor kuat, `DRAFT-MATCH <kode>? (perlu dicek teliti)` untuk skor lemah, `DRAFT-HOLD (perlu dicek)` untuk 8 baris tanpa kandidat) — **ini draf, bukan keputusan final**, tetap wajib dicek/dikoreksi Admin di Excel. Kolom `keputusan_tl` sengaja dibiarkan kosong, masih perlu sign-off TL setelah draf Admin dikoreksi. Backup sebelum diisi ada di `USULAN_PENCOCOKAN_MARA_UPT_SURABAYA.BACKUP_2026-07-06.xlsx` (folder sama).
 - **Belum ada apa pun yang dieksekusi ke Supabase** untuk data ini — masih tahap review, jangan asumsikan sudah masuk `tug15_history`.
-- **Pending terpisah:** folder `WARNOTOV2-2757983` (hasil ekstrak zip AppSheet di `D:\CLAUDE\WARNOTO data\Appsheet\_extracted`) belum diputuskan mau dihapus atau disimpan.
+- **Keputusan (2026-07-06):** folder `WARNOTOV2-2757983` (hasil ekstrak zip AppSheet di `D:\CLAUDE\WARNOTO data\Appsheet\_extracted\data`, 349MB) **disimpan sebagai arsip, tidak dihapus** — isinya template dokumen (Berita Acara/Bon/Lampiran TUG) + foto bukti transaksi TUG 8/9/10/34 asli tanggal 2 November 2025, dinilai sebagai audit trail historis, bukan file sementara yang aman dihapus.
 
-### ⏳ PENDING — fix kolom Gudang untuk role TL (2026-07-05, belum di-commit)
-- Ditemukan: kolom "Gudang" di halaman Data Stok Gudang untuk role TL selalu tampil kosong ("—"), padahal ini bukan bug tampilan — 217 baris `stocks` di Supabase memang semuanya belum punya `lokasi_id` (sisa migrasi SAP yang sengaja dikosongkan, lihat aturan "Migrasi Data" di bawah).
-- Bug nyata yang ditemukan & sudah diperbaiki di `App.jsx` (~baris 5648): dropdown filter Gudang sebelumnya cuma muncul untuk role ADMIN, sekarang untuk `["ADMIN","TL"]` — supaya TL juga bisa pilih gudang mana yang mau diisi lokasinya (sebelumnya TL cuma bisa isi lokasi di gudang pertama dalam daftar).
-- **Sudah `npm run build` sukses, tapi belum di-commit ke git** (staged, `git status` masih menunjukkan `App.jsx` modified). Perlu ditest dulu sebagai login TL di browser sebelum commit.
+### ✅ SELESAI — fix kolom Gudang untuk role TL + approval-gate Asman (2026-07-06, sudah di-commit)
+- Root cause kolom "Gudang" kosong ("—") di Data Stok Gudang untuk role TL: 217 baris `stocks` di Supabase memang semuanya belum punya `lokasi_id` (sisa migrasi SAP yang sengaja dikosongkan, lihat aturan "Migrasi Data" di bawah) — bukan bug tampilan.
+- Fix di `App.jsx`: dropdown filter Gudang sekarang muncul untuk `["ADMIN","TL"]` (sebelumnya cuma ADMIN), supaya TL bisa pilih gudang mana yang mau diisi lokasinya. Commit `294eb50`.
+- **Celah keamanan ditemukan dari fix di atas & sudah ditutup**: dropdown Blok baru membuka jalur TL memindahkan stok yang sudah punya lokasi ke Gudang lain tanpa approval apa pun (padahal aksi sama oleh ADMIN wajib approval TL). Sekarang pemindahan lintas Gudang oleh TL masuk antrian `lokasiMovePending` dengan `lokasiMoveApprover:"ASMAN"`, select ter-disable selama menunggu, ada section approval baru khusus role ASMAN. Isi lokasi kosong / pindah blok dalam Gudang yang sama tetap langsung tanpa approval. Badge sidebar & hitungan `ApprovalTab` sudah diupdate konsisten untuk TL maupun ASMAN. Commit `84d2b0a`.
+- Status: sudah `npm run build` sukses dan ter-commit. **Belum ada catatan hasil test manual login TL di browser** — kalau ada laporan bug terkait alur ini, minta console error dulu sebelum menebak fix (lihat section 5 aturan #4).
+
+### ✅ SELESAI — Alat Berat sync Supabase + Approval filter/pagination (2026-07-06, commit `ab4d365`)
+- `heavy_equipment`/`heavy_equipment_loans` sekarang auto-sync ke Supabase (sebelumnya localStorage/CLOUD-only, ditemukan saat audit tidak pernah disinkron) — load saat startup, auto-backup tiap perubahan via `syncMasterTable`, pola sama seperti katalog/stocks/warehouse_capacity. Skema: `supabase/schema.sql` section 21, sudah diterapkan ke Supabase project.
+- Overdue counter badge sidebar "Alat Berat" sekarang discope ke UPT user (sebelumnya global tanpa filter). Tambah blok "Alat Berat Overdue" di menu Alat Berat & Peminjaman UPT dengan tombol Tandai Kembali langsung di situ.
+- Halaman Approval: fix urutan render (judul halaman sempat tertimbun di bawah panel pending), tambah filter jenis approval (TUG/Alat Berat/Stok/Lokasi/Kapasitas Gudang) + pagination 10/20/50 per section termasuk Riwayat Approval (sebelumnya flat 80 baris tanpa pager).
+- Dokumentasi: semua spec dipindah ke `docs/`, 17 file snapshot basi 2026-06-30 diarsipkan ke `docs/archive/`, tambah `docs/SYSTEM_OVERVIEW.md`.
 
 ### Login & User Management
 - Login sudah pindah dari array password polos ke **Supabase Auth** (`auth.users` + tabel `profiles`), username disintesis jadi email lewat `usernameToAuthEmail()` (domain `@warnoto.pln.local`).
