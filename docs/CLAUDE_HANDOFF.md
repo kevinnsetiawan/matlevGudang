@@ -63,6 +63,29 @@ Data terkontrol (lihat section 4).
 
 ## 4. STATUS TERKINI (2026-07-05) — baca ini sebelum ubah apa pun
 
+### ✅ SELESAI — Stock Opname tidak masuk ke halaman Approval terpusat Asman/Manager (2026-07-07)
+User lapor: submit Stock Opname ke Asman, tapi "tidak masuk ke approval Asman".
+- **Akar masalah**: sesi Opname yang di-submit MEMANG berhasil pindah status ke `PENDING_ASMAN`
+  (`submitOpname` bekerja normal), TAPI approval-nya cuma bisa dilihat/diproses lewat menu "Stock
+  Opname & Count" sendiri (card `pendingForMe` di `StockOpnameTab`) — **tidak pernah muncul** di
+  halaman "✅ Approval" terpusat yang dipakai Asman/Manager untuk semua jenis approval lain (TUG,
+  Alat Berat, Kapasitas Gudang, dll). Badge notifikasi juga tidak menghitungnya sama sekali. Jadi
+  kalau Asman terbiasa cuma cek menu "✅ Approval", sesi Opname yang menunggu akan terlewat/tidak
+  kelihatan — bukan bug data, tapi gap UX/visibilitas.
+- **Perbaikan**: tambah section "📋 Stock Opname" di halaman Approval terpusat (App.jsx, sesudah
+  section "Peminjaman Alat Berat", sebelum "Riwayat Approval") — pola & styling identik dengan
+  section Alat Berat yang sudah ada (list + tombol ✓ Setuju/✕ Tolak, paginasi). Juga: chip filter
+  baru "Stock Opname" di dropdown jenis approval, badge count di sidebar nav "✅ Approval" dan di
+  prop `opnamePendingCount` (dipakai `ApprovalTab` supaya pesan "✅ Semua sudah diproses" tidak
+  salah tampil kalau sebenarnya ada Opname yang masih pending — pola yang sama sudah dipakai untuk
+  Alat Berat sebelumnya).
+- Menu "Stock Opname & Count" sendiri TIDAK diubah — approval dari sana tetap berfungsi seperti
+  biasa, cuma sekarang ADA JALUR TAMBAHAN lewat halaman Approval terpusat juga.
+- **⏳ PENDING (belum dikerjakan, gap serupa)**: Stock Count (bukan Stock Opname) approval per-item
+  (`approveStockCountItem`) kemungkinan punya gap visibilitas yang sama — belum diverifikasi/
+  diperbaiki di sesi ini, scope-nya beda (approval per-item di dalam sesi, bukan per-sesi).
+- Sudah `npm run build` sukses. Belum dites manual di browser.
+
 ### ✅ SELESAI — Stock Opname: 1 tombol Simpan/Submit, pilihan jumlah baris, foto per item (2026-07-07)
 - **Tombol Simpan Draft/Submit ke Asman dobel** (sempat ada di header ATAS dan bawah tabel sekaligus
   setelah perbaikan sebelumnya) — user minta disederhanakan jadi 1. Sekarang HANYA ada di bawah

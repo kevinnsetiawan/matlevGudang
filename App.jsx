@@ -2399,10 +2399,11 @@ export default function PLNWarehouse() {
   const [approvalEditStokPage, setApprovalEditStokPage] = useState(1);
   const [approvalHapusStokPage, setApprovalHapusStokPage] = useState(1);
   const [approvalAlatBeratPage, setApprovalAlatBeratPage] = useState(1);
+  const [approvalOpnamePage, setApprovalOpnamePage] = useState(1);
   const [approvalHistoryPage, setApprovalHistoryPage] = useState(1);
   useEffect(() => {
     setApprovalStokPage(1); setApprovalStokGudangPage(1); setApprovalEditStokPage(1);
-    setApprovalHapusStokPage(1); setApprovalAlatBeratPage(1); setApprovalHistoryPage(1);
+    setApprovalHapusStokPage(1); setApprovalAlatBeratPage(1); setApprovalOpnamePage(1); setApprovalHistoryPage(1);
   }, [approvalTypeFilter, approvalPageSize]);
   function renderApprovalPager(page, setPage, totalItems) {
     if (totalItems <= approvalPageSize) return null;
@@ -5557,7 +5558,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"stock",icon:"📦",label:"Data Stok"},
     {id:"master",icon:"🗂️",label:"Master Data"},
     {id:"transaction",icon:"🔄",label:"TUG"},
-    ...(["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0) + (["TL","ASMAN"].includes(currentUser.role) ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="TL" ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (["ADMIN","TL"].includes(currentUser.role) ? ultgPengajuanUntukAdopt.length : 0) + (currentUser.role==="TL" ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (currentUser.role==="ASMAN" ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0)}] : []),
+    ...(["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0) + (["TL","ASMAN"].includes(currentUser.role) ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="TL" ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (["ADMIN","TL"].includes(currentUser.role) ? ultgPengajuanUntukAdopt.length : 0) + (currentUser.role==="TL" ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (currentUser.role==="ASMAN" ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0)}] : []),
     {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
     {id:"opname",icon:"📋",label:"Stock Opname & Count",badge:stockCountPendingCount},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
@@ -7008,11 +7009,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length
                 : currentUser.role==="ASMAN" ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0;
               const alatBeratCount = currentUser.role==="ASMAN" ? heavyEquipmentPendingCount : 0;
-              const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount;
+              const opnameCount = currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length
+                : currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0;
+              const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount+opnameCount;
               const chips = [
                 {id:"ALL", label:"Semua", count:total},
                 {id:"TUG", label:"TUG", count:tugCount},
                 {id:"ALAT_BERAT", label:"Alat Berat", count:alatBeratCount},
+                {id:"OPNAME", label:"Stock Opname", count:opnameCount},
                 {id:"STOK", label:"Pemindahan/Edit/Hapus Stok", count:stokCount},
                 {id:"LOKASI", label:"Lokasi/Blok", count:lokasiCount},
                 {id:"KAPASITAS", label:"Kapasitas Gudang", count:capCount},
@@ -7072,6 +7076,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               adoptTUG5ULTG={adoptTUG5ULTG}
               openDraftTug9={openDraftTug9}
               heavyEquipmentPendingCount={currentUser.role==="ASMAN" ? heavyEquipmentPendingCount : 0}
+              opnamePendingCount={currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0}
               approvalTypeFilter={approvalTypeFilter}
               approvalPageSize={approvalPageSize}
             />
@@ -7219,6 +7224,40 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     );
                   })}
                   {renderApprovalPager(approvalAlatBeratPage, setApprovalAlatBeratPage, list.length)}
+                </div>
+              );
+            })()}
+
+            {/* ── BAGIAN: Stock Opname — Asman/Manager (dulu cuma muncul di menu Stock Opname
+                sendiri, tidak pernah tampil di halaman Approval terpusat ini — keluhan user
+                2026-07-07 "tidak masuk ke approval asman"). ── */}
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="OPNAME") && ["ASMAN","MANAGER"].includes(currentUser.role) &&
+              opnameList.some(o=>(currentUser.role==="ASMAN"&&o.status==="PENDING_ASMAN")||(currentUser.role==="MANAGER"&&o.status==="PENDING_MANAGER")) && (()=>{
+              const list = opnameList.filter(o=>(currentUser.role==="ASMAN"&&o.status==="PENDING_ASMAN")||(currentUser.role==="MANAGER"&&o.status==="PENDING_MANAGER"));
+              const paged = list.slice((approvalOpnamePage-1)*approvalPageSize, approvalOpnamePage*approvalPageSize);
+              return (
+                <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
+                  <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📋 Stock Opname ({list.length})</div>
+                  {paged.map(opn=>{
+                    const selisihCount = opn.items?.filter(i=>i.selisih!==0).length||0;
+                    const pengaju = users.find(u=>u.id===opn.dibuatOleh);
+                    return (
+                      <div key={opn.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10}}>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700}}>Opname {opn.semester} — {opn.jenisAlur}</div>
+                          <div style={{fontSize:11,color:C.muted}}>{opn.items?.length||0} item • Selisih: {selisihCount} item • Diajukan oleh {pengaju?.name||"?"} • {fmtDate(opn.submittedAt)}</div>
+                        </div>
+                        <div style={{display:"flex",gap:6,flexShrink:0}}>
+                          <button style={sty.btn("primary","sm")} onClick={()=>currentUser.role==="ASMAN"?approveOpname_Asman(opn,""):approveOpname_Manager(opn,"")}>✓ Setuju</button>
+                          <button style={sty.btn("danger","sm")} onClick={()=>{
+                            const reason = window.prompt("Alasan penolakan Stock Opname ini?");
+                            if (reason) rejectOpname(opn, reason);
+                          }}>✕ Tolak</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {renderApprovalPager(approvalOpnamePage, setApprovalOpnamePage, list.length)}
                 </div>
               );
             })()}
@@ -15471,7 +15510,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   );
 }
 
-function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, approvalTypeFilter="ALL", approvalPageSize=10 }) {
+function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, opnamePendingCount=0, approvalTypeFilter="ALL", approvalPageSize=10 }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Form, setTug7Form] = useState({});
@@ -15576,7 +15615,7 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
 
   return (
     <div>
-      {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 && pendingStockCount===0 && !(heavyEquipmentPendingCount>0) ? (
+      {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 && pendingStockCount===0 && !(heavyEquipmentPendingCount>0) && !(opnamePendingCount>0) ? (
         <div style={{...sty.card,textAlign:"center",padding:40}}>
           <div style={{fontSize:48,marginBottom:12}}>✅</div>
           <div style={{fontSize:16,fontWeight:700}}>Semua sudah diproses</div>
