@@ -10552,6 +10552,16 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
       if(item.selisih!==0 && !item.keterangan?.trim()) errors.push(`Baris ${i+1} (${item.namaBarang}): keterangan wajib diisi jika ada selisih`);
     });
     setValidationErrors(errors);
+    // Tombol Submit sekarang cuma ada di bawah tabel (setelah paginasi) — kalau validasi gagal
+    // dan cuma diam-diam set state tanpa toast, dengan item ratusan baris user tidak akan sadar
+    // submit-nya gagal (kotak error tampil di ATAS tabel, jauh di luar layar). Sesi jadi
+    // nyangkut DRAFT selamanya tanpa penjelasan — persis kasus yang dilaporkan user 2026-07-07
+    // ("tidak masuk ke approval asman").
+    if (errors.length>0) {
+      showToast(`❌ Belum bisa disubmit — ${errors.length} item belum lengkap (qty fisik/keterangan). Scroll ke atas untuk detail.`, "error");
+      setPage(0);
+      if (typeof window!=="undefined") window.scrollTo({top:0, behavior:"smooth"});
+    }
     return errors.length===0;
   }
 
@@ -10790,7 +10800,22 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
               <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:16}}>
                 <button style={sty.btn("ghost")} onClick={()=>saveOpname(activeOpname)}>💾 Simpan Draft</button>
                 <button style={{...sty.btn("primary"), opacity:prog.pct<100?0.5:1}}
-                  onClick={()=>{ if(!validate()) return; saveOpname(activeOpname); submitOpname(activeOpname); setActiveTab("list"); setActiveOpname(null); }}>
+                  onClick={async ()=>{
+                    // BUG KRITIS (ditemukan 2026-07-07): dulu saveOpname(activeOpname) dan
+                    // submitOpname(activeOpname) dipanggil beruntun TANPA menunggu satu sama lain.
+                    // submitOpname sudah menulis SELURUH data opn (spread {...opn}) + status
+                    // PENDING_ASMAN — saveOpname menulis objek yang SAMA tapi masih status DRAFT.
+                    // Karena keduanya sync ke Supabase secara paralel (network, bukan lagi
+                    // localStorage yang instan), race condition: kalau upsert dari saveOpname
+                    // (DRAFT) selesai BELAKANGAN dari upsert submitOpname (PENDING_ASMAN), hasil
+                    // akhir di database balik jadi DRAFT lagi — submit "hilang" diam-diam padahal
+                    // toast sukses tetap muncul. Ini akar masalah sesi opname tidak pernah sampai
+                    // ke approval Asman walau semua qty sudah lengkap. Fix: submitOpname saja
+                    // (sudah mencakup semua yang dilakukan saveOpname), di-await, baru pindah tab.
+                    if(!validate()) return;
+                    await submitOpname(activeOpname);
+                    setActiveTab("list"); setActiveOpname(null);
+                  }}>
                   📋 Submit ke Asman
                 </button>
               </div>
