@@ -63,6 +63,30 @@ Data terkontrol (lihat section 4).
 
 ## 4. STATUS TERKINI (2026-07-05) — baca ini sebelum ubah apa pun
 
+### ✅ SELESAI — Stock Opname/Stock Count disinkron ke Supabase (2026-07-07)
+User lapor: widget persentase akurasi Stock Count tidak muncul di Dashboard padahal sesi sudah
+disubmit lengkap.
+- **Akar masalah**: `opnameList`/`stockCountList` cuma tersimpan lewat `CLOUD.set/get` lama, yang
+  fallback ke `localStorage` polos di browser (bukan Supabase) — beda dengan `heavy_equipment`/
+  `warehouse_capacity` yang sudah dibenahi sesi sebelumnya. Jadi data itu 100% cuma ada di browser
+  tempat Stock Count dijalankan, tidak pernah nyampe device/browser lain (termasuk Dashboard kalau
+  dibuka dari sesi/device berbeda).
+- **Perbaikan**: tabel baru `stock_opname` & `stock_count` di `supabase/schema.sql` (pola sama
+  persis `heavy_equipment`: id/data jsonb/created_at + RLS), plus `loadCloud()`/`saveToCloud` di
+  `App.jsx` sekarang load-dari & sync-ke Supabase lewat `loadMasterTable`/`syncMasterTable` (pola
+  yang sama dipakai domain lain yang sudah lebih dulu dipindah ke Supabase).
+- **Migrasi otomatis satu-kali**: karena tabel Supabase baru dibuat (kosong), begitu app dibuka lagi
+  di browser/device ASLI tempat Stock Count itu dijalankan, logika fallback akan otomatis push data
+  lokal yang sudah ada ke Supabase (`if (cscRemote.length>0) pakai remote; else pakai lokal + push
+  ke Supabase`). Setelah push sekali itu, sesi Stock Count akan tampil di Dashboard dari device mana
+  pun.
+- Migration `add_stock_opname_and_stock_count_tables` sudah diterapkan ke Supabase project
+  `tadxodrzoquugnsyejld` lewat MCP, diverifikasi tabel `stock_opname`/`stock_count` sudah ada.
+- Sudah `npm run build` sukses.
+- **⏳ PENDING**: belum bisa jawab "berapa item selisih & berapa persen" dari sesi Stock Count user
+  yang sudah ada — karena baru akan ter-push ke Supabase setelah user reload app di browser/device
+  ASLI tempat sesi itu dijalankan. Setelah itu kejadian, bisa cek langsung lewat Supabase.
+
 ### ✅ SELESAI — Standarisasi parser titik/koma di SEMUA import file (2026-07-07, bug KRITIS)
 User lapor: qty benar "103,5 meter" tercatat "1.035" di app (distorsi ~10x, data kuantitas fisik).
 - **Akar masalah ditemukan** di `parseSAPMigration` (Migrasi Data): SELALU menghapus semua titik

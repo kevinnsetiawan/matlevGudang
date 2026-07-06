@@ -912,3 +912,38 @@ drop policy if exists "Authenticated read heavy_equipment_loans" on heavy_equipm
 drop policy if exists "Authenticated write heavy_equipment_loans" on heavy_equipment_loans;
 create policy "Authenticated read heavy_equipment_loans" on heavy_equipment_loans for select using (auth.role() = 'authenticated');
 create policy "Authenticated write heavy_equipment_loans" on heavy_equipment_loans for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ────────────────────────────────────────────────────────────
+-- 22. STOCK_OPNAME / STOCK_COUNT — sesi Stock Opname (banding SAP/fisik vs sistem,
+--     approval Asman->Manager) & Stock Count (banding SAP vs Aplikasi, read-only).
+--     Sebelumnya cuma localStorage/CLOUD (key pln_opname_v1 / pln_stockcount_v1) —
+--     ditemukan 2026-07-07 saat user lapor widget akurasi Dashboard tidak muncul di
+--     device/browser lain, ternyata data ini TIDAK PERNAH disinkron ke Supabase sama
+--     sekali (beda device/browser = data tidak ada). Pola sama seperti heavy_equipment
+--     di atas: jsonb generik, App.jsx tetap baca dari `data`.
+-- ────────────────────────────────────────────────────────────
+create table if not exists stock_opname (
+  id text primary key,              -- id sesi opname, dibuat App.jsx ("OPN-...")
+  data jsonb not null default '{}'::jsonb,
+  created_at bigint,
+  status text                       -- DRAFT/PENDING_ASMAN/PENDING_MANAGER/SELESAI/DITOLAK
+);
+create index if not exists idx_stock_opname_status on stock_opname(status);
+
+alter table stock_opname enable row level security;
+drop policy if exists "Authenticated read stock_opname" on stock_opname;
+drop policy if exists "Authenticated write stock_opname" on stock_opname;
+create policy "Authenticated read stock_opname" on stock_opname for select using (auth.role() = 'authenticated');
+create policy "Authenticated write stock_opname" on stock_opname for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+create table if not exists stock_count (
+  id text primary key,              -- id sesi stock count, dibuat App.jsx ("SC-...")
+  data jsonb not null default '{}'::jsonb,
+  created_at bigint
+);
+
+alter table stock_count enable row level security;
+drop policy if exists "Authenticated read stock_count" on stock_count;
+drop policy if exists "Authenticated write stock_count" on stock_count;
+create policy "Authenticated read stock_count" on stock_count for select using (auth.role() = 'authenticated');
+create policy "Authenticated write stock_count" on stock_count for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');

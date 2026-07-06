@@ -2559,7 +2559,7 @@ export default function PLNWarehouse() {
       // Master data (UIT/UPT/Gudang/Lokasi/Satpam/Tim Mutu) sekarang sumber
       // utamanya Supabase, bukan localStorage lagi — load dulu (seed dari
       // DEFAULT_* kalau tabelnya masih kosong, mis. instalasi baru).
-      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote] = await Promise.all([
+      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote] = await Promise.all([
         seedMasterTableIfEmpty("uit", DEFAULT_UIT),
         seedMasterTableIfEmpty("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null })),
         loadMasterTable("ultg").then(r => r || []),
@@ -2574,6 +2574,8 @@ export default function PLNWarehouse() {
         loadMasterTable("warehouse_capacity_imports"),
         loadMasterTable("heavy_equipment"),
         loadMasterTable("heavy_equipment_loans"),
+        loadMasterTable("stock_opname"),
+        loadMasterTable("stock_count"),
       ]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
 
@@ -2636,8 +2638,26 @@ export default function PLNWarehouse() {
       setGudangList(cgdg);
       setSubGudangList(csgdg || []);
       setRencanaKedatanganList(crk || []);
-      setOpnameList(copn || []);
-      setStockCountList(csc || []);
+      // Stock Opname & Stock Count — Supabase (stock_opname/stock_count) sekarang sumber
+      // utama kalau sudah ada isinya; kalau masih kosong (instalasi lama yang baru upgrade,
+      // atau baru pertama kali), dorong sekali data localStorage yang ada ke Supabase supaya
+      // tidak hilang lagi. Ditemukan 2026-07-07: sebelumnya data ini TIDAK PERNAH tersinkron
+      // ke Supabase sama sekali — widget akurasi Dashboard "hilang" kalau dibuka dari
+      // device/browser lain karena datanya memang cuma ada di localStorage device asal.
+      const opnLocal = copn || [];
+      const scLocal = csc || [];
+      if (copnRemote && copnRemote.length > 0) {
+        setOpnameList(copnRemote);
+      } else {
+        setOpnameList(opnLocal);
+        if (opnLocal.length > 0) syncMasterTable("stock_opname", opnLocal, o => ({ status: o.status || null }));
+      }
+      if (cscRemote && cscRemote.length > 0) {
+        setStockCountList(cscRemote);
+      } else {
+        setStockCountList(scLocal);
+        if (scLocal.length > 0) syncMasterTable("stock_count", scLocal);
+      }
       setApprovalHistoryList(cah || []);
       setMaturityAssessments(cma || []);
       // Alat Berat/Peminjaman UPT — Supabase (heavy_equipment/_loans) sekarang sumber
@@ -2770,6 +2790,12 @@ export default function PLNWarehouse() {
       owner_upt: getHeavyEquipmentLoanOwnerUpt(l) || null,
       requester_upt: getHeavyEquipmentLoanRequesterUpt(l) || null,
     }));
+    // Stock Opname & Stock Count — sebelumnya localStorage/CLOUD-only, ditemukan 2026-07-07
+    // (widget akurasi Dashboard "hilang" kalau dibuka dari device/browser lain karena datanya
+    // memang tidak pernah keluar dari localStorage device asal). Sekarang auto-backup ke
+    // Supabase tiap kali berubah, pola sama seperti heavy_equipment (schema.sql section 22).
+    if (overrides.opnameList !== undefined) syncMasterTable("stock_opname", opn, o => ({ status: o.status || null }));
+    if (overrides.stockCountList !== undefined) syncMasterTable("stock_count", sc);
 
     // Auto-sync warnoto_state + RAG (bot WA/Telegram) kalau ada perubahan stocks/txns —
     // debounced 90 detik supaya tidak spam Cohere embed API tiap 1 saveToCloud.
