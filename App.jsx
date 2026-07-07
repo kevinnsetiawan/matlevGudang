@@ -2406,6 +2406,7 @@ export default function PLNWarehouse() {
   const [katalogPage, setKatalogPage] = useState(1);
   const [katalogPageSize, setKatalogPageSize] = useState(10);
   const [katalogSearch, setKatalogSearch] = useState("");
+  const [katalogFilterBelumMara, setKatalogFilterBelumMara] = useState(false);
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   // Filter jenis approval (TUG/Alat Berat/Stok/dst) + pagination tiap section —
@@ -3101,7 +3102,10 @@ export default function PLNWarehouse() {
   function applyMaraToKatalog(item) {
     // _maraLocked: kunci Nomor Katalog/Nama/Kategori/Satuan supaya tidak diketik ulang manual
     // dan jadi tidak konsisten dengan sumber MARA — bisa dibuka lagi lewat tombol "Lepas kunci".
-    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan, category: item.material_group_desc||item.material_group||kf.category, _maraLocked: true }));
+    // belumDicocokkanMara: kalau katalog ini sebelumnya kode fallback Non-Stock dari opname
+    // (lihat addNonStockFoundItem) yang belum sempat dicocokkan, sekarang sudah ketemu —
+    // flag-nya dilepas. id (dipakai QR) TIDAK berubah, jadi label fisik yang sudah ditempel tetap valid.
+    setKatalogForm(kf=>({...kf, katalog: item.kode_material||kf.katalog, name: item.nama||kf.name, satuan: item.satuan||kf.satuan, category: item.material_group_desc||item.material_group||kf.category, _maraLocked: true, belumDicocokkanMara: false }));
     setMaraSearchResults([]);
     setMaraSearch("");
   }
@@ -4143,6 +4147,17 @@ export default function PLNWarehouse() {
         }
       });
     });
+    // Material Non-Stock yang ditemukan saat opname fisik (Opsi A) — katalog & stok-nya
+    // SUDAH dibuat sejak "Simpan" di lapangan (lihat addNonStockFoundItem), bukan di sini.
+    // Approve Manager di sini cuma melepas flag pendingOpnameId (mengonfirmasi), tidak bikin
+    // baris baru — beda dari material baru SAP di atas yang memang baru dibuat saat ini.
+    let konfirmasiNonStock = 0;
+    newKatalogList = newKatalogList.map(k => k.pendingOpnameId === opn.id ? { ...k, pendingOpnameId: null } : k);
+    newStocks = newStocks.map(s => {
+      if (s.pendingOpnameId === opn.id) { konfirmasiNonStock++; return { ...s, pendingOpnameId: null }; }
+      return s;
+    });
+
     const updated = {...opn, status:"SELESAI", approvedByManager:currentUser.id, approvedAtManager:Date.now(), catatanManager:catatan||""};
     const nl = opnameList.map(o=>o.id===opn.id?updated:o);
     setOpnameList(nl); setStocks(newStocks); setKatalogList(newKatalogList);
@@ -4154,6 +4169,7 @@ export default function PLNWarehouse() {
     let msg = "✅ Stock Opname SELESAI! Data Stok disesuaikan.";
     if (materialBaruDibuat.length) msg += ` ${materialBaruDibuat.length} material baru ditambahkan ke Master Katalog.`;
     if (materialBaruKonflik.length) msg += ` ⚠️ ${materialBaruKonflik.length} material baru TIDAK ditambahkan (bentrok No. Katalog): ${materialBaruKonflik.slice(0,2).join("; ")}${materialBaruKonflik.length>2?"...":""}.`;
+    if (konfirmasiNonStock) msg += ` ${konfirmasiNonStock} material Non-Stock hasil opname dikonfirmasi aktif.`;
     showToast(msg, materialBaruKonflik.length ? "error" : "success");
   }
   async function rejectOpname(opn, reason) {
@@ -4168,6 +4184,61 @@ export default function PLNWarehouse() {
     const nl = opnameList.filter(o=>o.id!==id);
     setOpnameList(nl); await saveToCloud({opnameList: nl});
     showToast("Opname dihapus.");
+  }
+
+  // Kode fallback untuk material Non-Stock yang TIDAK ketemu padanan MARA-nya —
+  // format NS-<UPT singkat>-<urut 4 digit>, jelas beda dari kode SAP/MARA asli
+  // (yang selalu angka murni) supaya tidak ada yang salah kira ini kode resmi.
+  function generateNonStockFallbackCode() {
+    const uptShort = ((typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim().slice(0, 3) || "UPT").toUpperCase();
+    const prefix = `NS-${uptShort}-`;
+    let maxN = 0;
+    katalogList.forEach(k => {
+      const m = String(k.katalog || "").match(new RegExp(`^${prefix}(\\d+)$`));
+      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+    });
+    return `${prefix}${String(maxN + 1).padStart(4, "0")}`;
+  }
+
+  // Material Non-Stock yang ditemukan SAAT opname fisik (bukan dari upload SAP) —
+  // KEPUTUSAN SENGAJA (Opsi A, disepakati user): katalog + stok dibuat LANGSUNG di
+  // sini (bukan menunggu Manager approve seperti material baru SAP), berstatus
+  // "pendingOpnameId" terisi, supaya QR/label bisa langsung dicetak & ditempel ke
+  // barang selagi Admin/TL masih di depannya — tidak perlu balik ke gudang lagi
+  // nanti. QR encode `katalog.id` (bukan field `katalog` yang bisa dikoreksi
+  // belakangan kalau kandidat MARA ditemukan susulan), jadi label fisik tetap
+  // valid walau kode katalognya diperbarui.
+  async function addNonStockFoundItem({ opnameId, nama, katalogCode, satuan, qty, lokasiId, foto, belumDicocokkanMara }) {
+    const code = katalogCode || generateNonStockFallbackCode();
+    const newKatalogId = "KAT-" + code;
+    if (katalogList.some(k => k.id === newKatalogId)) {
+      showToast(`Kode katalog "${code}" sudah dipakai. Coba lagi.`, "error");
+      return null;
+    }
+    const now = Date.now();
+    const newKatalog = {
+      id: newKatalogId, katalog: code, name: nama,
+      category: nama.split(";")[0].trim() || "Material",
+      jenisBarang: "Non-Stock", satuan: satuan || "-",
+      keterangan: `Ditemukan saat Stock Opname Non-SAP (menunggu approval sesi ${opnameId})`,
+      pendingOpnameId: opnameId, belumDicocokkanMara: !!belumDicocokkanMara,
+      createdAt: now,
+    };
+    const newStock = {
+      id: "STK-OPN-" + code + "-" + now,
+      katalogId: newKatalogId, lokasiId: lokasiId || null,
+      qty: Number(qty) || 0, price: 0, minQty: 0, unit: satuan || "-",
+      jenisBarang: "Non-Stock", name: nama, katalog: code,
+      category: nama.split(";")[0].trim() || "Material",
+      fotoKeseluruhan: foto || null,
+      pendingOpnameId: opnameId,
+      createdAt: now, updatedAt: now,
+    };
+    const nk = [...katalogList, newKatalog];
+    const ns = [...stocks, newStock];
+    setKatalogList(nk); setStocks(ns);
+    await saveToCloud({ katalogList: nk, stocks: ns });
+    return newKatalog;
   }
 
   // ── STOCK COUNT (banding SAP vs Aplikasi) — read-only, TIDAK mengubah
@@ -5595,7 +5666,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
   const pagedStocks = filteredStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
-  const filteredKatalog = katalogList.filter(k => matchesKatalogSearch(k, katalogSearch));
+  const filteredKatalog = katalogList.filter(k => matchesKatalogSearch(k, katalogSearch) && (!katalogFilterBelumMara || k.belumDicocokkanMara));
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
@@ -6095,6 +6166,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 deleteOpname={deleteOpname}
                 openScanner={openScanner}
                 showToast={showToast}
+                gudangList={gudangList}
+                lokasiList={lokasiList}
+                addNonStockFoundItem={addNonStockFoundItem}
               />
             ) : (
               <StockCountTab
@@ -6450,14 +6524,22 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             )}
 
             {stockSubTab==="katalog" && katalogList.length>0 && (
-              <div style={{marginBottom:12,position:"relative",maxWidth:420}}>
-                <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama barang, no. katalog, kategori, jenis..." value={katalogSearch} onChange={e=>setKatalogSearch(e.target.value)}/>
-                {katalogSearch && (
-                  <button
-                    onClick={()=>setKatalogSearch("")}
-                    title="Hapus pencarian"
-                    style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
-                  >✕</button>
+              <div style={{marginBottom:12,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <div style={{position:"relative",maxWidth:420,flex:1,minWidth:220}}>
+                  <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama barang, no. katalog, kategori, jenis..." value={katalogSearch} onChange={e=>setKatalogSearch(e.target.value)}/>
+                  {katalogSearch && (
+                    <button
+                      onClick={()=>setKatalogSearch("")}
+                      title="Hapus pencarian"
+                      style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
+                    >✕</button>
+                  )}
+                </div>
+                {katalogList.some(k=>k.belumDicocokkanMara) && (
+                  <button onClick={()=>setKatalogFilterBelumMara(v=>!v)}
+                    style={{padding:"6px 12px",borderRadius:20,border:`1px solid ${katalogFilterBelumMara?"#f59e0b":C.border}`,background:katalogFilterBelumMara?"#fef3c7":"white",color:katalogFilterBelumMara?"#92400e":C.text,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    ⚠️ Belum Dicocokkan MARA ({katalogList.filter(k=>k.belumDicocokkanMara).length})
+                  </button>
                 )}
               </div>
             )}
@@ -6493,7 +6575,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           </td>
                           <td style={{padding:"8px 10px",minWidth:200,fontWeight:700}}>{k.name}</td>
                           <td style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:10,background:"#f3f4f6",color:C.muted,whiteSpace:"nowrap"}}>{(k.name||"").split(";")[0]?.trim()||k.category||"Lainnya"}</span></td>
-                          <td style={{padding:"8px 10px"}}><span style={sty.jenisBadge(k.jenisBarang)}>{k.jenisBarang||"-"}</span></td>
+                          <td style={{padding:"8px 10px"}}>
+                            <span style={sty.jenisBadge(k.jenisBarang)}>{k.jenisBarang||"-"}</span>
+                            {k.pendingOpnameId && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:8,fontWeight:700,background:"#dbeafe",color:"#1e40af"}}>⏳ Pending Approval</span></div>}
+                            {k.belumDicocokkanMara && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:8,fontWeight:700,background:"#fef3c7",color:"#92400e"}}>⚠️ Belum MARA</span></div>}
+                          </td>
                           <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
                           <td style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:10,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
                           <td style={{padding:"8px 10px"}}>
@@ -10732,7 +10818,7 @@ function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setTopN, pe
 
 function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
   saveOpname, submitOpname, approveOpname_Asman, approveOpname_Manager, rejectOpname, deleteOpname,
-  openScanner, showToast }) {
+  openScanner, showToast, gudangList, lokasiList, addNonStockFoundItem }) {
 
   const [activeTab, setActiveTab] = useState("list"); // "list"|"form-sap"|"form-nonsap"|"detail"
   const [activeOpname, setActiveOpname] = useState(null);
@@ -10746,6 +10832,70 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
   const [highlightIdx, setHighlightIdx] = useState(null); // baris hasil scan QR — cuma bantu temukan & fokus, bukan pengganti hitung fisik
   const qtyInputRefs = useRef({});
   const [pageSize, setPageSize] = useState(10);
+
+  // "Tambah Material Ditemukan" (Opname Non-SAP) — form untuk barang fisik yang belum
+  // tercatat sama sekali di sistem, ditemukan sambil opname jalan.
+  const [tambahModal, setTambahModal] = useState(false);
+  const [tambahForm, setTambahForm] = useState({ nama:"", satuan:"", qty:"", gudangId:"", lokasiId:"", foto:null });
+  const [maraQuery, setMaraQuery] = useState("");
+  const [maraResults, setMaraResults] = useState([]);
+  const [maraLoading, setMaraLoading] = useState(false);
+  const [maraPicked, setMaraPicked] = useState(null); // {kode_material, nama, satuan} atau null
+  const [maraSkip, setMaraSkip] = useState(false); // user pilih "Tidak ada di MARA / lewati dulu"
+  const [tambahBusy, setTambahBusy] = useState(false);
+  const [qrResult, setQrResult] = useState(null); // katalog object baru, tampilkan label QR setelah simpan
+
+  async function searchMaraForOpname(q) {
+    setMaraQuery(q); setMaraPicked(null);
+    if (!q || q.trim().length < 2) { setMaraResults([]); return; }
+    if (!supabase) return;
+    setMaraLoading(true);
+    const terms = expandQueryForIlikeSearch(q);
+    const orFilter = terms.map(t => `nama.ilike.%${t}%`).join(",");
+    const { data, error } = await supabase.from("mara_catalog")
+      .select("kode_material,nama,satuan").or(orFilter).limit(15);
+    setMaraLoading(false);
+    setMaraResults(error ? [] : (data || []));
+  }
+
+  function openTambahModal() {
+    setTambahForm({ nama:"", satuan:"", qty:"", gudangId:"", lokasiId:"", foto:null });
+    setMaraQuery(""); setMaraResults([]); setMaraPicked(null); setMaraSkip(false);
+    setQrResult(null);
+    setTambahModal(true);
+  }
+
+  async function submitTambahMaterial() {
+    const f = tambahForm;
+    if (!f.nama.trim()) { showToast("Nama material wajib diisi.","error"); return; }
+    if (!f.qty || Number(f.qty) <= 0) { showToast("Qty fisik wajib diisi.","error"); return; }
+    if (!f.lokasiId) { showToast("Lokasi (Gudang/Blok) wajib diisi.","error"); return; }
+    if (!maraPicked && !maraSkip) { showToast("Cari & pilih kode MARA dulu, atau tap \"Tidak ada di MARA / lewati dulu\".","error"); return; }
+    setTambahBusy(true);
+    const newKatalog = await addNonStockFoundItem({
+      opnameId: activeOpname.id,
+      nama: f.nama.trim(),
+      katalogCode: maraPicked?.kode_material || null,
+      satuan: maraPicked?.satuan || f.satuan || "-",
+      qty: Number(f.qty),
+      lokasiId: f.lokasiId,
+      foto: f.foto,
+      belumDicocokkanMara: !maraPicked && maraSkip,
+    });
+    setTambahBusy(false);
+    if (!newKatalog) return;
+    setActiveOpname(prev => ({
+      ...prev,
+      items: [...(prev.items||[]), {
+        katalogId: newKatalog.id, namaBarang: newKatalog.name, noKatalog: newKatalog.katalog,
+        satuan: newKatalog.satuan, qtySistem: 0, qtsFisik: Number(f.qty), selisih: 0,
+        statusItem: "MATERIAL_BARU_NONSAP", keterangan: "", lokasiId: f.lokasiId,
+        fotoKeseluruhan: f.foto || null, belumDicocokkanMara: !maraPicked && maraSkip,
+      }],
+    }));
+    setQrResult(newKatalog);
+    showToast(`✅ "${newKatalog.name}" tersimpan (${newKatalog.katalog})`);
+  }
 
   // Scan QR label material (Kartu Gantung TUG-2) untuk LOMPAT ke baris yang benar di tabel opname
   // ini — TIDAK mengisi qty otomatis, cuma navigasi. Angka hasil hitung fisik tetap wajib diketik
@@ -10847,7 +10997,11 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
     setActiveOpname(prev=>{
       const items = [...prev.items];
       items[realIdx] = {...items[realIdx], [field]:value};
-      if(field==="qtsFisik") {
+      // Item "🆕 Material Baru" (dari SAP maupun temuan Non-SAP) tetap ditandai begitu walau
+      // qty-nya diedit ulang — jangan sampai berubah jadi status SESUAI/SELISIH biasa cuma
+      // karena user koreksi angka setelah simpan awal.
+      const isMaterialBaru = ["TIDAK_ADA_DI_SISTEM","MATERIAL_BARU_NONSAP"].includes(items[realIdx].statusItem);
+      if(field==="qtsFisik" && !isMaterialBaru) {
         items[realIdx].selisih = Number(value) - items[realIdx].qtySistem;
         items[realIdx].statusItem = items[realIdx].selisih===0?"SESUAI":"SELISIH";
       }
@@ -10857,9 +11011,13 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
 
   function validate() {
     const errors = [];
+    const isNonSapSession = activeOpname?.jenisAlur === "NON_SAP";
     (activeOpname.items||[]).forEach((item,i)=>{
       if(item.qtsFisik==null||item.qtsFisik==="") errors.push(`Baris ${i+1}: qty fisik belum diisi`);
       if(item.selisih!==0 && !item.keterangan?.trim()) errors.push(`Baris ${i+1} (${item.namaBarang}): keterangan wajib diisi jika ada selisih`);
+      // Opname Non-SAP: lokasi WAJIB diisi untuk semua item (baseline maupun temuan baru) —
+      // ini yang membuktikan opname fisik benar-benar dilakukan, bukan cuma isi qty dari kursi.
+      if(isNonSapSession && !item.lokasiId) errors.push(`Baris ${i+1} (${item.namaBarang}): lokasi (Gudang/Blok) wajib diisi`);
     });
     setValidationErrors(errors);
     // Tombol Submit sekarang cuma ada di bawah tabel (setelah paginasi) — kalau validasi gagal
@@ -10910,6 +11068,13 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
             <button style={sty.btn("ghost")} onClick={()=>downloadBeritaAcara(activeOpname)}>📄 Download Berita Acara</button>
           )}
         </div>
+
+        {/* Tambah Material Ditemukan — cuma Opname Non-SAP, sambil opname jalan di lapangan */}
+        {!isSAP && !isReadOnly && (
+          <button style={{...sty.btn("primary"),width:"100%",marginBottom:14,fontSize:14,padding:"12px 0"}} onClick={openTambahModal}>
+            ➕ Tambah Material Ditemukan
+          </button>
+        )}
 
         {/* Upload CSV SAP */}
         {isSAP && !isReadOnly && (
@@ -11003,6 +11168,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Qty Fisik</th>
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Selisih</th>
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Status</th>
+                    {!isSAP && <th style={{padding:"7px 8px",textAlign:"center"}}>📍 Lokasi *</th>}
                     <th style={{padding:"7px 8px",textAlign:"left"}}>Keterangan</th>
                     <th style={{padding:"7px 8px",textAlign:"center"}}>📷 Foto</th>
                   </tr>
@@ -11011,14 +11177,17 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                   {pageItems.map((item,pageIdx)=>{
                     const realIdx = page*pageSize + pageIdx;
                     const isHighlighted = highlightIdx===realIdx;
-                    const rowBg = isHighlighted ? "#dbeafe" : item.statusItem==="SESUAI"?"white":item.statusItem==="TIDAK_ADA_DI_SISTEM"?"#fefce8":item.statusItem==="TIDAK_ADA_DI_SAP"?"#f8fafc":"#fff5f5";
+                    const rowBg = isHighlighted ? "#dbeafe" : item.statusItem==="MATERIAL_BARU_NONSAP" ? "#eff6ff" : item.statusItem==="SESUAI"?"white":item.statusItem==="TIDAK_ADA_DI_SISTEM"?"#fefce8":item.statusItem==="TIDAK_ADA_DI_SAP"?"#f8fafc":"#fff5f5";
                     const statusBadge = item.statusItem==="SESUAI"
                       ? {bg:"#dcfce7",fg:"#166534",label:"✅ Sesuai"}
                       : item.statusItem==="TIDAK_ADA_DI_SAP"
                       ? {bg:"#f3f4f6",fg:"#6b7280",label:"○ Tdk di SAP"}
                       : item.statusItem==="TIDAK_ADA_DI_SISTEM"
                       ? {bg:"#fef3c7",fg:"#92400e",label:"⚠️ Tdk di Sistem"}
+                      : item.statusItem==="MATERIAL_BARU_NONSAP"
+                      ? {bg:"#dbeafe",fg:"#1e40af",label:"🆕 Baru (Non-Stock)"}
                       : {bg:"#fee2e2",fg:"#991b1b",label:"🔴 Selisih"};
+                    const itemGudangId = lokasiList?.find(l=>l.id===item.lokasiId)?.gudangId || "";
                     return (
                       <tr key={realIdx} style={{borderBottom:`1px solid ${C.border}`,background:rowBg,outline:isHighlighted?`2px solid #3b82f6`:"none"}}>
                         <td style={{padding:"6px 8px",textAlign:"center",color:C.muted,fontSize:10}}>{realIdx+1}</td>
@@ -11026,6 +11195,9 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                           {item.namaBarang}
                           {item.statusItem==="TIDAK_ADA_DI_SISTEM" && (
                             <div style={{fontSize:9,fontWeight:700,color:"#92400e",whiteSpace:"normal"}}>🆕 Material baru — akan dibuatkan Master Katalog + Data Stok saat sesi ini disetujui Manager (kalau qty fisik diisi &gt;0)</div>
+                          )}
+                          {item.statusItem==="MATERIAL_BARU_NONSAP" && (
+                            <div style={{fontSize:9,fontWeight:700,color:"#1e40af",whiteSpace:"normal"}}>🆕 Ditemukan saat opname — sudah aktif sebagai "Pending Approval", dikonfirmasi penuh saat Manager approve sesi ini.{item.belumDicocokkanMara && " ⚠️ Belum dicocokkan ke MARA."}</div>
                           )}
                         </td>
                         <td style={{padding:"6px 8px",textAlign:"center",fontFamily:"monospace",fontSize:10}}>{item.noKatalog}</td>
@@ -11048,6 +11220,27 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                             {statusBadge.label}
                           </span>
                         </td>
+                        {!isSAP && (
+                          <td style={{padding:"4px 6px"}}>
+                            {!isReadOnly ? (
+                              <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                                <select value={itemGudangId} onChange={e=>{ updateItem(realIdx,"lokasiId",""); updateItem(realIdx,"_gudangTmp",e.target.value); }}
+                                  style={{width:110,padding:"3px 4px",border:`1px solid ${C.border}`,borderRadius:4,fontSize:9}}>
+                                  <option value="">-- Gudang --</option>
+                                  {(gudangList||[]).map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
+                                </select>
+                                <select value={item.lokasiId||""} onChange={e=>updateItem(realIdx,"lokasiId",e.target.value)}
+                                  disabled={!itemGudangId && !item._gudangTmp}
+                                  style={{width:110,padding:"3px 4px",border:`1px solid ${!item.lokasiId?C.red:C.border}`,borderRadius:4,fontSize:9}}>
+                                  <option value="">-- Blok --</option>
+                                  {(lokasiList||[]).filter(l=>l.gudangId===(itemGudangId||item._gudangTmp)).map(l=><option key={l.id} value={l.id}>{l.kode}</option>)}
+                                </select>
+                              </div>
+                            ) : (
+                              <span style={{fontSize:10}}>{lokasiList?.find(l=>l.id===item.lokasiId)?.kode || "-"}</span>
+                            )}
+                          </td>
+                        )}
                         <td style={{padding:"4px 6px"}}>
                           {!isReadOnly
                             ? <input value={item.keterangan||""}
@@ -11140,6 +11333,105 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
             {activeOpname.approvedByAsman && <div style={{fontSize:11,color:C.green}}>✅ Asman: {users.find(u=>u.id===activeOpname.approvedByAsman)?.name} • {fmtDate(activeOpname.approvedAtAsman)} {activeOpname.catatanAsman&&`— "${activeOpname.catatanAsman}"`}</div>}
             {activeOpname.approvedByManager && <div style={{fontSize:11,color:C.green,marginTop:4}}>✅ Manager: {users.find(u=>u.id===activeOpname.approvedByManager)?.name} • {fmtDate(activeOpname.approvedAtManager)} {activeOpname.catatanManager&&`— "${activeOpname.catatanManager}"`}</div>}
             {activeOpname.rejectReason && <div style={{fontSize:11,color:C.red,marginTop:4}}>❌ Ditolak: {activeOpname.rejectReason}</div>}
+          </div>
+        )}
+
+        {/* MODAL: Tambah Material Ditemukan (Opname Non-SAP) — 1 layar per barang,
+            cari kode MARA dulu, lalu isi qty/lokasi/foto, simpan langsung dapat QR untuk ditempel. */}
+        {tambahModal && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:12}}>
+            <div style={{...sty.card,width:420,maxHeight:"92vh",overflowY:"auto"}}>
+              {qrResult ? (
+                <>
+                  <h3 style={{fontSize:16,fontWeight:800,marginBottom:14}}>🏷️ Label QR Siap Dicetak</h3>
+                  {(() => {
+                    const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(qrResult.id)}`;
+                    const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(scanUrl)}`;
+                    return (
+                      <div style={{border:`3px solid ${C.accent}`,borderRadius:10,padding:16,background:"white",textAlign:"center",marginBottom:14}}>
+                        <img src={qrImgUrl} alt="QR" width={160} height={160} style={{display:"block",margin:"0 auto"}}/>
+                        <div style={{fontSize:13,fontWeight:800,marginTop:10}}>{qrResult.name}</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:4}}>Kode: {qrResult.katalog}</div>
+                        <span style={{display:"inline-block",marginTop:8,padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:700,background:"#dbeafe",color:"#1e40af"}}>Non-Stock — Pending Approval</span>
+                      </div>
+                    );
+                  })()}
+                  <div style={{fontSize:11,color:C.muted,textAlign:"center",marginBottom:16}}>
+                    Screenshot/print gambar QR di atas, tempel ke barang fisik sekarang juga.
+                  </div>
+                  <button style={{...sty.btn("primary"),width:"100%",marginBottom:8}} onClick={()=>{ setTambahModal(false); setQrResult(null); }}>
+                    ➡️ Lanjut ke Material Berikutnya
+                  </button>
+                  <button style={{...sty.btn("ghost"),width:"100%"}} onClick={()=>setQrResult(null)}>← Lihat Ulang Form</button>
+                </>
+              ) : (
+                <>
+                  <h3 style={{fontSize:16,fontWeight:800,marginBottom:14}}>➕ Tambah Material Ditemukan</h3>
+                  <div style={{marginBottom:10}}>
+                    <label style={sty.label}>Nama Material *</label>
+                    <input style={sty.input} value={tambahForm.nama} onChange={e=>{setTambahForm(f=>({...f,nama:e.target.value})); searchMaraForOpname(e.target.value);}} placeholder="Ketik nama, sistem cari otomatis ke MARA..."/>
+                  </div>
+                  {maraLoading && <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Mencari ke MARA...</div>}
+                  {!maraPicked && maraResults.length>0 && (
+                    <div style={{border:`1px solid ${C.border}`,borderRadius:8,marginBottom:10,maxHeight:160,overflowY:"auto"}}>
+                      {maraResults.map(r=>(
+                        <div key={r.kode_material} onClick={()=>{setMaraPicked(r); setMaraResults([]); setMaraSkip(false);}}
+                          style={{padding:"6px 8px",fontSize:11,borderBottom:`1px solid ${C.border}`,cursor:"pointer"}}>
+                          <b>{r.kode_material}</b> — {r.nama} ({r.satuan})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {maraPicked ? (
+                    <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:10,marginBottom:10,fontSize:11}}>
+                      ✅ Dipilih: <b>{maraPicked.kode_material}</b> — {maraPicked.nama}
+                      <button style={{...sty.btn("ghost","sm"),marginLeft:8}} onClick={()=>setMaraPicked(null)}>Ganti</button>
+                    </div>
+                  ) : (
+                    <button style={{...sty.btn(maraSkip?"primary":"ghost","sm"),width:"100%",marginBottom:10}} onClick={()=>setMaraSkip(true)}>
+                      ⏭️ Tidak ada di MARA / lewati dulu (kode sementara dibuat otomatis)
+                    </button>
+                  )}
+                  {!maraPicked && (
+                    <div style={{marginBottom:10}}>
+                      <label style={sty.label}>Satuan {maraSkip?"*":""}</label>
+                      <input style={sty.input} value={tambahForm.satuan} onChange={e=>setTambahForm(f=>({...f,satuan:e.target.value}))} placeholder="cth: BH, M, SET"/>
+                    </div>
+                  )}
+                  <div style={{marginBottom:10}}>
+                    <label style={sty.label}>Qty Fisik *</label>
+                    <input type="number" inputMode="decimal" min="0" style={sty.input} value={tambahForm.qty} onChange={e=>setTambahForm(f=>({...f,qty:e.target.value}))}/>
+                  </div>
+                  <div style={{marginBottom:10}}>
+                    <label style={sty.label}>Gudang *</label>
+                    <select style={sty.select} value={tambahForm.gudangId} onChange={e=>setTambahForm(f=>({...f,gudangId:e.target.value,lokasiId:""}))}>
+                      <option value="">-- Pilih Gudang --</option>
+                      {(gudangList||[]).map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:10}}>
+                    <label style={sty.label}>Blok Lokasi *</label>
+                    <select style={sty.select} value={tambahForm.lokasiId} onChange={e=>setTambahForm(f=>({...f,lokasiId:e.target.value}))} disabled={!tambahForm.gudangId}>
+                      <option value="">-- Pilih Blok --</option>
+                      {(lokasiList||[]).filter(l=>l.gudangId===tambahForm.gudangId).map(l=><option key={l.id} value={l.id}>{l.kode}</option>)}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={sty.label}>📷 Foto Barang</label>
+                    <label style={{...sty.btn("ghost"),display:"block",textAlign:"center",cursor:"pointer"}}>
+                      {tambahForm.foto ? "✅ Foto sudah diambil (tap untuk ganti)" : "📷 Ambil Foto"}
+                      <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
+                        onChange={e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setTambahForm(fm=>({...fm,foto:ev.target.result})); r.readAsDataURL(f); }}/>
+                    </label>
+                    {tambahForm.foto && <img src={tambahForm.foto} alt="preview" style={{width:"100%",maxHeight:160,objectFit:"cover",borderRadius:8,marginTop:8}}/>}
+                  </div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setTambahModal(false)} disabled={tambahBusy}>Batal</button>
+                    <button style={{...sty.btn("primary"),flex:2,opacity:tambahBusy?0.6:1}} onClick={submitTambahMaterial} disabled={tambahBusy}>{tambahBusy?"Menyimpan...":"💾 Simpan & Lihat QR"}</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
