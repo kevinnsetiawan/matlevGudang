@@ -11166,8 +11166,11 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                 diisi ulang saat itu), file cuma pre-fill nama & kandidat kode MARA-nya. */}
             {tambahQueue.length>0 && (
               <div style={{...sty.card,marginBottom:14,padding:12}}>
-                <div style={{fontSize:12,fontWeight:800,marginBottom:8}}>
-                  📋 Antrian dari File ({tambahQueue.filter(q=>q.status==="DONE").length}/{tambahQueue.length} diproses)
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:12,fontWeight:800}}>
+                    📋 Antrian dari File ({tambahQueue.filter(q=>q.status==="DONE").length}/{tambahQueue.length} diproses)
+                  </div>
+                  <button title="Batalkan & tutup antrian ini" style={sty.btn("ghost","sm")} onClick={()=>{ if(window.confirm("Batalkan antrian ini? Baris yang belum diproses akan hilang dari daftar (material yang sudah tersimpan TIDAK ikut terhapus).")) setTambahQueue([]); }}>✕ Batal</button>
                 </div>
                 <div style={{fontSize:10,color:C.muted,marginBottom:10}}>
                   Qty di file ini data lama (AppSheet) — bukan angka final. Tetap wajib dihitung fisik ulang & isi lokasi tiap kali diproses.
