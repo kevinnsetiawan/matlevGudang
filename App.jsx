@@ -6169,6 +6169,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 gudangList={gudangList}
                 lokasiList={lokasiList}
                 addNonStockFoundItem={addNonStockFoundItem}
+                isMobile={isMobile}
               />
             ) : (
               <StockCountTab
@@ -6727,8 +6728,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}} onClick={e=>e.stopPropagation()}>
                             {hasRole(currentUser, "ADMIN") && (<>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openAddUPT(uit.id)}>+ UPT</button>
-                              <button style={sty.btn("ghost","sm")} onClick={()=>openEditUIT(uit)}>✏️</button>
-                              <button style={sty.btn("danger","sm")} onClick={()=>deleteUIT(uit.id)}>🗑️</button>
+                              <button title="Edit" style={sty.btn("ghost","sm")} onClick={()=>openEditUIT(uit)}>✏️</button>
+                              <button title="Hapus" style={sty.btn("danger","sm")} onClick={()=>deleteUIT(uit.id)}>🗑️</button>
                             </>)}
                             <span onClick={toggleUit} style={{fontSize:14,color:C.muted,transition:"transform 0.15s",transform:isOpen?"rotate(90deg)":"rotate(0deg)",display:"inline-block",marginLeft:4,cursor:"pointer"}}>▶</span>
                           </div>
@@ -6757,8 +6758,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                           {hasRole(currentUser, "ADMIN") && (
                                             <div style={{display:"flex",gap:4,flexShrink:0}}>
                                               <button style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openAddULTG(upt.id)}>+ ULTG</button>
-                                              <button style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openEditUPT(upt)}>✏️</button>
-                                              <button style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={()=>deleteUPT(upt.id)}>🗑️</button>
+                                              <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openEditUPT(upt)}>✏️</button>
+                                              <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={()=>deleteUPT(upt.id)}>🗑️</button>
                                             </div>
                                           )}
                                         </div>
@@ -6769,8 +6770,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                                 <span>🏘️ <b>{ultg.kode}</b> {ultg.nama}</span>
                                                 {hasRole(currentUser, "ADMIN") && (
                                                   <span style={{display:"flex",gap:2,marginLeft:2}}>
-                                                    <button style={{...sty.btn("ghost","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>openEditULTG(ultg)}>✏️</button>
-                                                    <button style={{...sty.btn("danger","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>deleteULTG(ultg.id)}>🗑️</button>
+                                                    <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>openEditULTG(ultg)}>✏️</button>
+                                                    <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>deleteULTG(ultg.id)}>🗑️</button>
                                                   </span>
                                                 )}
                                               </div>
@@ -6815,7 +6816,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           {hasRole(currentUser, "ADMIN") && (
                             <div style={{display:"flex",gap:6}} onClick={e=>e.stopPropagation()}>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openEditGudang(g)}>✏️ Edit</button>
-                              <button style={sty.btn("danger","sm")} onClick={()=>deleteGudang(g.id)}>🗑️</button>
+                              <button title="Hapus" style={sty.btn("danger","sm")} onClick={()=>deleteGudang(g.id)}>🗑️</button>
                             </div>
                           )}
                           <span style={{fontSize:14,color:C.muted,transition:"transform 0.15s",transform:isExpanded?"rotate(90deg)":"rotate(0deg)",display:"inline-block"}}>▶</span>
@@ -6955,7 +6956,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                           </div>
                                           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                                             <span style={{fontSize:11,color:n>0?C.accent:C.muted,fontWeight:700}}>{n} item</span>
-                                            {hasRole(currentUser, "ADMIN") && <button style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
+                                            {hasRole(currentUser, "ADMIN") && <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
                                           </div>
                                         </div>
                                       );
@@ -7634,7 +7635,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* STOCK MODAL (Data Stok = junction of Katalog x Lokasi) */}
       {stockModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:520,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{stockModal==="edit"?"Edit Data Stok":"Tambah Data Stok Baru"}</h3>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div style={{gridColumn:"1/-1"}}>
@@ -7700,7 +7701,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* MASTER KATALOG MODAL */}
       {katalogModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:460,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:460,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{katalogModal==="edit"?"Edit Master Katalog":"Tambah Katalog Barang Baru"}</h3>
             {/* MARA Referensi Search */}
             <div style={{marginBottom:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:12}}>
@@ -7769,7 +7770,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* USULAN BLOK DARI DENAH — popup terpusat, supaya tidak perlu scroll naik-turun ke peta */}
       {hasRole(currentUser, "ADMIN") && ocrSuggestGudangId && ocrSuggestions.length>0 && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100}}>
-          <div style={{...sty.card,width:520,maxHeight:"85vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"85vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>📋 Usulan Blok dari Denah {ocrSuggestSubGudangId?"(Sub Gudang)":"(Gudang)"} ({ocrSuggestions.length})</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>Lengkapi data tiap usulan, lalu konfirmasi untuk mengirim ke approval TL.</p>
             <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
@@ -7815,7 +7816,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* MASTER LOKASI MODAL */}
       {lokasiModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:420}}>
+          <div style={{...sty.card,width:420,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{lokasiModal==="edit"?"Edit Master Lokasi":"Tambah Lokasi Gudang Baru"}</h3>
             {gudangList.length===0 ? (
               <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"10px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Belum ada Master Gudang. Tambahkan Gudang dulu di menu "Master Data" → "Master Gudang" sebelum bisa mengisi Blok — data harus berjenjang: Gudang dulu, baru Blok.</div>
@@ -7852,7 +7853,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* SATPAM MODAL */}
       {satpamModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:400}}>
+          <div style={{...sty.card,width:400,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{satpamModal==="edit"?"Edit Satpam":"Tambah Satpam Baru"}</h3>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Nama Satpam</label>
@@ -7873,7 +7874,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* TIM MUTU MODAL — edit anggota paket tetap (tidak bisa tambah/hapus paket) */}
       {timMutuModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:420}}>
+          <div style={{...sty.card,width:420,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Edit {timMutuForm.label}</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>Paket tim ini tetap (tidak bisa diganti namanya) — hanya anggotanya yang bisa diedit.</p>
             <div style={{marginBottom:12}}>
@@ -7952,7 +7953,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         };
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>
-            <div style={{...sty.card,width:560,maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{...sty.card,width:560,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                 <div>
                   <h3 style={{fontSize:16,fontWeight:800}}>{st.name}</h3>
@@ -7995,7 +7996,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* PETA MINI MODAL — dari card Data Stok */}
       {petaMiniDetail && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}}>
-          <div style={{...sty.card,width:560,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:560,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div>
                 <h3 style={{fontSize:16,fontWeight:800}}>📍 Lokasi di Peta Gudang</h3>
@@ -8035,7 +8036,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* GUDANG MODAL — mode "edit" satu langkah; mode "add" wizard 3 langkah (Data → Denah → Blok) */}
       {gudangModal==="edit" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:460}}>
+          <div style={{...sty.card,width:460,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>Edit Gudang</h3>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode Gudang</label><input style={sty.input} value={gudangForm.kode||""} onChange={e=>setGudangForm(f=>({...f,kode:e.target.value}))} placeholder="cth: GTK"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama Gudang</label><input style={sty.input} value={gudangForm.nama||""} onChange={e=>setGudangForm(f=>({...f,nama:e.target.value}))} placeholder="cth: Gudang Ketintang"/></div>
@@ -8062,7 +8063,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
       {gudangModal==="add" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:540,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:540,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <div style={{display:"flex",gap:6,marginBottom:18}}>
               {[1,2,3].map(n=>(
                 <div key={n} style={{flex:1,height:4,borderRadius:4,background:gudangWizardStep>=n?C.accent:C.border}}/>
@@ -8182,7 +8183,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           penulisan nama gudang di Excel bikin duplikat. */}
       {capacityReviewImportId && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:600,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:600,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>🔎 Konfirmasi Gudang Baru</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>
               {capacityReviewCandidates.length} nama Gudang di file ini tidak cocok dengan Gudang yang sudah ada.
@@ -8238,7 +8239,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* MATURITY ASSESSMENT MODAL — input manual Admin untuk Dashboard */}
       {maturityModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:460}}>
+          <div style={{...sty.card,width:460,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>🏆 Asesmen Maturity Level Baru</h3>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Level (1-5)</label>
@@ -8264,7 +8265,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
       {uitModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:440}}>
+          <div style={{...sty.card,width:440,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{uitModal==="edit"?"Edit UIT":"Tambah UIT Baru"}</h3>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode UIT</label><input style={sty.input} value={uitForm.kode||""} onChange={e=>setUitForm(f=>({...f,kode:e.target.value}))} placeholder="cth: UIT-JBM"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama Lengkap UIT</label><input style={sty.input} value={uitForm.nama||""} onChange={e=>setUitForm(f=>({...f,nama:e.target.value}))} placeholder="cth: PT PLN (PERSERO) UNIT INDUK TRANSMISI JAWA BAGIAN TIMUR DAN BALI"/></div>
@@ -8277,7 +8278,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* UPT MODAL */}
       {uptModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:440}}>
+          <div style={{...sty.card,width:440,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{uptModal==="edit"?"Edit UPT":"Tambah UPT Baru"}</h3>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode UPT</label><input style={sty.input} value={uptForm.kode||""} onChange={e=>setUptForm(f=>({...f,kode:e.target.value}))} placeholder="cth: UPT-MLG"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama UPT</label><input style={sty.input} value={uptForm.nama||""} onChange={e=>setUptForm(f=>({...f,nama:e.target.value}))} placeholder="cth: UPT Malang"/></div>
@@ -8297,7 +8298,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* ULTG MODAL */}
       {ultgModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:440}}>
+          <div style={{...sty.card,width:440,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{ultgModal==="edit"?"Edit ULTG":"Tambah ULTG Baru"}</h3>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode ULTG</label><input style={sty.input} value={ultgForm.kode||""} onChange={e=>setUltgForm(f=>({...f,kode:e.target.value}))} placeholder="cth: ULTG-SBU"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama ULTG</label><input style={sty.input} value={ultgForm.nama||""} onChange={e=>setUltgForm(f=>({...f,nama:e.target.value}))} placeholder="cth: ULTG Surabaya Utara"/></div>
@@ -8316,7 +8317,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* KELOLA AKUN MODAL — daftarkan user baru (ADMIN only) */}
       {akunModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:460}}>
+          <div style={{...sty.card,width:460,maxWidth:"100%"}}>
             {akunResult ? (
               <>
                 <h3 style={{fontSize:18,fontWeight:800,marginBottom:14}}>✅ Akun Berhasil Didaftarkan</h3>
@@ -8425,7 +8426,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* GANTI PASSWORD MODAL — self-service, semua role, akun sendiri */}
       {gantiPasswordModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{...sty.card,width:400}}>
+          <div style={{...sty.card,width:400,maxWidth:"100%"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>🔑 Ganti Password</h3>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Password Lama</label>
@@ -8450,7 +8451,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* TXN MODAL - TUG5 FORM */}
       {txnModal && txnForm && txnForm.docType==="TUG5" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:700,maxHeight:"92vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-5 — Daftar Permintaan Barang</h3>
               <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-5/...</span>
@@ -8590,7 +8591,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* TXN MODAL - TUG9 / TUG8 FORM (outgoing material) */}
       {txnModal && txnForm && (txnForm.docType==="TUG9" || txnForm.docType==="TUG8") && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:680,maxHeight:"92vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:680,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <h3 style={{fontSize:18,fontWeight:800}}>Formulir {txnForm.docType.replace("TUG","TUG-")} — {txnForm.docType==="TUG9"?"Bon Pemakaian":"Pemakaian Unit Lain"}</h3>
               <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.{txnForm.docType.replace("TUG","TUG-")}/...</span>
@@ -8720,7 +8721,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* TXN MODAL - TUG10 FORM (incoming material / return to warehouse) */}
       {txnModal && txnForm && txnForm.docType==="TUG10" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:700,maxHeight:"92vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-10 — Bon Pengembalian</h3>
               <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-10/...</span>
@@ -8848,7 +8849,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {/* TXN MODAL - TUG3 FORM (Karantina — penerimaan barang tahap 1) */}
       {txnModal && txnForm && txnForm.docType==="TUG3" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:700,maxHeight:"92vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-3 Karantina — Bon Penerimaan</h3>
               <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-3/...</span>
@@ -9591,7 +9592,7 @@ function KPISaldoCards({ stocks, C, sty }) {
   ];
 
   return (
-    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
       {cards.map((c,i)=>(
         <div key={i} style={{...sty.card,borderLeft:`4px solid ${c.color}`,background:c.bg,padding:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -9778,7 +9779,7 @@ function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty
       </div>
 
       {/* Kategori alat dengan icon */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(90px,1fr))",gap:8,marginBottom:12}}>
         {catBreakdown.map(c=>(
           <div key={c.key} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 8px",background:"#f0f9ff",border:`1px solid #bae6fd`,borderRadius:10}}>
             <span style={{color:C.accent}}>{catIcons[c.key]}</span>
@@ -9853,7 +9854,7 @@ function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedata
         <h1 style={{fontSize:22,fontWeight:900}}>Dashboard Gudang</h1>
         <p style={{color:C.muted,fontSize:13}}>{WAREHOUSE} • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14,marginBottom:20}}>
         {kpiCards.map((s,i)=>(
           <div key={i} style={{...sty.card,borderLeft:`4px solid ${s.color}`,cursor:"pointer"}} onClick={()=>setDashModal(s.key)} title="Klik untuk lihat ringkasan">
             <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -9932,7 +9933,7 @@ function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedata
       {/* ── POPUP RINGKASAN KPI ── */}
       {dashModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>setDashModal(null)}>
-          <div style={{...sty.card,width:480,maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <h3 style={{fontSize:15,fontWeight:800}}>
                 {dashModal==="totalItem"&&"📦 Ringkasan Total Item"}
@@ -10020,7 +10021,7 @@ function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganList, myPe
       </div>
 
       {/* KPI Row */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
         {[
           {label:"Total Nilai Inventori",val:fmtRp(nilaiTotal),icon:"💰",color:"#16a34a"},
           {label:"Total Item Stok",val:stocks.length,icon:"📦",color:C.accent},
@@ -10122,7 +10123,7 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
       </div>
 
       {/* KPI Row */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
         {[
           {label:"Total Item Stok",val:stocks.length,icon:"📦",color:C.accent},
           {label:"Stok Kritis",val:stokKritis.length,icon:"🔴",color:stokKritis.length>0?"#dc2626":"#16a34a"},
@@ -10410,7 +10411,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
           </div>
           {/* Input */}
           <div style={{display:"flex",gap:8}}>
-            <button style={{...sty.btn("ghost","sm"),flexShrink:0}} onClick={()=>setChatHistory([{role:"ai",text:`Halo! Ada yang bisa saya bantu tentang data gudang ${WAREHOUSE}?`}])}>🗑️</button>
+            <button title="Bersihkan riwayat chat" style={{...sty.btn("ghost","sm"),flexShrink:0}} onClick={()=>setChatHistory([{role:"ai",text:`Halo! Ada yang bisa saya bantu tentang data gudang ${WAREHOUSE}?`}])}>🗑️</button>
             <input style={{...sty.input,flex:1}}
               placeholder="Tanya AI tentang stok, forecast, atau analisa gudang... (Enter untuk kirim)"
               value={chatInput}
@@ -10818,7 +10819,7 @@ function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setTopN, pe
 
 function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
   saveOpname, submitOpname, approveOpname_Asman, approveOpname_Manager, rejectOpname, deleteOpname,
-  openScanner, showToast, gudangList, lokasiList, addNonStockFoundItem }) {
+  openScanner, showToast, gudangList, lokasiList, addNonStockFoundItem, isMobile }) {
 
   const [activeTab, setActiveTab] = useState("list"); // "list"|"form-sap"|"form-nonsap"|"detail"
   const [activeOpname, setActiveOpname] = useState(null);
@@ -11113,7 +11114,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
               <div style={{background:"#f1f5f9",borderRadius:6,height:8}}>
                 <div style={{width:`${prog.pct}%`,height:8,borderRadius:6,background:prog.pct===100?C.green:C.accent,transition:"width 0.3s"}}/>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginTop:10}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(80px,1fr))",gap:8,marginTop:10}}>
                 {[
                   {label:"Total Item",val:items.length,color:C.accent},
                   {label:"Sesuai",val:items.filter(i=>i.statusItem==="SESUAI").length,color:C.green},
@@ -11159,11 +11160,11 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead>
                   <tr style={{background:"#003087",color:"white"}}>
-                    <th style={{padding:"7px 8px",textAlign:"center",width:36}}>No</th>
+                    {!isMobile && <th style={{padding:"7px 8px",textAlign:"center",width:36}}>No</th>}
                     <th style={{padding:"7px 8px",textAlign:"left"}}>Nama Barang</th>
-                    <th style={{padding:"7px 8px",textAlign:"center"}}>No Katalog</th>
+                    {!isMobile && <th style={{padding:"7px 8px",textAlign:"center"}}>No Katalog</th>}
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Sat</th>
-                    <th style={{padding:"7px 8px",textAlign:"center"}}>Qty Sistem</th>
+                    {!isMobile && <th style={{padding:"7px 8px",textAlign:"center"}}>Qty Sistem</th>}
                     {isSAP && <th style={{padding:"7px 8px",textAlign:"center"}}>Qty SAP</th>}
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Qty Fisik</th>
                     <th style={{padding:"7px 8px",textAlign:"center"}}>Selisih</th>
@@ -11190,8 +11191,8 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                     const itemGudangId = lokasiList?.find(l=>l.id===item.lokasiId)?.gudangId || "";
                     return (
                       <tr key={realIdx} style={{borderBottom:`1px solid ${C.border}`,background:rowBg,outline:isHighlighted?`2px solid #3b82f6`:"none"}}>
-                        <td style={{padding:"6px 8px",textAlign:"center",color:C.muted,fontSize:10}}>{realIdx+1}</td>
-                        <td style={{padding:"6px 8px",fontWeight:600,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {!isMobile && <td style={{padding:"6px 8px",textAlign:"center",color:C.muted,fontSize:10}}>{realIdx+1}</td>}
+                        <td style={{padding:"6px 8px",fontWeight:600,maxWidth:isMobile?120:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                           {item.namaBarang}
                           {item.statusItem==="TIDAK_ADA_DI_SISTEM" && (
                             <div style={{fontSize:9,fontWeight:700,color:"#92400e",whiteSpace:"normal"}}>🆕 Material baru — akan dibuatkan Master Katalog + Data Stok saat sesi ini disetujui Manager (kalau qty fisik diisi &gt;0)</div>
@@ -11200,9 +11201,9 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                             <div style={{fontSize:9,fontWeight:700,color:"#1e40af",whiteSpace:"normal"}}>🆕 Ditemukan saat opname — sudah aktif sebagai "Pending Approval", dikonfirmasi penuh saat Manager approve sesi ini.{item.belumDicocokkanMara && " ⚠️ Belum dicocokkan ke MARA."}</div>
                           )}
                         </td>
-                        <td style={{padding:"6px 8px",textAlign:"center",fontFamily:"monospace",fontSize:10}}>{item.noKatalog}</td>
+                        {!isMobile && <td style={{padding:"6px 8px",textAlign:"center",fontFamily:"monospace",fontSize:10}}>{item.noKatalog}</td>}
                         <td style={{padding:"6px 8px",textAlign:"center"}}>{item.satuan}</td>
-                        <td style={{padding:"6px 8px",textAlign:"center",fontWeight:600}}>{fmtNum(item.qtySistem)}</td>
+                        {!isMobile && <td style={{padding:"6px 8px",textAlign:"center",fontWeight:600}}>{fmtNum(item.qtySistem)}</td>}
                         {isSAP && <td style={{padding:"6px 8px",textAlign:"center",color:item.qtySAP!=null?C.text:"#9ca3af"}}>{item.qtySAP!=null?fmtNum(item.qtySAP):"—"}</td>}
                         <td style={{padding:"4px 6px",textAlign:"center"}}>
                           {!isReadOnly
@@ -11340,7 +11341,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
             cari kode MARA dulu, lalu isi qty/lokasi/foto, simpan langsung dapat QR untuk ditempel. */}
         {tambahModal && (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:12}}>
-            <div style={{...sty.card,width:420,maxHeight:"92vh",overflowY:"auto"}}>
+            <div style={{...sty.card,width:420,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
               {qrResult ? (
                 <>
                   <h3 style={{fontSize:16,fontWeight:800,marginBottom:14}}>🏷️ Label QR Siap Dicetak</h3>
@@ -11516,7 +11517,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                   🔍 {opn.status==="DRAFT"?"Edit":"Lihat Detail"}
                 </button>
                 {opn.status==="SELESAI" && <button style={sty.btn("ghost","sm")} onClick={()=>downloadBeritaAcara(opn)}>📄 Berita Acara</button>}
-                {opn.status==="DRAFT" && hasRole(currentUser, "ADMIN","TL") && <button style={sty.btn("danger","sm")} onClick={()=>deleteOpname(opn.id)}>🗑️</button>}
+                {opn.status==="DRAFT" && hasRole(currentUser, "ADMIN","TL") && <button title="Hapus sesi opname" style={sty.btn("danger","sm")} onClick={()=>deleteOpname(opn.id)}>🗑️</button>}
               </div>
             </div>
           );
@@ -11886,7 +11887,7 @@ function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, sty, C, s
                   📅 Serah Terima: {r.tanggalSerahTerima||"-"} {isLate && "⚠️ TERLAMBAT"}
                 </div>
               </div>
-              {canEdit && <button style={{...sty.btn("danger","sm")}} onClick={()=>deleteRencana(r.id)}>🗑️</button>}
+              {canEdit && <button title="Hapus" style={{...sty.btn("danger","sm")}} onClick={()=>deleteRencana(r.id)}>🗑️</button>}
             </div>
             <div style={{background:"#f9fafb",borderRadius:8,padding:8}}>
               {(r.items||[]).map((item,i)=>{
@@ -15591,7 +15592,7 @@ function KartuGantungModal({ katalog, stocks, txns, lokasiList, sty, C, onClose 
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}}>
-      <div style={{...sty.card,width:560,maxHeight:"92vh",overflowY:"auto"}}>
+      <div style={{...sty.card,width:560,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
           <div>
             <h3 style={{fontSize:17,fontWeight:800}}>🏷️ Kartu Gantung Digital — TUG.2</h3>
@@ -15915,7 +15916,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       {/* TUG-7 lengkapi modal */}
       {tug7Modal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}}>
-          <div style={{...sty.card,width:480,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Lengkapi TUG-7</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>Pilih UPT Pengirim dan lengkapi administrasi.</p>
             <div style={{marginBottom:12}}>
@@ -16072,7 +16073,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       {/* TUG-4 FORM MODAL */}
       {tug4Modal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:480,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Formulir TUG-4 — Pemeriksaan Mutu</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>untuk {tug4Modal.docNumbers.tug3}</p>
             <div style={{marginBottom:12}}>
@@ -16101,7 +16102,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       {/* TUG-3 FINAL LAMPIRAN MODAL */}
       {finalModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:500,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:500,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Lampiran Final TUG-3</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>untuk {finalModal.docNumbers.tug3}</p>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
@@ -16426,7 +16427,7 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
       {/* TUG-7 lengkapi modal */}
       {tug7Modal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}}>
-          <div style={{...sty.card,width:480,maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
             <h3 style={{fontSize:17,fontWeight:800,marginBottom:6}}>Lengkapi TUG-7</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:14}}>Pilih UPT Pengirim dan lengkapi administrasi.</p>
             <div style={{marginBottom:12}}>
