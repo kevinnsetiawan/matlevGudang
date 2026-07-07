@@ -253,8 +253,10 @@ drop policy if exists "Authenticated read profiles" on profiles;
 create policy "Authenticated read profiles" on profiles for select using (auth.role() = 'authenticated');
 -- SENGAJA tidak ada policy insert/update untuk role authenticated biasa —
 -- supaya user tidak bisa menaikkan role-nya sendiri lewat console browser.
--- Pembuatan/ubah profil Fase 1 lewat SQL manual (lihat instruksi migrasi),
--- Fase 2 nanti lewat Edge Function dengan service_role.
+-- Pembuatan/ubah profil Fase 1 lewat SQL manual (lihat instruksi migrasi).
+-- Fase 2 SUDAH SELESAI (2026-07-07): Admin bisa daftarkan akun baru langsung
+-- dari menu "Kelola Akun" di aplikasi (App.jsx), lewat Edge Function
+-- supabase/functions/admin-create-user (service_role, bypass RLS di atas).
 
 -- Trigger: begitu ada user baru terdaftar di Supabase Auth (lewat Dashboard
 -- "Add user" atau nanti Edge Function), otomatis bikin baris stub di

@@ -2446,6 +2446,10 @@ export default function PLNWarehouse() {
   const [ultgForm, setUltgForm] = useState({});
   const [uptModal, setUptModal] = useState(null);
   const [uptForm, setUptForm] = useState({});
+  const [akunModal, setAkunModal] = useState(null); // null | "add"
+  const [akunForm, setAkunForm] = useState({});
+  const [akunBusy, setAkunBusy] = useState(false);
+  const [akunResult, setAkunResult] = useState(null); // {username,password} setelah sukses daftar
   const [stockSubTab, setStockSubTab] = useState("katalog"); // "katalog" | "lokasi" | "satpam" | "timmutu" (within Master Data tab)
   const [tugGroup, setTugGroup] = useState("penerimaan");
   const [tug15Filter, setTug15Filter] = useState({
@@ -2906,6 +2910,39 @@ export default function PLNWarehouse() {
   async function handleLogout() {
     if (supabase) await supabase.auth.signOut();
     setCurrentUser(null); setUsers([]);
+  }
+
+  async function reloadUsers() {
+    if (!supabase) return;
+    const { data: allProfiles } = await supabase.from("profiles").select("*");
+    setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id })));
+  }
+
+  // Kelola Akun (ADMIN only) — daftarkan user baru lewat Edge Function
+  // admin-create-user (service_role di server, supaya sesi Admin yang lagi
+  // login tidak ketimpa jadi sesi user baru seperti kalau pakai signUp() biasa
+  // langsung dari browser).
+  function openAddAkun() {
+    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:""});
+    setAkunResult(null);
+    setAkunModal("add");
+  }
+  async function submitAkunBaru() {
+    const f = akunForm;
+    if (!f.username?.trim()) { showToast("Username wajib diisi.","error"); return; }
+    if (!f.password || f.password.length < 6) { showToast("Password minimal 6 karakter.","error"); return; }
+    if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
+    if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
+    setAkunBusy(true);
+    const { data, error } = await supabase.functions.invoke("admin-create-user", { body: {
+      username: f.username.trim().toLowerCase(), password: f.password, name: f.name.trim(),
+      role: f.role, jabatan: f.jabatan||"", uptId: f.uptId||"", ultgId: f.ultgId||"",
+    }});
+    setAkunBusy(false);
+    if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal mendaftarkan akun.","error"); return; }
+    setAkunResult({username: f.username.trim().toLowerCase(), password: f.password});
+    await reloadUsers();
+    showToast("✅ Akun berhasil didaftarkan!");
   }
 
   // Pulihkan sesi Supabase Auth yang tersimpan saat app dibuka (reload, buka
@@ -3951,7 +3988,11 @@ export default function PLNWarehouse() {
   }
   async function submitOpname(opn) {
     const updated = {...opn, status:"PENDING_ASMAN", submittedAt:Date.now()};
-    const nl = opnameList.map(o=>o.id===opn.id?updated:o);
+    // Sesi baru yang langsung di-submit tanpa pernah "Simpan Draft" dulu belum ada di
+    // opnameList sama sekali (startOpname cuma setActiveOpname, tidak append ke list) —
+    // pakai pola exists?map:append sama seperti saveOpname, supaya tidak silently dropped.
+    const exists = opnameList.find(o=>o.id===opn.id);
+    const nl = exists ? opnameList.map(o=>o.id===opn.id?updated:o) : [...opnameList, updated];
     setOpnameList(nl);
     await saveToCloud({opnameList: nl});
     showToast("📋 Opname disubmit! Menunggu approval Asman.");
@@ -4028,6 +4069,10 @@ export default function PLNWarehouse() {
     const nl = opnameList.map(o=>o.id===opn.id?updated:o);
     setOpnameList(nl); setStocks(newStocks); setKatalogList(newKatalogList);
     await saveToCloud({opnameList: nl, stocks: newStocks, katalogList: newKatalogList});
+    // Ditemukan 2026-07-07: approve/reject Opname tidak pernah lapor ke logApprovalHistory
+    // (beda dari semua jenis approval lain — Lokasi, Stock Move/Edit/Delete, Alat Berat,
+    // Stock Count), jadi keputusannya tidak pernah muncul di "Riwayat Approval" terpusat.
+    await logApprovalHistory({type:"OPNAME", decision:"APPROVED", title:`Stock Opname ${opn.semester} (${opn.jenisAlur})`, requestedBy:opn.dibuatOleh, requestedAt:opn.dibuatAt});
     let msg = "✅ Stock Opname SELESAI! Data Stok disesuaikan.";
     if (materialBaruDibuat.length) msg += ` ${materialBaruDibuat.length} material baru ditambahkan ke Master Katalog.`;
     if (materialBaruKonflik.length) msg += ` ⚠️ ${materialBaruKonflik.length} material baru TIDAK ditambahkan (bentrok No. Katalog): ${materialBaruKonflik.slice(0,2).join("; ")}${materialBaruKonflik.length>2?"...":""}.`;
@@ -4037,6 +4082,7 @@ export default function PLNWarehouse() {
     const updated = {...opn, status:"DITOLAK", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason};
     const nl = opnameList.map(o=>o.id===opn.id?updated:o);
     setOpnameList(nl); await saveToCloud({opnameList: nl});
+    await logApprovalHistory({type:"OPNAME", decision:"REJECTED", title:`Stock Opname ${opn.semester} (${opn.jenisAlur})`, requestedBy:opn.dibuatOleh, requestedAt:opn.dibuatAt});
     showToast("❌ Opname ditolak.", "error");
   }
   async function deleteOpname(id) {
@@ -5673,7 +5719,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         {id:"timmutu",icon:"👥",label:"Tim Mutu"},
                         {id:"organisasi",icon:"🏢",label:"Struktur Organisasi"},
                         {id:"gudang",icon:"🏭",label:"Master Gudang"},
-        ...(currentUser.role==="ADMIN" ? [{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
+        ...(currentUser.role==="ADMIN" ? [{id:"akun",icon:"👤",label:"Kelola Akun"},{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (
@@ -6235,16 +6281,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div>
                 <h1 style={{fontSize:22,fontWeight:900}}>
-                  {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi (UIT / UPT / ULTG)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
+                  {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi (UIT / UPT / ULTG)":stockSubTab==="akun"?"👤 Kelola Akun (User)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
                 </h1>
                 <p style={{color:C.muted,fontSize:13}}>
-                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </p>
               </div>
               {currentUser.role==="ADMIN" && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
               {currentUser.role==="ADMIN" && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
+              {currentUser.role==="ADMIN" && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
             </div>
             {stockSubTab==="gudang" && (
               <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
@@ -6844,6 +6891,40 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
 
+            {/* ── SUB-TAB: KELOLA AKUN (ADMIN only) ── */}
+            {stockSubTab==="akun" && currentUser.role==="ADMIN" && (
+              <div style={sty.card}>
+                {users.length===0 ? (
+                  <div style={{textAlign:"center",color:C.muted,padding:30}}>Belum ada akun terdaftar.</div>
+                ) : (
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead>
+                      <tr style={{borderBottom:`2px solid ${C.border}`,textAlign:"left"}}>
+                        <th style={{padding:"8px 6px"}}>Nama</th>
+                        <th style={{padding:"8px 6px"}}>Username</th>
+                        <th style={{padding:"8px 6px"}}>Role</th>
+                        <th style={{padding:"8px 6px"}}>Jabatan</th>
+                        <th style={{padding:"8px 6px"}}>UPT</th>
+                        <th style={{padding:"8px 6px"}}>ULTG</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map(u=>(
+                        <tr key={u.id} style={{borderBottom:`1px solid ${C.border}`}}>
+                          <td style={{padding:"8px 6px",fontWeight:700}}>{u.name}</td>
+                          <td style={{padding:"8px 6px",color:C.muted}}>{u.username}</td>
+                          <td style={{padding:"8px 6px"}}>{ROLES[u.role]||u.role}</td>
+                          <td style={{padding:"8px 6px",color:C.muted}}>{u.jabatan||"-"}</td>
+                          <td style={{padding:"8px 6px",color:C.muted}}>{uptList.find(p=>p.id===u.uptId)?.nama||"-"}</td>
+                          <td style={{padding:"8px 6px",color:C.muted}}>{ultgList.find(g=>g.id===u.ultgId)?.nama||"-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
             {/* ── SUB-TAB: MIGRASI DATA (ADMIN only) ── */}
             {stockSubTab==="migrasi" && currentUser.role==="ADMIN" && (
               <MigrasiDataTab
@@ -7282,8 +7363,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               }));
               const combinedAll = [...approvalHistoryList, ...histTUG].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
               const combined = combinedAll.slice((approvalHistoryPage-1)*approvalPageSize, approvalHistoryPage*approvalPageSize);
-              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG"};
-              const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];
+              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname"};
+              const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","OPNAME","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];
               const groupsByType = typeOrder
                 .map(type=>({ type, items: combined.filter(h=>h.type===type) }))
                 .filter(g=>g.items.length>0);
@@ -8057,6 +8138,63 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </select>
             </div>
             <div style={{display:"flex",gap:10}}><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setUltgModal(null)}>Batal</button><button style={{...sty.btn("primary"),flex:2}} onClick={saveULTG}>💾 Simpan</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* KELOLA AKUN MODAL — daftarkan user baru (ADMIN only) */}
+      {akunModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+          <div style={{...sty.card,width:460}}>
+            {akunResult ? (
+              <>
+                <h3 style={{fontSize:18,fontWeight:800,marginBottom:14}}>✅ Akun Berhasil Didaftarkan</h3>
+                <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:14,marginBottom:14,fontSize:13}}>
+                  <div style={{marginBottom:6}}><b>Username:</b> {akunResult.username}</div>
+                  <div><b>Password:</b> {akunResult.password}</div>
+                </div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:16}}>⚠️ Sampaikan kredensial ini ke pemilik akun secara aman. Password ini tidak akan ditampilkan lagi setelah ditutup.</div>
+                <button style={{...sty.btn("primary"),width:"100%"}} onClick={()=>{setAkunModal(null);setAkunResult(null);}}>Selesai</button>
+              </>
+            ) : (
+              <>
+                <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>Daftarkan Akun Baru</h3>
+                <div style={{marginBottom:12}}><label style={sty.label}>Username</label><input style={sty.input} value={akunForm.username||""} onChange={e=>setAkunForm(f=>({...f,username:e.target.value}))} placeholder="cth: budi.manager (huruf kecil, tanpa spasi)"/></div>
+                <div style={{marginBottom:12}}>
+                  <label style={sty.label}>Password</label>
+                  <div style={{display:"flex",gap:6}}>
+                    <input style={sty.input} value={akunForm.password||""} onChange={e=>setAkunForm(f=>({...f,password:e.target.value}))} placeholder="minimal 6 karakter"/>
+                    <button style={sty.btn("ghost","sm")} onClick={()=>setAkunForm(f=>({...f,password:Math.random().toString(36).slice(-5)+Math.random().toString(36).slice(-5)}))}>🎲 Acak</button>
+                  </div>
+                </div>
+                <div style={{marginBottom:12}}><label style={sty.label}>Nama Lengkap</label><input style={sty.input} value={akunForm.name||""} onChange={e=>setAkunForm(f=>({...f,name:e.target.value}))} placeholder="cth: Budi Santoso"/></div>
+                <div style={{marginBottom:12}}>
+                  <label style={sty.label}>Role</label>
+                  <select style={sty.select} value={akunForm.role||"VIEWER"} onChange={e=>setAkunForm(f=>({...f,role:e.target.value}))}>
+                    {Object.entries(ROLES).map(([id,label])=><option key={id} value={id}>{label}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:12}}><label style={sty.label}>Jabatan (opsional)</label><input style={sty.input} value={akunForm.jabatan||""} onChange={e=>setAkunForm(f=>({...f,jabatan:e.target.value}))}/></div>
+                <div style={{marginBottom:12}}>
+                  <label style={sty.label}>UPT (opsional)</label>
+                  <select style={sty.select} value={akunForm.uptId||""} onChange={e=>setAkunForm(f=>({...f,uptId:e.target.value}))}>
+                    <option value="">-- Tidak discope ke UPT tertentu --</option>
+                    {uptList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
+                  </select>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <label style={sty.label}>ULTG {(akunForm.role==="ADMIN_ULTG"||akunForm.role==="MGR_ULTG")?"*":"(opsional)"}</label>
+                  <select style={sty.select} value={akunForm.ultgId||""} onChange={e=>setAkunForm(f=>({...f,ultgId:e.target.value}))}>
+                    <option value="">-- Pilih ULTG --</option>
+                    {ultgList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
+                  </select>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setAkunModal(null)} disabled={akunBusy}>Batal</button>
+                  <button style={{...sty.btn("primary"),flex:2,opacity:akunBusy?0.6:1}} onClick={submitAkunBaru} disabled={akunBusy}>{akunBusy?"Mendaftarkan...":"💾 Daftarkan"}</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
