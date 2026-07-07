@@ -76,8 +76,17 @@ const STATUS_MATERIAL_RETUR = ["Material Sisa Baru", "Bongkaran", "Bongkaran ATT
 // Maps a return status to the resulting Jenis Barang in Data Stok (null = leave as user's manual choice)
 const STATUS_RETUR_TO_JENIS = { "Bongkaran": "Bongkaran", "Bongkaran ATTB (MTU)": "ATTB" };
 const CATEGORIES = ["Transformator", "Kabel", "Panel", "Meter", "Tools", "Safety", "Consumable", "Spare Part", "Struktur", "Isolator", "Lainnya"];
-const ROLES = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", PENGADAAN: "Tim Pengadaan", VIEWER: "Viewer", ADMIN_ULTG: "Admin ULTG", MGR_ULTG: "Manager ULTG" };
+const ROLES = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", PENGADAAN: "Tim Pengadaan", VIEWER: "Viewer", ADMIN_ULTG: "Admin ULTG", MGR_ULTG: "Manager ULTG", SUPERADMIN: "Super Admin" };
 const ULTG_ROLES = ["ADMIN_ULTG","MGR_ULTG"]; // role dengan sidebar terbatas (view-only + TUG-5 saja)
+// Kuota role per UPT untuk indikator di form Kelola Akun — validasi sebenarnya
+// (hard limit) ditegakkan server-side di admin-create-user/admin-update-user.
+const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
+// SUPERADMIN bypass semua gate role-specific (akses & approval lintas UPT/UIT/ULTG) —
+// dipakai lewat hasRole() di seluruh App.jsx, bukan dicek manual satu-satu.
+function hasRole(currentUser, ...allowedRoles) {
+  return currentUser?.role === "SUPERADMIN" || allowedRoles.includes(currentUser?.role);
+}
 const ROMAN = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
 // Who can create TUG-9 transactions
 const CAN_CREATE = ["ADMIN", "TL"];
@@ -223,6 +232,7 @@ function getUserUptScope(user) {
 }
 
 function canApproveHeavyEquipmentLoan(user, loan) {
+  if (user?.role === "SUPERADMIN") return true; // full-access, bypass scope UPT di bawah
   if (user?.role !== "ASMAN") return false;
   const userUpt = getUserUptScope(user);
   // Approval discope ke UNIT PEMINJAM (requesterUpt) — Asman UPT sendiri hanya boleh approve
@@ -2450,6 +2460,9 @@ export default function PLNWarehouse() {
   const [akunForm, setAkunForm] = useState({});
   const [akunBusy, setAkunBusy] = useState(false);
   const [akunResult, setAkunResult] = useState(null); // {username,password} setelah sukses daftar
+  const [gantiPasswordModal, setGantiPasswordModal] = useState(false);
+  const [gantiPasswordForm, setGantiPasswordForm] = useState({oldPassword:"", newPassword:"", confirmPassword:""});
+  const [gantiPasswordBusy, setGantiPasswordBusy] = useState(false);
   const [stockSubTab, setStockSubTab] = useState("katalog"); // "katalog" | "lokasi" | "satpam" | "timmutu" (within Master Data tab)
   const [tugGroup, setTugGroup] = useState("penerimaan");
   const [tug15Filter, setTug15Filter] = useState({
@@ -2915,7 +2928,7 @@ export default function PLNWarehouse() {
   async function reloadUsers() {
     if (!supabase) return;
     const { data: allProfiles } = await supabase.from("profiles").select("*");
-    setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id })));
+    setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id, uitId: p.uit_id })));
   }
 
   // Kelola Akun (ADMIN only) — daftarkan user baru lewat Edge Function
@@ -2923,26 +2936,34 @@ export default function PLNWarehouse() {
   // login tidak ketimpa jadi sesi user baru seperti kalau pakai signUp() biasa
   // langsung dari browser).
   function openAddAkun() {
-    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:""});
+    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:"", uitId:"", pengadaanScope:"UPT"});
     setAkunResult(null);
     setAkunModal("add");
   }
   function openEditAkun(u) {
-    setAkunForm({id:u.id, username:u.username, password:"", name:u.name||"", role:u.role||"VIEWER", jabatan:u.jabatan||"", uptId:u.uptId||"", ultgId:u.ultgId||""});
+    setAkunForm({id:u.id, username:u.username, password:"", name:u.name||"", role:u.role||"VIEWER", jabatan:u.jabatan||"", uptId:u.uptId||"", ultgId:u.ultgId||"", uitId:u.uitId||"", pengadaanScope:u.uitId?"UIT":"UPT"});
     setAkunResult(null);
     setAkunModal("edit");
+  }
+  // Role level-UIT (ADMIN_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT pakai
+  // uitId, bukan uptId — field-nya saling eksklusif di form (lihat render modal).
+  function isUitScopedRole(f) {
+    return ["ADMIN_UIT","MGR_LOGISTIK_UIT"].includes(f.role) || (f.role==="PENGADAAN" && f.pengadaanScope==="UIT");
   }
   async function submitAkunEdit() {
     const f = akunForm;
     if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
     if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
-    if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; }
+    const uitScoped = isUitScopedRole(f);
+    if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
+    else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
     if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
     if (f.password && f.password.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
     setAkunBusy(true);
     const { data, error } = await supabase.functions.invoke("admin-update-user", { body: {
-      userId: f.id, name: f.name.trim(), role: f.role, jabatan: f.jabatan||"", uptId: f.uptId||"", ultgId: f.ultgId||"",
-      newPassword: f.password||"",
+      userId: f.id, name: f.name.trim(), role: f.role, jabatan: f.jabatan||"",
+      uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"", uitId: uitScoped ? (f.uitId||"") : "",
+      pengadaanScope: f.pengadaanScope||"UPT", newPassword: f.password||"",
     }});
     setAkunBusy(false);
     if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal menyimpan perubahan akun.","error"); return; }
@@ -2956,18 +2977,50 @@ export default function PLNWarehouse() {
     if (!f.password || f.password.length < 6) { showToast("Password minimal 6 karakter.","error"); return; }
     if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
     if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
-    if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; }
+    const uitScoped = isUitScopedRole(f);
+    if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
+    else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
     if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
     setAkunBusy(true);
     const { data, error } = await supabase.functions.invoke("admin-create-user", { body: {
       username: f.username.trim().toLowerCase(), password: f.password, name: f.name.trim(),
-      role: f.role, jabatan: f.jabatan||"", uptId: f.uptId||"", ultgId: f.ultgId||"",
+      role: f.role, jabatan: f.jabatan||"", uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"",
+      uitId: uitScoped ? (f.uitId||"") : "", pengadaanScope: f.pengadaanScope||"UPT",
     }});
     setAkunBusy(false);
     if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal mendaftarkan akun.","error"); return; }
     setAkunResult({username: f.username.trim().toLowerCase(), password: f.password});
     await reloadUsers();
     showToast("✅ Akun berhasil didaftarkan!");
+  }
+
+  // Ganti password mandiri (semua role, akun sendiri) — re-auth pakai password
+  // lama dulu (signInWithPassword) sebelum panggil updateUser, supaya device
+  // dengan sesi aktif yang lagi dipegang orang lain tidak bisa ganti password
+  // pemilik akun tanpa tahu password lamanya.
+  function openGantiPassword() {
+    setGantiPasswordForm({oldPassword:"", newPassword:"", confirmPassword:""});
+    setGantiPasswordModal(true);
+  }
+  async function submitGantiPassword() {
+    const f = gantiPasswordForm;
+    if (!f.oldPassword) { showToast("Password lama wajib diisi.","error"); return; }
+    if (!f.newPassword || f.newPassword.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
+    if (f.newPassword !== f.confirmPassword) { showToast("Konfirmasi password baru tidak cocok.","error"); return; }
+    setGantiPasswordBusy(true);
+    const { error: reauthErr } = await supabase.auth.signInWithPassword({
+      email: usernameToAuthEmail(currentUser.username), password: f.oldPassword,
+    });
+    if (reauthErr) {
+      setGantiPasswordBusy(false);
+      showToast("Password lama salah.","error");
+      return;
+    }
+    const { error: updateErr } = await supabase.auth.updateUser({ password: f.newPassword });
+    setGantiPasswordBusy(false);
+    if (updateErr) { showToast("Gagal mengubah password: "+updateErr.message,"error"); return; }
+    setGantiPasswordModal(false);
+    showToast("✅ Password berhasil diubah!");
   }
 
   // Pulihkan sesi Supabase Auth yang tersimpan saat app dibuka (reload, buka
@@ -2984,7 +3037,7 @@ export default function PLNWarehouse() {
           await supabase.auth.signOut();
           setCurrentUser(null); setUsers([]);
         } else {
-          setCurrentUser({ id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id });
+          setCurrentUser({ id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id });
           const { data: allProfiles } = await supabase.from("profiles").select("*");
           setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id })));
         }
@@ -3131,7 +3184,7 @@ export default function PLNWarehouse() {
     if (isKodeDuplicateInGudang(lokasiForm.kode, lokasiForm.gudangId, lokasiModal==="edit"?lokasiForm.id:null)) {
       showToast(`Kode blok "${lokasiForm.kode}" sudah dipakai di gudang ini!`,"error"); return;
     }
-    const isTL = currentUser.role === "TL";
+    const isTL = hasRole(currentUser, "TL");
     let nl;
     if (lokasiModal==="edit") {
       nl = lokasiList.map(l => l.id===lokasiForm.id ? (
@@ -3251,7 +3304,7 @@ export default function PLNWarehouse() {
           <div style={{background:"#f3f4f6",borderRadius:20,height:8}}><div style={{width:`${pct}%`,background:barC,height:"100%",borderRadius:20}}/></div>
           {pct>=90 && <div style={{fontSize:10,color:C.red,marginTop:4,fontWeight:600}}>⚠️ Lokasi hampir penuh!</div>}
         </div>
-        {currentUser.role==="ADMIN" && (
+        {hasRole(currentUser, "ADMIN") && (
           <div style={{display:"flex",gap:6}}>
             <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={()=>openEditLokasi(l)} disabled={isPending}>✏️ Edit</button>
             <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>deleteLokasi(l.id)} disabled={isPending}>🗑️ Hapus</button>
@@ -3282,7 +3335,7 @@ export default function PLNWarehouse() {
     let wentToApproval = false;
     if (stockModal==="edit") {
       const original = stocks.find(s=>s.id===stockForm.id) || {};
-      const isTL = currentUser.role === "TL";
+      const isTL = hasRole(currentUser, "TL");
       const fieldsChanged = original.qty!==stockForm.qty || original.price!==stockForm.price || original.jenisBarang!==stockForm.jenisBarang;
       if (fieldsChanged && !isTL) {
         wentToApproval = true;
@@ -3735,7 +3788,7 @@ export default function PLNWarehouse() {
     if (isKodeDuplicateInGudang(wizardBlokDraft.kode, gudangForm.id, null)) {
       showToast(`Kode blok "${wizardBlokDraft.kode}" sudah dipakai di gudang ini!`,"error"); return;
     }
-    const isTL = currentUser.role === "TL";
+    const isTL = hasRole(currentUser, "TL");
     const baru = {
       id: `LOK-${uid().slice(-6)}`,
       kode: wizardBlokDraft.kode.trim(), keterangan: wizardBlokDraft.keterangan||"", kapasitas: wizardBlokDraft.kapasitas||50,
@@ -3845,7 +3898,7 @@ export default function PLNWarehouse() {
   // subGudangId non-null = usulan berasal dari denah Sub Gudang -> koordinat disimpan di
   // subMapX/subMapY (bukan mapX/mapY yang dipakai denah Gudang keseluruhan).
   async function confirmOcrSuggestions(gudangId, subGudangId=null) {
-    const isTL = currentUser.role === "TL";
+    const isTL = hasRole(currentUser, "TL");
     const checked = ocrSuggestions.filter(s => s.checked);
     if (checked.length === 0) { showToast("Tidak ada usulan yang dicentang.","error"); return; }
     if (checked.some(s => !s.kode.trim())) { showToast("Nama Area wajib diisi untuk semua usulan yang dicentang!","error"); return; }
@@ -4023,7 +4076,7 @@ export default function PLNWarehouse() {
     showToast("📋 Opname disubmit! Menunggu approval Asman.");
   }
   async function approveOpname_Asman(opn, catatan) {
-    if (currentUser.role!=="ASMAN") { showToast("Hanya Asman yang bisa approve.","error"); return; }
+    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman yang bisa approve.","error"); return; }
     const updated = {...opn, status:"PENDING_MANAGER", approvedByAsman:currentUser.id, approvedAtAsman:Date.now(), catatanAsman:catatan||""};
     const nl = opnameList.map(o=>o.id===opn.id?updated:o);
     setOpnameList(nl);
@@ -4031,7 +4084,7 @@ export default function PLNWarehouse() {
     showToast("✅ Disetujui Asman! Menunggu Manager.");
   }
   async function approveOpname_Manager(opn, catatan) {
-    if (currentUser.role!=="MANAGER") { showToast("Hanya Manager yang bisa approve.","error"); return; }
+    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa approve.","error"); return; }
     let newStocks = [...stocks];
     // Material baru dari SAP (item.katalogId null — belum ada di Master Katalog saat upload)
     // sekarang IKUT approval sesi ini (Asman->Manager), TIDAK ada approval TL terpisah (keputusan
@@ -4274,7 +4327,7 @@ export default function PLNWarehouse() {
     showToast("Foto alat disimpan.");
   }
   async function createHeavyEquipmentLoan(form) {
-    if (!["ADMIN","TL"].includes(currentUser.role)) { showToast("Hanya Admin/TL yang bisa mengajukan peminjaman alat.","error"); return; }
+    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengajukan peminjaman alat.","error"); return; }
     if (!form.equipmentId || !form.requesterUpt || !form.namaPekerjaan?.trim() || !form.tanggalAmbil || !form.tanggalKembali || !form.keperluan?.trim()) {
       showToast("Lengkapi alat, UPT peminjam, nama pekerjaan, tanggal, dan keperluan.","error"); return;
     }
@@ -4337,7 +4390,7 @@ export default function PLNWarehouse() {
   async function completeHeavyEquipmentLoan(loanId) {
     const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
     if (!loan || !["DIPINJAM","OVERDUE"].includes(getHeavyEquipmentLoanRuntimeStatus(loan))) return;
-    if (!["ADMIN","TL","ASMAN"].includes(currentUser.role)) { showToast("Role kamu tidak bisa menandai alat kembali.","error"); return; }
+    if (!hasRole(currentUser, "ADMIN","TL","ASMAN")) { showToast("Role kamu tidak bisa menandai alat kembali.","error"); return; }
     const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, status:"SELESAI", returnedBy:currentUser.id, returnedAt:Date.now() } : l);
     const nextEquipment = heavyEquipmentList.map(eq=>eq.id===loan.equipmentId ? { ...eq, availabilityStatus:"TERSEDIA", activeLoanId:null, borrowedToUpt:null, borrowedJobName:null, borrowedUntil:null } : eq);
     setHeavyEquipmentLoans(nextLoans);
@@ -4452,7 +4505,7 @@ export default function PLNWarehouse() {
       });
     } else if (docType === "TUG5") {
       setTug5ExpandedIdx(0); setTug5MaterialPage(0);
-      if (currentUser.role === "ADMIN_ULTG") {
+      if (hasRole(currentUser, "ADMIN_ULTG")) {
         // TUG-5 dari ULTG: tujuan implisit = UPT induk ULTG-nya, tidak perlu pilih UIT/jenis transfer
         setTxnForm({
           ...base,
@@ -4517,8 +4570,8 @@ export default function PLNWarehouse() {
   }
 
   async function saveTxn() {
-    const canCreateULTG = currentUser.role==="ADMIN_ULTG" && txnForm?.docType==="TUG5";
-    if (!CAN_CREATE.includes(currentUser.role) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
+    const canCreateULTG = hasRole(currentUser, "ADMIN_ULTG") && txnForm?.docType==="TUG5";
+    if (!hasRole(currentUser, ...CAN_CREATE) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
     const docType = txnForm.docType;
 
     if (docType !== "TUG3") {
@@ -4665,7 +4718,7 @@ export default function PLNWarehouse() {
       return;
     }
 
-    const requiredApprover = currentUser.role === "ADMIN" ? "TL" : "ASMAN";
+    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
     const nt = {
       id: `${docType}-` + uid().slice(-6),
       docType, docSeq: seq, docNumbers,
@@ -4697,7 +4750,7 @@ export default function PLNWarehouse() {
   // ADMIN-created  -> TL approves -> Asman auto-approved alongside
   // TL-created     -> ASMAN approves -> directly APPROVED
   async function approveTxn(txn) {
-    if (txn.requiredApprover !== currentUser.role) {
+    if (currentUser.role !== "SUPERADMIN" && txn.requiredApprover !== currentUser.role) {
       showToast(`Transaksi ini butuh approval dari ${ROLES[txn.requiredApprover]}, bukan kamu.`,"error"); return;
     }
     const isAdminCreated = txn.requiredApprover === "TL";
@@ -4761,7 +4814,7 @@ export default function PLNWarehouse() {
     }
   }
   async function rejectTxn(txn, reason) {
-    if (txn.requiredApprover !== currentUser.role) {
+    if (currentUser.role !== "SUPERADMIN" && txn.requiredApprover !== currentUser.role) {
       showToast(`Transaksi ini butuh approval dari ${ROLES[txn.requiredApprover]}, bukan kamu.`,"error"); return;
     }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
@@ -4780,7 +4833,7 @@ export default function PLNWarehouse() {
 
   // Stage 1: TL Logistik approves the TUG-3 Karantina submission
   async function approveTUG3_TL(txn) {
-    if (currentUser.role !== "TL") { showToast("Hanya TL Logistik yang bisa menyetujui TUG-3 Karantina.","error"); return; }
+    if (!hasRole(currentUser, "TL")) { showToast("Hanya TL Logistik yang bisa menyetujui TUG-3 Karantina.","error"); return; }
     if (txn.stage !== "PENDING_TL") { showToast("Transaksi ini tidak dalam tahap menunggu TL.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? { ...t, stage:"MENUNGGU_TUG4", approvedByTL:currentUser.id, approvedAtTL:Date.now(), requiredApprover:"MANAGER" } : t);
     setTxns(newTxns);
@@ -4788,7 +4841,7 @@ export default function PLNWarehouse() {
     showToast(`✅ ${txn.docNumbers.tug3} disetujui TL Logistik! Lanjut ke tahap TUG-4 (Pemeriksaan Mutu).`);
   }
   async function rejectTUG3_TL(txn, reason) {
-    if (currentUser.role !== "TL") { showToast("Hanya TL Logistik yang bisa menolak TUG-3 Karantina.","error"); return; }
+    if (!hasRole(currentUser, "TL")) { showToast("Hanya TL Logistik yang bisa menolak TUG-3 Karantina.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns);
@@ -4807,7 +4860,7 @@ export default function PLNWarehouse() {
   }
   // Stage 2b: Manager approves the TUG-4 pemeriksaan
   async function approveTUG4_Manager(txn) {
-    if (currentUser.role !== "MANAGER") { showToast("Hanya Manager yang bisa menyetujui TUG-4.","error"); return; }
+    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menyetujui TUG-4.","error"); return; }
     if (txn.stage !== "PENDING_MANAGER") { showToast("Transaksi ini tidak dalam tahap menunggu Manager.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? { ...t, stage:"MENUNGGU_FINAL", approvedByManager:currentUser.id, approvedAtManager:Date.now(), requiredApprover:"ASMAN" } : t);
     setTxns(newTxns);
@@ -4815,7 +4868,7 @@ export default function PLNWarehouse() {
     showToast(`✅ ${txn.docNumbers.tug4} disetujui Manager! Lanjut ke tahap finalisasi TUG-3.`);
   }
   async function rejectTUG4_Manager(txn, reason) {
-    if (currentUser.role !== "MANAGER") { showToast("Hanya Manager yang bisa menolak TUG-4.","error"); return; }
+    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menolak TUG-4.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns);
@@ -4832,7 +4885,7 @@ export default function PLNWarehouse() {
   }
   // Stage 3b: Asman Konstruksi approves the final receipt — THIS is when stock actually increases
   async function approveTUG3Final_Asman(txn) {
-    if (currentUser.role !== "ASMAN") { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-3 Final.","error"); return; }
+    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-3 Final.","error"); return; }
     if (txn.stage !== "PENDING_ASMAN") { showToast("Transaksi ini tidak dalam tahap menunggu Asman.","error"); return; }
 
     // Same incoming-material logic as TUG-10 approval: bump existing Data Stok
@@ -4867,7 +4920,7 @@ export default function PLNWarehouse() {
     showToast(`✅ ${txn.docNumbers.tug3} DISETUJUI FINAL! Stok bertambah ke gudang.`);
   }
   async function rejectTUG3Final_Asman(txn, reason) {
-    if (currentUser.role !== "ASMAN") { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-3 Final.","error"); return; }
+    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-3 Final.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns);
@@ -4882,7 +4935,7 @@ export default function PLNWarehouse() {
   // ══════════════════════════════════════════════════════════════════
 
   async function approveTUG5_Asman(txn) {
-    if (currentUser.role !== "ASMAN") { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
+    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
     if (txn.stage !== "PENDING_ASMAN") { showToast("TUG-5 ini tidak dalam tahap menunggu Asman.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"PENDING_MANAGER", requiredApprover:"MANAGER", approvedByAsman:currentUser.id, approvedAtAsman:Date.now()} : t);
     setTxns(newTxns);
@@ -4890,7 +4943,7 @@ export default function PLNWarehouse() {
     showToast(`✅ ${txn.docNumbers.tug5} disetujui Asman! Menunggu approval Manager.`);
   }
   async function rejectTUG5_Asman(txn, reason) {
-    if (currentUser.role !== "ASMAN") { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-5.","error"); return; }
+    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-5.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns); await saveToCloud({txns: newTxns});
@@ -4898,7 +4951,7 @@ export default function PLNWarehouse() {
   }
 
   async function approveTUG5_Manager(txn) {
-    if (currentUser.role !== "MANAGER") { showToast("Hanya Manager yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
+    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
     if (txn.stage !== "PENDING_MANAGER") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager.","error"); return; }
 
     if (txn.jenisTransfer === "INTRACOMPANY") {
@@ -4961,7 +5014,7 @@ export default function PLNWarehouse() {
     }
   }
   async function rejectTUG5_Manager(txn, reason) {
-    if (currentUser.role !== "MANAGER") { showToast("Hanya Manager yang bisa menolak TUG-5.","error"); return; }
+    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menolak TUG-5.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns); await saveToCloud({txns: newTxns});
@@ -4974,9 +5027,11 @@ export default function PLNWarehouse() {
   // ══════════════════════════════════════════════════════════════════
 
   async function approveTUG5_MgrULTG(txn) {
-    if (currentUser.role !== "MGR_ULTG") { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
-    if (!currentUser.ultgId) { showToast("Akun kamu belum terhubung ke unit ULTG manapun. Hubungi Admin untuk melengkapi profil.","error"); return; }
-    if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
+    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
+    if (currentUser.role !== "SUPERADMIN") {
+      if (!currentUser.ultgId) { showToast("Akun kamu belum terhubung ke unit ULTG manapun. Hubungi Admin untuk melengkapi profil.","error"); return; }
+      if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
+    }
     if (txn.stage !== "PENDING_MGR_ULTG") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED_ULTG", status:"APPROVED", approvedByMgrUltg:currentUser.id, approvedAtMgrUltg:Date.now()} : t);
     setTxns(newTxns);
@@ -4984,7 +5039,7 @@ export default function PLNWarehouse() {
     showToast(`✅ ${txn.docNumbers.tug5} disetujui! Menunggu di-adopt oleh Admin/TL UPT.`);
   }
   async function rejectTUG5_MgrULTG(txn, reason) {
-    if (currentUser.role !== "MGR_ULTG") { showToast("Hanya Manager ULTG yang bisa menolak TUG-5 ini.","error"); return; }
+    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menolak TUG-5 ini.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns); await saveToCloud({txns: newTxns});
@@ -4992,7 +5047,7 @@ export default function PLNWarehouse() {
   }
   // Admin/TL UPT induk "mengadopsi" pengajuan ULTG → auto-create draft TUG-9 (editable, stok dipilih sendiri)
   async function adoptTUG5ULTG(txn) {
-    if (!["ADMIN","TL"].includes(currentUser.role)) { showToast("Hanya Admin/TL UPT yang bisa mengadopsi pengajuan ini.","error"); return; }
+    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL UPT yang bisa mengadopsi pengajuan ini.","error"); return; }
     if (txn.adoptedBy) { showToast("Pengajuan ini sudah di-adopt UPT lain.","error"); return; }
     const seq = docSeq;
     const docCode = "LOG.00.02";
@@ -5038,7 +5093,7 @@ export default function PLNWarehouse() {
   }
   // Submit draft TUG-9 (hasil adopt) yang sudah dilengkapi/diedit → masuk approval normal TUG-9
   async function submitDraftTug9(formData) {
-    const requiredApprover = currentUser.role === "ADMIN" ? "TL" : "ASMAN";
+    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
     const newTxns = txns.map(t => t.id===editingDraftTxnId ? {
       ...t, ...formData,
       status: "PENDING", requiredApprover,
@@ -5056,7 +5111,7 @@ export default function PLNWarehouse() {
   // ══════════════════════════════════════════════════════════════════
 
   async function submitTUG7_AdminUIT(txn, tug7Data) {
-    if (currentUser.role !== "ADMIN_UIT") { showToast("Hanya Admin UIT yang bisa melengkapi TUG-7.","error"); return; }
+    if (!hasRole(currentUser, "ADMIN_UIT")) { showToast("Hanya Admin UIT yang bisa melengkapi TUG-7.","error"); return; }
     if (!tug7Data.uptPengirimId) { showToast("Pilih UPT Pengirim terlebih dahulu!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, ...tug7Data, stage:"PENDING_MGR_LOGISTIK", requiredApprover:"MGR_LOGISTIK_UIT", approvedByAdminUIT:currentUser.id, approvedAtAdminUIT:Date.now()} : t);
     setTxns(newTxns);
@@ -5064,7 +5119,7 @@ export default function PLNWarehouse() {
     showToast(`📋 TUG-7 ${txn.docNumbers.tug7} dilengkapi! Menunggu approval Manager Logistik UIT.`);
   }
   async function approveTUG7_MgrLogistik(txn) {
-    if (currentUser.role !== "MGR_LOGISTIK_UIT") { showToast("Hanya Manager Logistik UIT yang bisa menyetujui TUG-7.","error"); return; }
+    if (!hasRole(currentUser, "MGR_LOGISTIK_UIT")) { showToast("Hanya Manager Logistik UIT yang bisa menyetujui TUG-7.","error"); return; }
     if (txn.stage !== "PENDING_MGR_LOGISTIK") { showToast("TUG-7 ini tidak dalam tahap menunggu Manager Logistik.","error"); return; }
 
     // Auto-generate draft TUG-8 di UPT Pengirim
@@ -5102,7 +5157,7 @@ export default function PLNWarehouse() {
     showToast(`✅ TUG-7 DISETUJUI! Draft TUG-8 otomatis muncul di UPT ${uptPengirim?.nama||"Pengirim"}. 📦`);
   }
   async function rejectTUG7_MgrLogistik(txn, reason) {
-    if (currentUser.role !== "MGR_LOGISTIK_UIT") { showToast("Hanya Manager Logistik UIT yang bisa menolak TUG-7.","error"); return; }
+    if (!hasRole(currentUser, "MGR_LOGISTIK_UIT")) { showToast("Hanya Manager Logistik UIT yang bisa menolak TUG-7.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns); await saveToCloud({txns: newTxns});
@@ -5111,8 +5166,8 @@ export default function PLNWarehouse() {
 
   // Konfirmasi draft TUG-8 dari TUG-7 oleh Admin UPT Pengirim
   async function konfirmasiDraftTUG8(txn) {
-    if (!["ADMIN","TL"].includes(currentUser.role)) { showToast("Hanya Admin Gudang / TL yang bisa mengkonfirmasi draft TUG-8.","error"); return; }
-    const requiredApprover = currentUser.role === "ADMIN" ? "TL" : "ASMAN";
+    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin Gudang / TL yang bisa mengkonfirmasi draft TUG-8.","error"); return; }
+    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
     const newTxns = txns.map(t => t.id===txn.id ? {
       ...t, stage:undefined, status:"PENDING",
       requiredApprover, approvedBy:null, approvedAt:null,
@@ -5495,16 +5550,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // fields (name, katalog, category, unit, lokasi) without modification.
   const enrichedStocks = enrichStocks(stocks, katalogList, lokasiList);
   const myPendingApprovals = txns.filter(t => {
+    if (currentUser?.role === "SUPERADMIN" && t.status === "PENDING") return true;
     if (t.status === "PENDING" && t.requiredApprover === currentUser?.role) return true;
     // TUG-5: Asman and Manager see their respective stages
-    if (t.docType==="TUG5" && t.stage==="PENDING_ASMAN" && currentUser?.role==="ASMAN") return true;
-    if (t.docType==="TUG5" && t.stage==="PENDING_MANAGER" && currentUser?.role==="MANAGER") return true;
+    if (t.docType==="TUG5" && t.stage==="PENDING_ASMAN" && hasRole(currentUser, "ASMAN")) return true;
+    if (t.docType==="TUG5" && t.stage==="PENDING_MANAGER" && hasRole(currentUser, "MANAGER")) return true;
     // TUG-7 DRAFT_UIT stage needs Admin UIT attention
-    if (t.docType==="TUG7" && t.stage==="DRAFT_UIT" && currentUser?.role==="ADMIN_UIT") return true;
+    if (t.docType==="TUG7" && t.stage==="DRAFT_UIT" && hasRole(currentUser, "ADMIN_UIT")) return true;
     // TUG-7 PENDING_MGR_LOGISTIK needs Manager Logistik UIT
-    if (t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && currentUser?.role==="MGR_LOGISTIK_UIT") return true;
+    if (t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && hasRole(currentUser, "MGR_LOGISTIK_UIT")) return true;
     // TUG-8 DRAFT from TUG-7 needs Admin/TL UPT to confirm
-    if (t.docType==="TUG8" && t.stage==="DRAFT_TUG8" && ["ADMIN","TL"].includes(currentUser?.role)) return true;
+    if (t.docType==="TUG8" && t.stage==="DRAFT_TUG8" && hasRole(currentUser, "ADMIN","TL")) return true;
     // TUG-5 dari ULTG: Manager ULTG (unit yang sama) approve
     if (t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && currentUser?.role==="MGR_ULTG" && t.ultgId===currentUser?.ultgId) return true;
     return false;
@@ -5516,9 +5572,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const currentUserUptId = currentUser?.uptId
     || (ultgList.find(u=>u.id===currentUser?.ultgId)?.parentUptId)
     || (uptList.find(u=>String(u.nama||"").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
-  const ultgPengajuanUntukAdopt = ["ADMIN","TL"].includes(currentUser?.role) ? txns.filter(t =>
+  const ultgPengajuanUntukAdopt = hasRole(currentUser, "ADMIN","TL") ? txns.filter(t =>
     t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="APPROVED_ULTG" && !t.adoptedBy &&
-    ultgList.find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId
+    (currentUser?.role==="SUPERADMIN" || ultgList.find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId)
   ) : [];
   const pendingTxns = txns.filter(t=>t.status==="PENDING");
   const stockCountPendingCount = stockCountList.reduce((a,s)=>a+s.items.filter(i=>i.approval==="PENDING").length, 0);
@@ -5619,9 +5675,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   // ══════════════════════ MAIN APP ══════════════════════
   // Role PENGADAAN hanya punya akses Dashboard + Rencana Kedatangan
-  const isPengadaan = currentUser.role === "PENGADAAN";
+  const isPengadaan = hasRole(currentUser, "PENGADAAN");
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
-  const isUltgRole = ULTG_ROLES.includes(currentUser.role);
+  const isUltgRole = hasRole(currentUser, ...ULTG_ROLES);
   const navItems = isPengadaan ? [
     {id:"dashboard",icon:"📊",label:"Dashboard"},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
@@ -5629,7 +5685,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"dashboard",icon:"📊",label:"Dashboard"},
     {id:"stock",icon:"📦",label:"Data Stok"},
     {id:"transaction",icon:"🔄",label:"TUG"},
-    {id:"approval",icon:"✅",label:"Approval",badge: currentUser.role==="MGR_ULTG" ? myPendingApprovals.length : 0},
+    {id:"approval",icon:"✅",label:"Approval",badge: hasRole(currentUser, "MGR_ULTG") ? myPendingApprovals.length : 0},
     {id:"heavyEquipment",icon:"🚜",label:"Alat Berat"},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
     {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
@@ -5639,8 +5695,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"stock",icon:"📦",label:"Data Stok"},
     {id:"master",icon:"🗂️",label:"Master Data"},
     {id:"transaction",icon:"🔄",label:"TUG"},
-    ...(["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN"].includes(currentUser.role) ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0) + (["TL","ASMAN"].includes(currentUser.role) ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="TL" ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (["ADMIN","TL"].includes(currentUser.role) ? ultgPengajuanUntukAdopt.length : 0) + (currentUser.role==="TL" ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (currentUser.role==="ASMAN" ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0)}] : []),
-    {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(currentUser.role==="ASMAN"?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
+    ...(hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN") ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0) + (hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (hasRole(currentUser, "ADMIN","TL") ? ultgPengajuanUntukAdopt.length : 0) + (hasRole(currentUser, "TL") ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0)}] : []),
+    {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
     {id:"opname",icon:"📋",label:"Stock Opname & Count",badge:stockCountPendingCount},
     {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
     {id:"kapasitasGudang",icon:"📐",label:"Kapasitas Gudang"},
@@ -5744,7 +5800,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         {id:"timmutu",icon:"👥",label:"Tim Mutu"},
                         {id:"organisasi",icon:"🏢",label:"Struktur Organisasi"},
                         {id:"gudang",icon:"🏭",label:"Master Gudang"},
-        ...(currentUser.role==="ADMIN" ? [{id:"akun",icon:"👤",label:"Kelola Akun"},{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
+        ...(hasRole(currentUser, "ADMIN") ? [{id:"akun",icon:"👤",label:"Kelola Akun"},{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (
@@ -5812,7 +5868,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         </div>
 
         {/* Export / Import JSON — backup & restore data */}
-        {currentUser.role==="ADMIN" && (
+        {hasRole(currentUser, "ADMIN") && (
           <div style={{padding:"8px 12px",borderTop:"1px solid rgba(255,255,255,0.1)",display:"flex",gap:6}}>
             <button title="Export semua data ke file JSON" style={{flex:1,padding:"5px 0",background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:6,color:"rgba(255,255,255,0.7)",fontSize:10,cursor:"pointer",fontWeight:600}}
               onClick={()=>{
@@ -5882,6 +5938,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{color:"white",fontWeight:600,fontSize:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{currentUser.name}</div>
             <div style={{color:"rgba(255,255,255,0.5)",fontSize:10}}>{ROLES[currentUser.role]}</div>
           </div>
+          <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:14}} onClick={openGantiPassword} title="Ganti Password">🔑</button>
           <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:16}} onClick={handleLogout} title="Logout">⬅</button>
         </div>
       </div>
@@ -5896,7 +5953,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
 
         {/* DASHBOARD */}
-        {tab==="dashboard" && currentUser.role==="MANAGER" && (
+        {tab==="dashboard" && hasRole(currentUser, "MANAGER") && (
           <DashboardManager
             stocks={enrichedStocks} txns={txns} katalogList={katalogList}
             uptList={uptList} rencanaKedatanganList={rencanaKedatanganList}
@@ -5905,9 +5962,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
             C={C} sty={sty} setTab={setTab}
             heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
+            currentUser={currentUser}
           />
         )}
-        {tab==="dashboard" && currentUser.role==="ASMAN" && (
+        {tab==="dashboard" && hasRole(currentUser, "ASMAN") && (
           <DashboardAsman
             stocks={enrichedStocks} txns={txns} katalogList={katalogList}
             rencanaKedatanganList={rencanaKedatanganList}
@@ -5919,7 +5977,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             currentUser={currentUser}
           />
         )}
-        {tab==="dashboard" && !["MANAGER","ASMAN"].includes(currentUser.role) && (
+        {tab==="dashboard" && !hasRole(currentUser, "MANAGER","ASMAN") && (
           <>
           {/* ── PETA WILAYAH GUDANG UPT SURABAYA ── */}
           <div style={{...sty.card}}>
@@ -5928,7 +5986,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {gudangList.filter(g=>g.lat!=null&&g.lng!=null).length} dari {gudangList.length} gudang sudah punya koordinat GPS. Klik pin untuk lihat ringkasan.
             </div>
             <div ref={petaWilayahDivRef} style={{width:"100%",height:320,borderRadius:10,border:`1px solid ${C.border}`,background:"#eef2f7"}}/>
-            {gudangList.filter(g=>g.lat==null||g.lng==null).length>0 && currentUser.role==="ADMIN" && (
+            {gudangList.filter(g=>g.lat==null||g.lng==null).length>0 && hasRole(currentUser, "ADMIN") && (
               <div style={{fontSize:11,color:"#92400e",marginTop:8}}>⚠️ Ada gudang belum punya koordinat GPS — isi di Master Data → Master Gudang → Edit.</div>
             )}
           </div>
@@ -5968,7 +6026,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div style={{...sty.card,marginTop:16}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <div style={{fontWeight:800,fontSize:15}}>🏆 Maturity Level Gudang UPT Surabaya</div>
-                  {currentUser.role==="ADMIN" && <button style={sty.btn("primary","sm")} onClick={()=>{setMaturityForm({level:latest?.level||3,catatan:"",tanggalAsesmen:Date.now()}); setMaturityModal(true);}}>+ Asesmen Baru</button>}
+                  {hasRole(currentUser, "ADMIN") && <button style={sty.btn("primary","sm")} onClick={()=>{setMaturityForm({level:latest?.level||3,catatan:"",tanggalAsesmen:Date.now()}); setMaturityModal(true);}}>+ Asesmen Baru</button>}
                 </div>
                 {!latest ? (
                   <div style={{fontSize:12,color:C.muted}}>Belum ada data asesmen maturity level.</div>
@@ -6159,7 +6217,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           {isLow && <div style={{fontSize:9,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
                         </td>
                         <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
-                          {["ADMIN","TL"].includes(currentUser.role) ? (
+                          {hasRole(currentUser, "ADMIN","TL") ? (
                             <select
                               value={stockGudangFilter[st.id] ?? gdg?.id ?? gudangList[0]?.id ?? ""}
                               style={{...sty.select,fontSize:11,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8}}
@@ -6171,7 +6229,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           )}
                         </td>
                         <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:150}}>
-                          {currentUser.role==="ADMIN" ? (
+                          {hasRole(currentUser, "ADMIN") ? (
                             <>
                               <select
                                 value={st.lokasiId||""}
@@ -6210,7 +6268,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                               </select>
                               {st.lokasiMovePending && <div style={{fontSize:9,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"TL"} → {st.pendingLokasiKode}</div>}
                             </>
-                          ) : currentUser.role==="TL" ? (
+                          ) : hasRole(currentUser, "TL") ? (
                             <>
                               <select
                                 value={st.lokasiId||""}
@@ -6253,7 +6311,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         </td>
                         <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
                           <div style={{display:"flex",gap:4,justifyContent:"center"}}>
-                            {currentUser.role==="ADMIN" && (
+                            {hasRole(currentUser, "ADMIN") && (
                               <>
                                 <button title="Edit" disabled={st.deletePending} style={{...sty.btn("ghost","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>openEditStock(st)}>✏️</button>
                                 <button title="Hapus" disabled={st.deletePending} style={{...sty.btn("danger","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>deleteStock(st.id)}>🗑️</button>
@@ -6312,18 +6370,18 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":stockSubTab==="usulanKatalog"?"Cari di referensi MARA, usulkan penambahan katalog baru, persetujuan Asman/TL":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </p>
               </div>
-              {currentUser.role==="ADMIN" && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
-              {currentUser.role==="ADMIN" && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
-              {currentUser.role==="ADMIN" && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
-              {currentUser.role==="ADMIN" && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
-              {currentUser.role==="ADMIN" && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
+              {hasRole(currentUser, "ADMIN") && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
+              {hasRole(currentUser, "ADMIN") && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
+              {hasRole(currentUser, "ADMIN") && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
+              {hasRole(currentUser, "ADMIN") && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
+              {hasRole(currentUser, "ADMIN") && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
             </div>
             {stockSubTab==="gudang" && (
               <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
                 ℹ️ Sebagian besar Gudang biasanya <b>otomatis terbentuk sendiri</b> dari import Excel Kapasitas Gudang (tombol di bawah) setelah disetujui Asman. Kalau ada Gudang yang belum tercakup di laporan itu, tambahkan manual lewat tombol "+ Tambah Gudang Baru" di kanan atas.
               </div>
             )}
-            {stockSubTab==="gudang" && ["ADMIN","TL"].includes(currentUser.role) && (
+            {stockSubTab==="gudang" && hasRole(currentUser, "ADMIN","TL") && (
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                   <button style={sty.btn(importGudangOpen?"danger":"primary")} onClick={()=>setImportGudangOpen(o=>!o)}>
@@ -6370,7 +6428,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
             {/* ── SUB-TAB: MASTER KATALOG ── */}
-            {stockSubTab==="katalog" && currentUser.role==="ADMIN" && (
+            {stockSubTab==="katalog" && hasRole(currentUser, "ADMIN") && (
               <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1",padding:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <div>
@@ -6406,7 +6464,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
             {stockSubTab==="katalog" && (
               katalogList.length===0
-              ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Katalog. {currentUser.role==="ADMIN" && "Klik \"+ Tambah Katalog Barang\" untuk menambahkan."}</div>
+              ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Katalog. {hasRole(currentUser, "ADMIN") && "Klik \"+ Tambah Katalog Barang\" untuk menambahkan."}</div>
               : filteredKatalog.length===0
               ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Tidak ada hasil untuk "{katalogSearch}".</div>
               : (
@@ -6439,7 +6497,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
                           <td style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:10,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
                           <td style={{padding:"8px 10px"}}>
-                            {currentUser.role==="ADMIN" && (
+                            {hasRole(currentUser, "ADMIN") && (
                               <div style={{display:"flex",gap:4,justifyContent:"center"}}>
                                 <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"6px 8px"}} onClick={()=>openEditKatalog(k)}>✏️</button>
                                 <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"6px 8px"}} onClick={()=>deleteKatalog(k.id)}>🗑️</button>
@@ -6475,7 +6533,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             {/* ── SUB-TAB: SATPAM ── */}
             {stockSubTab==="satpam" && (
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
-                {satpamList.length===0 && <div style={{...sty.card,gridColumn:"1/-1",textAlign:"center",color:C.muted,padding:30}}>Belum ada data Satpam. {currentUser.role==="ADMIN" && "Klik \"+ Tambah Satpam\" untuk menambahkan."}</div>}
+                {satpamList.length===0 && <div style={{...sty.card,gridColumn:"1/-1",textAlign:"center",color:C.muted,padding:30}}>Belum ada data Satpam. {hasRole(currentUser, "ADMIN") && "Klik \"+ Tambah Satpam\" untuk menambahkan."}</div>}
                 {satpamList.map(sp=>(
                   <div key={sp.id} style={{...sty.card,borderTop:`3px solid ${C.accent}`}}>
                     <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}>
@@ -6485,7 +6543,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         <div style={{fontSize:11,color:C.muted}}>{sp.id}{sp.telp ? ` • ${sp.telp}` : ""}</div>
                       </div>
                     </div>
-                    {currentUser.role==="ADMIN" && (
+                    {hasRole(currentUser, "ADMIN") && (
                       <div style={{display:"flex",gap:6}}>
                         <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={()=>openEditSatpam(sp)}>✏️ Edit</button>
                         <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>deleteSatpam(sp.id)}>🗑️ Hapus</button>
@@ -6509,7 +6567,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                       <div><b>Anggota 2:</b> {tm.anggota2||"-"}</div>
                       <div><b>Anggota 3:</b> {tm.anggota3||"-"}</div>
                     </div>
-                    {currentUser.role==="ADMIN" && (
+                    {hasRole(currentUser, "ADMIN") && (
                       <button style={{...sty.btn("ghost","sm"),marginTop:10,width:"100%"}} onClick={()=>openEditTimMutu(tm)}>✏️ Edit Anggota</button>
                     )}
                   </div>
@@ -6581,7 +6639,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             </div>
                           </div>
                           <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}} onClick={e=>e.stopPropagation()}>
-                            {currentUser.role==="ADMIN" && (<>
+                            {hasRole(currentUser, "ADMIN") && (<>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openAddUPT(uit.id)}>+ UPT</button>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openEditUIT(uit)}>✏️</button>
                               <button style={sty.btn("danger","sm")} onClick={()=>deleteUIT(uit.id)}>🗑️</button>
@@ -6610,7 +6668,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                               <div style={{fontSize:11,color:C.muted,marginTop:2}}>{upt.alamat||"Alamat belum diisi"} • {ultgOfUpt.length} ULTG</div>
                                             </div>
                                           </div>
-                                          {currentUser.role==="ADMIN" && (
+                                          {hasRole(currentUser, "ADMIN") && (
                                             <div style={{display:"flex",gap:4,flexShrink:0}}>
                                               <button style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openAddULTG(upt.id)}>+ ULTG</button>
                                               <button style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openEditUPT(upt)}>✏️</button>
@@ -6623,7 +6681,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                             {ultgOfUpt.map(ultg=>(
                                               <div key={ultg.id} style={{display:"flex",alignItems:"center",gap:6,background:"#f0fdf4",border:`1px solid #bbf7d0`,borderRadius:20,padding:"4px 10px",fontSize:11}}>
                                                 <span>🏘️ <b>{ultg.kode}</b> {ultg.nama}</span>
-                                                {currentUser.role==="ADMIN" && (
+                                                {hasRole(currentUser, "ADMIN") && (
                                                   <span style={{display:"flex",gap:2,marginLeft:2}}>
                                                     <button style={{...sty.btn("ghost","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>openEditULTG(ultg)}>✏️</button>
                                                     <button style={{...sty.btn("danger","sm"),padding:"1px 4px",fontSize:10}} onClick={()=>deleteULTG(ultg.id)}>🗑️</button>
@@ -6668,7 +6726,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           <div style={{fontSize:11,color:C.muted,marginTop:2}}>{bloklokasi.length} blok terkait, {blokWithCoord.length} sudah ter-peta{subsOfGudang.length>0?` • ${subsOfGudang.length} Sub Gudang`:""}</div>
                         </div>
                         <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                          {currentUser.role==="ADMIN" && (
+                          {hasRole(currentUser, "ADMIN") && (
                             <div style={{display:"flex",gap:6}} onClick={e=>e.stopPropagation()}>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openEditGudang(g)}>✏️ Edit</button>
                               <button style={sty.btn("danger","sm")} onClick={()=>deleteGudang(g.id)}>🗑️</button>
@@ -6693,7 +6751,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
                       {showGudangDenahTools && (
                       <div style={{marginBottom:12}}>
-                        {currentUser.role==="ADMIN" && (
+                        {hasRole(currentUser, "ADMIN") && (
                           <div style={{marginBottom:12}}>
                             <label style={sty.label}>Upload Denah Gudang (PNG / JPG) — peta keseluruhan</label>
                             <div style={{fontSize:10,color:C.muted,marginBottom:4}}>
@@ -6722,7 +6780,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           </div>
                         )}
 
-                        {currentUser.role==="ADMIN" && g.denahImageData && (
+                        {hasRole(currentUser, "ADMIN") && g.denahImageData && (
                           subsOfGudang.length===0 ? (
                             <GudangCoordConfigPanel
                               label="Gudang"
@@ -6793,7 +6851,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
                               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                                 <div style={{fontSize:12,color:C.muted}}>📍 Daftar Blok Lokasi ({grp.blok.length})</div>
-                                {currentUser.role==="ADMIN" && !isUnregistered && <button style={sty.btn("ghost","sm")} onClick={()=>openAddLokasiFor(g.id, grp.id)}>+ Tambah Blok</button>}
+                                {hasRole(currentUser, "ADMIN") && !isUnregistered && <button style={sty.btn("ghost","sm")} onClick={()=>openAddLokasiFor(g.id, grp.id)}>+ Tambah Blok</button>}
                               </div>
                               {grp.blok.length===0
                                 ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic",marginBottom:8}}>Belum ada blok lokasi di sub gudang ini.</div>
@@ -6811,7 +6869,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                           </div>
                                           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                                             <span style={{fontSize:11,color:n>0?C.accent:C.muted,fontWeight:700}}>{n} item</span>
-                                            {currentUser.role==="ADMIN" && <button style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
+                                            {hasRole(currentUser, "ADMIN") && <button style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
                                           </div>
                                         </div>
                                       );
@@ -6829,7 +6887,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   </button>
                                   {isSubToolsOpen && (
                                     <div style={{marginTop:10}}>
-                                      {currentUser.role==="ADMIN" && (
+                                      {hasRole(currentUser, "ADMIN") && (
                                         <div style={{marginBottom:10}}>
                                           <label style={{...sty.label,fontSize:10}}>Upload Denah Sub Gudang (PNG / JPG) — opsional, fallback ke denah Gudang jika kosong</label>
                                           <div>
@@ -6847,7 +6905,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                           <img src={grp.sg.denahImageData} alt="Denah Sub Gudang" style={{width:"100%",maxHeight:180,objectFit:"contain",borderRadius:6,border:`1px solid ${C.border}`}}/>
                                         </div>
                                       )}
-                                      {currentUser.role==="ADMIN" && grp.sg.denahImageData && (
+                                      {hasRole(currentUser, "ADMIN") && grp.sg.denahImageData && (
                                         <GudangCoordConfigPanel
                                           label="Sub Gudang"
                                           denahImage={grp.sg.denahImageData}
@@ -6917,7 +6975,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             )}
 
             {/* ── SUB-TAB: KELOLA AKUN (ADMIN only) ── */}
-            {stockSubTab==="akun" && currentUser.role==="ADMIN" && (
+            {stockSubTab==="akun" && hasRole(currentUser, "ADMIN") && (
               <div style={sty.card}>
                 {users.length===0 ? (
                   <div style={{textAlign:"center",color:C.muted,padding:30}}>Belum ada akun terdaftar.</div>
@@ -6953,7 +7011,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             )}
 
             {/* ── SUB-TAB: MIGRASI DATA (ADMIN only) ── */}
-            {stockSubTab==="migrasi" && currentUser.role==="ADMIN" && (
+            {stockSubTab==="migrasi" && hasRole(currentUser, "ADMIN") && (
               <MigrasiDataTab
                 stocks={stocks}
                 katalogList={katalogList}
@@ -6990,7 +7048,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {tugSubTab==="TUG9"?"Pengeluaran Barang Pemakaian di Unit Sendiri (UPT Surabaya)":tugSubTab==="TUG8"?"Pengeluaran Barang Pemakaian ke Unit PLN Lain":tugSubTab==="TUG10"?"Pengembalian Material ke Gudang — Sisa Pekerjaan / Bekas Bongkaran":tugSubTab==="TUG5"?"Permintaan material ke UIT — Intracompany (→TUG-7) atau Intercompany (→TUG-5 UIT)":tugSubTab==="TUG15"?"History mutasi stok dari semua transaksi TUG yang disetujui — filter rentang tanggal & unduh":"Karantina → Pemeriksaan Mutu → Final (3 tahap: TL → Manager → Asman)"}
                 </p>
               </div>
-              {(CAN_CREATE.includes(currentUser.role) || currentUser.role==="ADMIN_ULTG") && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button style={sty.btn("primary")} onClick={()=>openNewTxn(tugSubTab)}>+ Buat {tugSubTab.replace("TUG","TUG-")} Baru</button>}
+              {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button style={sty.btn("primary")} onClick={()=>openNewTxn(tugSubTab)}>+ Buat {tugSubTab.replace("TUG","TUG-")} Baru</button>}
             </div>
 
             <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
@@ -7117,18 +7175,18 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
 
         {/* APPROVAL — semua notifikasi approval (TUG, Lokasi/Blok, Pemindahan Stok, dkk) dikumpulkan di sini, dipisah per-bagian + riwayat di bawah */}
-        {tab==="approval" && ["TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","MGR_ULTG","ADMIN_ULTG"].includes(currentUser.role) && (
+        {tab==="approval" && hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","MGR_ULTG","ADMIN_ULTG") && (
           <div>
             {(()=>{
               const tugCount = myPendingApprovals.length;
-              const capCount = ["TL","ASMAN"].includes(currentUser.role) ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
-              const lokasiCount = currentUser.role==="TL" ? lokasiList.filter(l=>l.status==="PENDING").length : 0;
-              const stokCount = currentUser.role==="TL"
+              const capCount = hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
+              const lokasiCount = hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0;
+              const stokCount = hasRole(currentUser, "TL")
                 ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length
-                : currentUser.role==="ASMAN" ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0;
-              const alatBeratCount = currentUser.role==="ASMAN" ? heavyEquipmentPendingCount : 0;
-              const opnameCount = currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length
-                : currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0;
+                : hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0;
+              const alatBeratCount = hasRole(currentUser, "ASMAN") ? heavyEquipmentPendingCount : 0;
+              const opnameCount = hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length
+                : hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0;
               const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount+opnameCount;
               const chips = [
                 {id:"ALL", label:"Semua", count:total},
@@ -7193,14 +7251,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               ultgPengajuanUntukAdopt={ultgPengajuanUntukAdopt}
               adoptTUG5ULTG={adoptTUG5ULTG}
               openDraftTug9={openDraftTug9}
-              heavyEquipmentPendingCount={currentUser.role==="ASMAN" ? heavyEquipmentPendingCount : 0}
-              opnamePendingCount={currentUser.role==="ASMAN" ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : currentUser.role==="MANAGER" ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0}
+              heavyEquipmentPendingCount={hasRole(currentUser, "ASMAN") ? heavyEquipmentPendingCount : 0}
+              opnamePendingCount={hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0}
               approvalTypeFilter={approvalTypeFilter}
               approvalPageSize={approvalPageSize}
             />
 
             {/* ── BAGIAN: Pemindahan Blok Data Stok — pindah Gudang oleh ADMIN, wajib approval TL ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && currentUser.role==="TL" && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL") && (()=>{
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "TL") && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL") && (()=>{
               const list = stocks.filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL");
               const paged = list.slice((approvalStokPage-1)*approvalPageSize, approvalStokPage*approvalPageSize);
               return (
@@ -7228,7 +7286,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             })()}
 
             {/* ── BAGIAN: Pemindahan Gudang Data Stok — pindah Gudang oleh TL, wajib approval Asman UPT ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && currentUser.role==="ASMAN" && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="ASMAN") && (()=>{
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "ASMAN") && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="ASMAN") && (()=>{
               const list = stocks.filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="ASMAN");
               const paged = list.slice((approvalStokGudangPage-1)*approvalPageSize, approvalStokGudangPage*approvalPageSize);
               return (
@@ -7256,7 +7314,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             })()}
 
             {/* ── BAGIAN: Edit Data Stok (qty/harga/jenis) — khusus TL ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && currentUser.role==="TL" && stocks.some(s=>s.editPending) && (()=>{
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "TL") && stocks.some(s=>s.editPending) && (()=>{
               const list = stocks.filter(s=>s.editPending);
               const paged = list.slice((approvalEditStokPage-1)*approvalPageSize, approvalEditStokPage*approvalPageSize);
               return (
@@ -7286,7 +7344,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             })()}
 
             {/* ── BAGIAN: Hapus Data Stok — khusus TL ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && currentUser.role==="TL" && stocks.some(s=>s.deletePending) && (()=>{
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "TL") && stocks.some(s=>s.deletePending) && (()=>{
               const list = stocks.filter(s=>s.deletePending);
               const paged = list.slice((approvalHapusStokPage-1)*approvalPageSize, approvalHapusStokPage*approvalPageSize);
               return (
@@ -7313,7 +7371,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             })()}
 
             {/* ── BAGIAN: Peminjaman Alat Berat — khusus ASMAN ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="ALAT_BERAT") && currentUser.role==="ASMAN" && heavyEquipmentLoans.some(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)) && (()=>{
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="ALAT_BERAT") && hasRole(currentUser, "ASMAN") && heavyEquipmentLoans.some(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)) && (()=>{
               const list = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l));
               const paged = list.slice((approvalAlatBeratPage-1)*approvalPageSize, approvalAlatBeratPage*approvalPageSize);
               return (
@@ -7349,9 +7407,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             {/* ── BAGIAN: Stock Opname — Asman/Manager (dulu cuma muncul di menu Stock Opname
                 sendiri, tidak pernah tampil di halaman Approval terpusat ini — keluhan user
                 2026-07-07 "tidak masuk ke approval asman"). ── */}
-            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="OPNAME") && ["ASMAN","MANAGER"].includes(currentUser.role) &&
-              opnameList.some(o=>(currentUser.role==="ASMAN"&&o.status==="PENDING_ASMAN")||(currentUser.role==="MANAGER"&&o.status==="PENDING_MANAGER")) && (()=>{
-              const list = opnameList.filter(o=>(currentUser.role==="ASMAN"&&o.status==="PENDING_ASMAN")||(currentUser.role==="MANAGER"&&o.status==="PENDING_MANAGER"));
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="OPNAME") && hasRole(currentUser, "ASMAN","MANAGER") &&
+              opnameList.some(o=>(hasRole(currentUser, "ASMAN")&&o.status==="PENDING_ASMAN")||(hasRole(currentUser, "MANAGER")&&o.status==="PENDING_MANAGER")) && (()=>{
+              const list = opnameList.filter(o=>(hasRole(currentUser, "ASMAN")&&o.status==="PENDING_ASMAN")||(hasRole(currentUser, "MANAGER")&&o.status==="PENDING_MANAGER"));
               const paged = list.slice((approvalOpnamePage-1)*approvalPageSize, approvalOpnamePage*approvalPageSize);
               return (
                 <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
@@ -7366,7 +7424,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           <div style={{fontSize:11,color:C.muted}}>{opn.items?.length||0} item • Selisih: {selisihCount} item • Diajukan oleh {pengaju?.name||"?"} • {fmtDate(opn.submittedAt)}</div>
                         </div>
                         <div style={{display:"flex",gap:6,flexShrink:0}}>
-                          <button style={sty.btn("primary","sm")} onClick={()=>currentUser.role==="ASMAN"?approveOpname_Asman(opn,""):approveOpname_Manager(opn,"")}>✓ Setuju</button>
+                          <button style={sty.btn("primary","sm")} onClick={()=>hasRole(currentUser, "ASMAN")?approveOpname_Asman(opn,""):approveOpname_Manager(opn,"")}>✓ Setuju</button>
                           <button style={sty.btn("danger","sm")} onClick={()=>{
                             const reason = window.prompt("Alasan penolakan Stock Opname ini?");
                             if (reason) rejectOpname(opn, reason);
@@ -7623,7 +7681,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       )}
 
       {/* USULAN BLOK DARI DENAH — popup terpusat, supaya tidak perlu scroll naik-turun ke peta */}
-      {currentUser.role==="ADMIN" && ocrSuggestGudangId && ocrSuggestions.length>0 && (
+      {hasRole(currentUser, "ADMIN") && ocrSuggestGudangId && ocrSuggestions.length>0 && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100}}>
           <div style={{...sty.card,width:520,maxHeight:"85vh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>📋 Usulan Blok dari Denah {ocrSuggestSubGudangId?"(Sub Gudang)":"(Gudang)"} ({ocrSuggestions.length})</h3>
@@ -7768,7 +7826,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         const kat = katalogList.find(k=>k.id===st.katalogId);
         const lok = lokasiList.find(l=>l.id===st.lokasiId);
         const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
-        const canUploadFoto = ["ADMIN","TL"].includes(currentUser.role);
+        const canUploadFoto = hasRole(currentUser, "ADMIN","TL");
         const isSAP = st.id?.startsWith("STK-SAP-");
         const bs = getSAPBadgeStyle(st.katalog);
         const fotoBox = (label, field) => {
@@ -8205,17 +8263,62 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <div style={{marginBottom:12}}>
                   <label style={sty.label}>Role</label>
                   <select style={sty.select} value={akunForm.role||"VIEWER"} onChange={e=>setAkunForm(f=>({...f,role:e.target.value}))}>
-                    {Object.entries(ROLES).map(([id,label])=><option key={id} value={id}>{label}</option>)}
+                    {Object.entries(ROLES).filter(([id])=>id!=="SUPERADMIN").map(([id,label])=><option key={id} value={id}>{label}</option>)}
                   </select>
                 </div>
                 <div style={{marginBottom:12}}><label style={sty.label}>Jabatan *</label><input style={sty.input} value={akunForm.jabatan||""} onChange={e=>setAkunForm(f=>({...f,jabatan:e.target.value}))}/></div>
-                <div style={{marginBottom:12}}>
-                  <label style={sty.label}>UPT *</label>
-                  <select style={sty.select} value={akunForm.uptId||""} onChange={e=>setAkunForm(f=>({...f,uptId:e.target.value}))}>
-                    <option value="">-- Pilih UPT --</option>
-                    {uptList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
-                  </select>
-                </div>
+                {akunForm.role==="PENGADAAN" && (
+                  <div style={{marginBottom:12}}>
+                    <label style={sty.label}>Scope Pengadaan</label>
+                    <div style={{display:"flex",gap:8}}>
+                      <button type="button" style={{...sty.btn((akunForm.pengadaanScope||"UPT")==="UPT"?"primary":"ghost","sm"),flex:1}} onClick={()=>setAkunForm(f=>({...f,pengadaanScope:"UPT"}))}>Pengadaan UPT</button>
+                      <button type="button" style={{...sty.btn(akunForm.pengadaanScope==="UIT"?"primary":"ghost","sm"),flex:1}} onClick={()=>setAkunForm(f=>({...f,pengadaanScope:"UIT"}))}>Pengadaan UIT</button>
+                    </div>
+                  </div>
+                )}
+                {(() => {
+                  const isUitScopedForm = ["ADMIN_UIT","MGR_LOGISTIK_UIT"].includes(akunForm.role) || (akunForm.role==="PENGADAAN" && akunForm.pengadaanScope==="UIT");
+                  if (isUitScopedForm) {
+                    return (
+                      <div style={{marginBottom:12}}>
+                        <label style={sty.label}>UIT *</label>
+                        <select style={sty.select} value={akunForm.uitId||""} onChange={e=>setAkunForm(f=>({...f,uitId:e.target.value}))}>
+                          <option value="">-- Pilih UIT --</option>
+                          {uitList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
+                        </select>
+                        {UIT_ROLE_QUOTA[akunForm.role] !== undefined && akunForm.uitId && (() => {
+                          const holder = users.find(u => u.role===akunForm.role && u.uitId===akunForm.uitId && u.id!==akunForm.id);
+                          const filled = holder ? 1 : 0;
+                          const quota = UIT_ROLE_QUOTA[akunForm.role];
+                          return (
+                            <div style={{fontSize:11,marginTop:4,color:filled>=quota?"#dc2626":C.muted}}>
+                              Slot {ROLES[akunForm.role]} di UIT ini: {filled}/{quota} terisi{holder?` (${holder.name})`:""}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{marginBottom:12}}>
+                      <label style={sty.label}>UPT *</label>
+                      <select style={sty.select} value={akunForm.uptId||""} onChange={e=>setAkunForm(f=>({...f,uptId:e.target.value}))}>
+                        <option value="">-- Pilih UPT --</option>
+                        {uptList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
+                      </select>
+                      {UPT_ROLE_QUOTA[akunForm.role] !== undefined && akunForm.uptId && (() => {
+                        const holder = users.find(u => u.role===akunForm.role && u.uptId===akunForm.uptId && u.id!==akunForm.id);
+                        const filled = holder ? 1 : 0;
+                        const quota = UPT_ROLE_QUOTA[akunForm.role];
+                        return (
+                          <div style={{fontSize:11,marginTop:4,color:filled>=quota?"#dc2626":C.muted}}>
+                            Slot {ROLES[akunForm.role]} di UPT ini: {filled}/{quota} terisi{holder?` (${holder.name})`:""}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
                 <div style={{marginBottom:16}}>
                   <label style={sty.label}>ULTG {(akunForm.role==="ADMIN_ULTG"||akunForm.role==="MGR_ULTG")?"* (wajib untuk role ULTG)":"(kosongkan jika bukan lingkungan ULTG)"}</label>
                   <select style={sty.select} value={akunForm.ultgId||""} onChange={e=>setAkunForm(f=>({...f,ultgId:e.target.value}))}>
@@ -8229,6 +8332,31 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* GANTI PASSWORD MODAL — self-service, semua role, akun sendiri */}
+      {gantiPasswordModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
+          <div style={{...sty.card,width:400}}>
+            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>🔑 Ganti Password</h3>
+            <div style={{marginBottom:12}}>
+              <label style={sty.label}>Password Lama</label>
+              <input type="password" style={sty.input} value={gantiPasswordForm.oldPassword||""} onChange={e=>setGantiPasswordForm(f=>({...f,oldPassword:e.target.value}))}/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={sty.label}>Password Baru</label>
+              <input type="password" style={sty.input} value={gantiPasswordForm.newPassword||""} onChange={e=>setGantiPasswordForm(f=>({...f,newPassword:e.target.value}))} placeholder="minimal 6 karakter"/>
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={sty.label}>Konfirmasi Password Baru</label>
+              <input type="password" style={sty.input} value={gantiPasswordForm.confirmPassword||""} onChange={e=>setGantiPasswordForm(f=>({...f,confirmPassword:e.target.value}))}/>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setGantiPasswordModal(false)} disabled={gantiPasswordBusy}>Batal</button>
+              <button style={{...sty.btn("primary"),flex:2,opacity:gantiPasswordBusy?0.6:1}} onClick={submitGantiPassword} disabled={gantiPasswordBusy}>{gantiPasswordBusy?"Menyimpan...":"💾 Simpan Password Baru"}</button>
+            </div>
           </div>
         </div>
       )}
@@ -9494,7 +9622,7 @@ function getEquipmentCategory(e) {
 function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab, currentUser }) {
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
   const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
-  const isMSB = ["MSB","Manager UIT"].includes(currentUser?.role);
+  const isMSB = hasRole(currentUser, "MSB","Manager UIT");
   const scopedEquipment = isMSB ? equipmentList : equipmentList.filter(e=>e.upt===myUpt);
   const scopedLoans = isMSB ? loans : loans.filter(l=>
     (getHeavyEquipmentLoanOwnerUpt(l)===myUpt)||(getHeavyEquipmentLoanRequesterUpt(l)===myUpt)
@@ -9604,7 +9732,7 @@ function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty
                 <span style={{fontWeight:700,color:status==="OVERDUE"?C.red:"#c2410c",minWidth:54}}>{status==="OVERDUE"?"⚠ OVERDUE":"📌 Dipinjam"}</span>
                 <span style={{color:C.text}}>{l.equipmentId||"-"}</span>
                 <span style={{color:C.muted}}>→ {requesterUpt}</span>
-                {!isManager && ownerUpt!==myUpt && <span style={{color:C.muted,fontStyle:"italic"}}>dari {ownerUpt}</span>}
+                {!isMSB && ownerUpt!==myUpt && <span style={{color:C.muted,fontStyle:"italic"}}>dari {ownerUpt}</span>}
                 <span style={{marginLeft:"auto",color:C.muted}}>s/d {returnDate||"-"}</span>
               </div>
             );
@@ -9867,7 +9995,7 @@ function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganList, myPe
 }
 
 // ─── DASHBOARD MANAGER (Eksekutif Multi-UPT) ─────────────────────────────
-function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans }) {
+function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiCadang = stocks.filter(s=>s.jenisBarang==="Cadang").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiPersediaan = stocks.filter(s=>s.jenisBarang==="Persediaan").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
@@ -10133,7 +10261,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
           <h1 style={{fontSize:22,fontWeight:900}}>🤖 AI Agent</h1>
           <p style={{color:C.muted,fontSize:13}}>Powered by Claude AI • Data real-time {WAREHOUSE} • Untuk prediksi stok/forecast, lihat menu "📈 Forecast Stok"</p>
         </div>
-        {currentUser?.role==="ADMIN" && (
+        {hasRole(currentUser, "ADMIN") && (
           <div style={{textAlign:"right"}}>
             <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
               <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot(); await syncRagChunks(); await syncWarnotoState();}}>
@@ -10148,7 +10276,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
         )}
       </div>
 
-      {showFaqPanel && currentUser?.role==="ADMIN" && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
+      {showFaqPanel && hasRole(currentUser, "ADMIN") && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
 
       {/* ── CHAT AI ── */}
       <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 180px)"}}>
@@ -11020,8 +11148,8 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
 
   // ── LIST VIEW ────────────────────────────────────────────────────────────
   const pendingForMe = opnameList.filter(o=>
-    (o.status==="PENDING_ASMAN"&&currentUser.role==="ASMAN")||
-    (o.status==="PENDING_MANAGER"&&currentUser.role==="MANAGER")
+    (o.status==="PENDING_ASMAN"&&hasRole(currentUser, "ASMAN"))||
+    (o.status==="PENDING_MANAGER"&&hasRole(currentUser, "MANAGER"))
   );
 
   return (
@@ -11031,7 +11159,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
           <h1 style={{fontSize:22,fontWeight:900}}>📋 Stock Opname</h1>
           <p style={{color:C.muted,fontSize:13}}>Dilakukan 1× per semester — bandingkan data sistem vs lapangan & SAP</p>
         </div>
-        {["ADMIN","TL"].includes(currentUser.role) && (
+        {hasRole(currentUser, "ADMIN","TL") && (
           <div style={{display:"flex",gap:8}}>
             <button style={sty.btn("primary")} onClick={()=>startOpname("SAP")}>+ Opname SAP</button>
             <button style={sty.btn("ghost")} onClick={()=>startOpname("NON_SAP")}>+ Opname Non-SAP</button>
@@ -11096,7 +11224,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
                   🔍 {opn.status==="DRAFT"?"Edit":"Lihat Detail"}
                 </button>
                 {opn.status==="SELESAI" && <button style={sty.btn("ghost","sm")} onClick={()=>downloadBeritaAcara(opn)}>📄 Berita Acara</button>}
-                {opn.status==="DRAFT" && ["ADMIN","TL"].includes(currentUser.role) && <button style={sty.btn("danger","sm")} onClick={()=>deleteOpname(opn.id)}>🗑️</button>}
+                {opn.status==="DRAFT" && hasRole(currentUser, "ADMIN","TL") && <button style={sty.btn("danger","sm")} onClick={()=>deleteOpname(opn.id)}>🗑️</button>}
               </div>
             </div>
           );
@@ -11170,7 +11298,7 @@ function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount,
           <h1 style={{fontSize:22,fontWeight:900}}>Stock Count</h1>
           <p style={{color:C.muted,fontSize:13}}>Banding qty SAP vs Aplikasi untuk material ber-status SAP — temuan selisih perlu approval Asman.</p>
         </div>
-        {currentUser.role==="ADMIN" && !draftItems && (
+        {hasRole(currentUser, "ADMIN") && !draftItems && (
           <label style={{...sty.btn("primary"),cursor:uploading?"default":"pointer",opacity:uploading?0.6:1}}>
             {uploading ? "Memproses..." : "📂 Upload CSV/XLSX SAP"}
             <input type="file" accept=".csv,.CSV,.xlsx,.XLSX,.xls" onChange={handleFile} disabled={uploading} style={{display:"none"}}/>
@@ -11272,7 +11400,7 @@ function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount,
       })()}
 
       {stockCountList.length===0 ? (
-        !draftItems && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada sesi Stock Count. {currentUser.role==="ADMIN" && "Klik \"Upload CSV/XLSX SAP\" untuk mulai."}</div>
+        !draftItems && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada sesi Stock Count. {hasRole(currentUser, "ADMIN") && "Klik \"Upload CSV/XLSX SAP\" untuk mulai."}</div>
       ) : stockCountList.map(session => {
         const isOpen = expandedId===session.id;
         const mismatch = session.items.filter(i=>i.status!=="AKURAT").sort((a,b)=>b.selisihPct-a.selisihPct);
@@ -11290,7 +11418,7 @@ function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount,
             </div>
             {isOpen && (
               <div style={{padding:"0 16px 16px"}}>
-                {currentUser.role==="ADMIN" && (
+                {hasRole(currentUser, "ADMIN") && (
                   <div style={{textAlign:"right",marginBottom:8}}>
                     <button style={sty.btn("danger","sm")} onClick={()=>deleteStockCountSession(session.id)}>🗑️ Hapus Sesi</button>
                   </div>
@@ -11309,7 +11437,7 @@ function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount,
                     <div style={{fontSize:11,color:C.muted,marginBottom:6}}>SAP: {fmtNum(item.qtySap)} {item.satuan} • Aplikasi: {item.katalogId ? `${fmtNum(item.qtyApp)} ${item.satuan}` : <span style={{color:"#7c3aed",fontStyle:"italic",fontWeight:700}}>Tidak terdaftar</span>}</div>
                     <div style={{fontSize:11,fontWeight:600,color:"#1d4ed8",marginBottom:8}}>{REKOMENDASI_LABEL[item.rekomendasi]}</div>
                     {item.approval==="PENDING" ? (
-                      currentUser.role==="ASMAN" ? (
+                      hasRole(currentUser, "ASMAN") ? (
                         <div>
                           <input style={{...sty.input,fontSize:12,marginBottom:6}} placeholder="Catatan (opsional)" value={catatanDraft[item.id]||""} onChange={e=>setCatatanDraft(d=>({...d,[item.id]:e.target.value}))}/>
                           {rejectingItemId===item.id ? (
@@ -11382,7 +11510,7 @@ function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, sty, C, s
   function removeItem(i) { setForm(f=>({...f,items:f.items.filter((_,idx)=>idx!==i)})); }
 
   const today = Date.now();
-  const canEdit = ["ADMIN","TL","PENGADAAN"].includes(currentUser.role);
+  const canEdit = hasRole(currentUser, "ADMIN","TL","PENGADAAN");
 
   return (
     <div>
@@ -11683,7 +11811,7 @@ function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasi
 function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, savePhoto, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
   const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
-  const isMSB = ["MSB","Manager UIT"].includes(currentUser?.role);
+  const isMSB = hasRole(currentUser, "MSB","Manager UIT");
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
   // padahal unifiedLoans-nya sendiri tidak pernah benar-benar difilter UPT) — digabung jadi 1
@@ -11718,7 +11846,7 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
     ...normalizedLoans.map(l=>l.ownerUpt),
     ...normalizedLoans.map(l=>l.requesterUpt),
   ].filter(Boolean))).sort();
-  const canManage = ["ADMIN","TL"].includes(currentUser.role);
+  const canManage = hasRole(currentUser, "ADMIN","TL");
   // Ajukan Peminjaman = "kita mau pinjam alat", jadi alat yang ditawarkan HARUS di luar UPT
   // sendiri (non-MSB) — pinjam alat sendiri lewat form sendiri tidak masuk akal. MSB/Manager UIT
   // memfasilitasi peminjaman UPT mana pun, jadi tetap lihat semua alat.
@@ -11874,7 +12002,7 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
                   <div style={{fontSize:12,fontWeight:700}}>{eq?.nama||l.equipmentId} • {l.ownerUpt} → {l.requesterUpt}</div>
                   <div style={{fontSize:11,color:C.muted}}>Rencana kembali: {l.tanggalKembali||"-"} • {l.namaPekerjaan||"-"} • Diajukan oleh {pemohon?.name||"?"}</div>
                 </div>
-                {["ADMIN","TL","ASMAN"].includes(currentUser.role) && (
+                {hasRole(currentUser, "ADMIN","TL","ASMAN") && (
                   <button style={sty.btn("success","sm")} onClick={()=>completeLoan(l.id)}>Tandai Kembali</button>
                 )}
               </div>
@@ -12069,11 +12197,11 @@ function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C,
                         :<><button style={sty.btn("success","sm")} onClick={()=>approveLoan(loan.id)}>Setujui</button><button style={sty.btn("danger","sm")} onClick={()=>setRejectingId(loan.id)}>Tolak</button></>}
                     </div>
                   )}
-                  {isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&["ADMIN","TL","ASMAN"].includes(currentUser.role)&&(
+                  {isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&hasRole(currentUser, "ADMIN","TL","ASMAN")&&(
                     <button style={{...sty.btn("ghost","sm"),marginTop:6}} onClick={()=>completeLoan(loan.id)}>Tandai Kembali</button>
                   )}
                   {["DIPINJAM","OVERDUE","SELESAI"].includes(loan.runtimeStatus) && (
-                    <button style={{...sty.btn("ghost","sm"),marginTop:6,marginLeft:isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&["ADMIN","TL","ASMAN"].includes(currentUser.role)?6:0}} onClick={()=>downloadHeavyEquipmentLoanHTML(loan, eq, users, showToast)}>📄 Cetak Dokumen</button>
+                    <button style={{...sty.btn("ghost","sm"),marginTop:6,marginLeft:isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&hasRole(currentUser, "ADMIN","TL","ASMAN")?6:0}} onClick={()=>downloadHeavyEquipmentLoanHTML(loan, eq, users, showToast)}>📄 Cetak Dokumen</button>
                   )}
                 </div>
               );
@@ -12715,8 +12843,8 @@ function UsulanKatalogTab({ maraReference, setMaraReference, katalogList, setKat
   const [rejectingId, setRejectingId] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const canApprove = ["ASMAN","TL"].includes(currentUser.role);
-  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
+  const canApprove = hasRole(currentUser, "ASMAN","TL");
+  const canEdit = hasRole(currentUser, "ADMIN","TL");
 
   const existingKatalogs = new Set(katalogList.map(k => normalizeKatalog(String(k.katalog||""))));
 
@@ -12901,8 +13029,8 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, material
   const [detailItem, setDetailItem] = useState(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
 
-  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
-  const canApprove = currentUser.role === "ASMAN";
+  const canEdit = hasRole(currentUser, "ADMIN","TL");
+  const canApprove = hasRole(currentUser, "ASMAN");
 
   // Guard defensif terhadap shape data lama/tidak lengkap dari localStorage/CLOUD
   // (mis. tersimpan sebelum field ini ada) — tanpa ini, akses .slice/.filter
@@ -13833,7 +13961,7 @@ function parseKapasitasGudangSheet(rows) {
 function KapasitasGudangImportTab({ gudangCapacityImports, setGudangCapacityImports, currentUser, sty, C, saveToCloud, showToast }) {
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
-  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
+  const canEdit = hasRole(currentUser, "ADMIN","TL");
 
   function revalidateRecord(r) {
     const luasLahan = Number(r.luasLahanM2) || 0;
@@ -14094,7 +14222,7 @@ function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangList, lok
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
 
-  const canEdit = ["ADMIN","TL"].includes(currentUser.role);
+  const canEdit = hasRole(currentUser, "ADMIN","TL");
 
   // Daftar UPT unik dari data (string label, bukan Master UPT)
   const uptLabelList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
@@ -15279,9 +15407,9 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   const currentUserUptId = currentUser?.uptId
     || (ultgList||[]).find(u=>u.id===currentUser?.ultgId)?.parentUptId
     || (uptList||[]).find(u=>String(u.nama||"").toUpperCase().includes(appUptShort5.toUpperCase()))?.id;
-  const ultgPoolAdopt = ["ADMIN","TL"].includes(currentUser?.role) ? tug5UltgTxns.filter(t =>
+  const ultgPoolAdopt = hasRole(currentUser, "ADMIN","TL") ? tug5UltgTxns.filter(t =>
     t.stage==="APPROVED_ULTG" && !t.adoptedBy &&
-    (ultgList||[]).find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId
+    (currentUser?.role==="SUPERADMIN" || (ultgList||[]).find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId)
   ) : [];
 
   function stageBadge5(t) {
@@ -15300,7 +15428,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       {/* TUG-5 Permintaan UPT — disembunyikan untuk role ULTG (tidak relevan bagi mereka) */}
-      {!["ADMIN_ULTG","MGR_ULTG"].includes(currentUser.role) && (
+      {!hasRole(currentUser, "ADMIN_ULTG","MGR_ULTG") && (
       <>
       <div style={{fontSize:13,fontWeight:800,color:C.accent,borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginBottom:4}}>📋 TUG-5 — Permintaan Barang UPT</div>
       {tug5Txns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-5.</div>}
@@ -15326,12 +15454,12 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
             {t.status==="REJECTED" && <div style={{fontSize:11,color:C.red,marginBottom:8}}>❌ {t.rejectReason}</div>}
             {rejectingId===t.id && <div style={{marginBottom:8}}><input style={sty.input} placeholder="Alasan penolakan..." value={reason} onChange={e=>setReason(e.target.value)}/></div>}
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {t.stage==="PENDING_ASMAN" && currentUser.role==="ASMAN" && (
+              {t.stage==="PENDING_ASMAN" && hasRole(currentUser, "ASMAN") && (
                 rejectingId===t.id
                   ? <><button style={sty.btn("danger","sm")} onClick={()=>{rejectTUG5_Asman(t,reason);setRejectingId(null);setReason("");}}>Konfirmasi Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={sty.btn("success","sm")} onClick={()=>approveTUG5_Asman(t)}>✅ Setujui (Asman)</button><button style={{...sty.btn("ghost","sm"),border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ Tolak</button></>
               )}
-              {t.stage==="PENDING_MANAGER" && currentUser.role==="MANAGER" && (
+              {t.stage==="PENDING_MANAGER" && hasRole(currentUser, "MANAGER") && (
                 rejectingId===t.id
                   ? <><button style={sty.btn("danger","sm")} onClick={()=>{rejectTUG5_Manager(t,reason);setRejectingId(null);setReason("");}}>Konfirmasi Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={sty.btn("success","sm")} onClick={()=>approveTUG5_Manager(t)}>✅ Setujui (Manager) → Generate {t.jenisTransfer==="INTRACOMPANY"?"TUG-7":"TUG-5 UIT"}</button><button style={{...sty.btn("ghost","sm"),border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ Tolak</button></>
@@ -15345,7 +15473,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       )}
 
       {/* TUG-5 dari ULTG */}
-      {(["ADMIN_ULTG","MGR_ULTG","ADMIN","TL"].includes(currentUser.role)) && (
+      {(hasRole(currentUser, "ADMIN_ULTG","MGR_ULTG","ADMIN","TL")) && (
         <>
           <div style={{fontSize:13,fontWeight:800,color:"#0369a1",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏘️ TUG-5 — Permintaan Material dari ULTG</div>
           {currentUser.role==="MGR_ULTG" && !currentUser.ultgId && (
@@ -15357,9 +15485,9 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
           {tug5UltgTxns.slice(ultgListPage*5, ultgListPage*5+5).map(t=>{
             const ultg = (ultgList||[]).find(u=>u.id===t.ultgId);
             const creator = users.find(u=>u.id===t.createdBy)||{};
-            const canApprove = t.stage==="PENDING_MGR_ULTG" && currentUser.role==="MGR_ULTG" && t.ultgId===currentUser.ultgId;
-            const canAdopt = t.stage==="APPROVED_ULTG" && !t.adoptedBy && ["ADMIN","TL"].includes(currentUser.role) &&
-              ultg?.parentUptId === currentUserUptId;
+            const canApprove = t.stage==="PENDING_MGR_ULTG" && (currentUser.role==="SUPERADMIN" || (currentUser.role==="MGR_ULTG" && t.ultgId===currentUser.ultgId));
+            const canAdopt = t.stage==="APPROVED_ULTG" && !t.adoptedBy && hasRole(currentUser, "ADMIN","TL") &&
+              (currentUser.role==="SUPERADMIN" || ultg?.parentUptId === currentUserUptId);
             const isExpanded = ultgExpandedId===t.id;
 
             if (!isExpanded) {
@@ -15420,7 +15548,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
       )}
 
       {/* TUG-7 Perintah Penyerahan (UIT) */}
-      {(["ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","TL","ASMAN","MANAGER"].includes(currentUser.role)) && (
+      {(hasRole(currentUser, "ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","TL","ASMAN","MANAGER")) && (
         <>
           <div style={{fontSize:13,fontWeight:800,color:"#7c3aed",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏢 TUG-7 — Perintah Penyerahan Barang (Level UIT)</div>
           {tug7Txns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-7.</div>}
@@ -15447,10 +15575,10 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
                 </div>
                 {rejectingId===t.id && <div style={{marginBottom:8}}><input style={sty.input} placeholder="Alasan penolakan..." value={reason} onChange={e=>setReason(e.target.value)}/></div>}
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  {t.stage==="DRAFT_UIT" && currentUser.role==="ADMIN_UIT" && (
+                  {t.stage==="DRAFT_UIT" && hasRole(currentUser, "ADMIN_UIT") && (
                     <button style={sty.btn("primary","sm")} onClick={()=>{setTug7Form({uptPengirimId:t.uptPengirimId||"",atasBebanRekening:t.atasBebanRekening||"",perintahKerja:t.perintahKerja||"",kodeAkun:t.kodeAkun||"",fungsi:t.fungsi||""});setTug7Modal(t);}}>📝 Lengkapi TUG-7</button>
                   )}
-                  {t.stage==="PENDING_MGR_LOGISTIK" && currentUser.role==="MGR_LOGISTIK_UIT" && (
+                  {t.stage==="PENDING_MGR_LOGISTIK" && hasRole(currentUser, "MGR_LOGISTIK_UIT") && (
                     rejectingId===t.id
                       ? <><button style={sty.btn("danger","sm")} onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}>Konfirmasi Tolak</button><button style={sty.btn("ghost","sm")} onClick={()=>setRejectingId(null)}>Batal</button></>
                       : <><button style={sty.btn("success","sm")} onClick={()=>approveTUG7_MgrLogistik(t)}>✅ Setujui TUG-7 → Generate Draft TUG-8</button><button style={{...sty.btn("ghost","sm"),border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ Tolak</button></>
@@ -15484,7 +15612,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
                 })}
               </div>
               <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",borderRadius:6,padding:"6px 10px",marginBottom:8}}>⚠️ Draft ini perlu dikonfirmasi oleh Admin Gudang / TL UPT Pengirim sebelum masuk antrian approval TUG-8.</div>
-              {["ADMIN","TL"].includes(currentUser.role) && (
+              {hasRole(currentUser, "ADMIN","TL") && (
                 <button style={sty.btn("success","sm")} onClick={()=>konfirmasiDraftTUG8(t)}>✅ Konfirmasi — Aktifkan TUG-8 ini</button>
               )}
             </div>
@@ -15593,7 +15721,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
 
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 {/* Stage 1: TL approves Karantina */}
-                {t.stage==="PENDING_TL" && currentUser.role==="TL" && (
+                {t.stage==="PENDING_TL" && hasRole(currentUser, "TL") && (
                   rejectingId===t.id ? (
                     <>
                       <button style={{...sty.btn("danger","sm")}} onClick={()=>{rejectTUG3_TL(t,reason); setRejectingId(null); setReason("");}}>Konfirmasi Tolak</button>
@@ -15607,11 +15735,11 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
                   )
                 )}
                 {/* Stage 2a: Admin/TL fills TUG-4 form */}
-                {t.stage==="MENUNGGU_TUG4" && ["ADMIN","TL"].includes(currentUser.role) && (
+                {t.stage==="MENUNGGU_TUG4" && hasRole(currentUser, "ADMIN","TL") && (
                   <button style={sty.btn("primary","sm")} onClick={()=>openTug4Modal(t)}>📋 Isi Form TUG-4</button>
                 )}
                 {/* Stage 2b: Manager approves TUG-4 */}
-                {t.stage==="PENDING_MANAGER" && currentUser.role==="MANAGER" && (
+                {t.stage==="PENDING_MANAGER" && hasRole(currentUser, "MANAGER") && (
                   rejectingId===t.id ? (
                     <>
                       <button style={{...sty.btn("danger","sm")}} onClick={()=>{rejectTUG4_Manager(t,reason); setRejectingId(null); setReason("");}}>Konfirmasi Tolak</button>
@@ -15625,11 +15753,11 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
                   )
                 )}
                 {/* Stage 3a: Admin/TL completes final lampiran */}
-                {t.stage==="MENUNGGU_FINAL" && ["ADMIN","TL"].includes(currentUser.role) && (
+                {t.stage==="MENUNGGU_FINAL" && hasRole(currentUser, "ADMIN","TL") && (
                   <button style={sty.btn("primary","sm")} onClick={()=>openFinalModal(t)}>📎 Lengkapi Lampiran Final</button>
                 )}
                 {/* Stage 3b: Asman approves final */}
-                {t.stage==="PENDING_ASMAN" && currentUser.role==="ASMAN" && (
+                {t.stage==="PENDING_ASMAN" && hasRole(currentUser, "ASMAN") && (
                   rejectingId===t.id ? (
                     <>
                       <button style={{...sty.btn("danger","sm")}} onClick={()=>{rejectTUG3Final_Asman(t,reason); setRejectingId(null); setReason("");}}>Konfirmasi Tolak</button>
@@ -15728,9 +15856,9 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
   const [capPage, setCapPage] = useState(1);
   const [lokasiPage, setLokasiPage] = useState(1);
   useEffect(() => { setTugPage(1); setCapPage(1); setLokasiPage(1); }, [approvalTypeFilter, approvalPageSize]);
-  const canApproveCap = ["TL","ASMAN"].includes(currentUser.role);
+  const canApproveCap = hasRole(currentUser, "TL","ASMAN");
   const pendingCapacityImports = (gudangCapacityImports||[]).filter(i=>i.status==="PENDING_ASMAN");
-  const pendingLokasiChanges = currentUser.role==="TL" ? (lokasiList||[]).filter(l=>l.status==="PENDING") : [];
+  const pendingLokasiChanges = hasRole(currentUser, "TL") ? (lokasiList||[]).filter(l=>l.status==="PENDING") : [];
   const showTug = approvalTypeFilter==="ALL"||approvalTypeFilter==="TUG";
   const showCap = approvalTypeFilter==="ALL"||approvalTypeFilter==="KAPASITAS";
   const showLokasi = approvalTypeFilter==="ALL"||approvalTypeFilter==="LOKASI";
@@ -15758,10 +15886,10 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
   // bilang 0/"selesai" padahal ada 1 item nyata di bawahnya) dan sidebar juga
   // tidak ikut kasih notifikasi badge untuk ini. Tambahkan ke hitungan supaya
   // konsisten.
-  const pendingStockMoves = currentUser.role==="TL" ? (stocks||[]).filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL")
-    : currentUser.role==="ASMAN" ? (stocks||[]).filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="ASMAN") : [];
-  const pendingStockEdits = currentUser.role==="TL" ? (stocks||[]).filter(s=>s.editPending) : [];
-  const pendingStockDeletes = currentUser.role==="TL" ? (stocks||[]).filter(s=>s.deletePending) : [];
+  const pendingStockMoves = hasRole(currentUser, "TL") ? (stocks||[]).filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL")
+    : hasRole(currentUser, "ASMAN") ? (stocks||[]).filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="ASMAN") : [];
+  const pendingStockEdits = hasRole(currentUser, "TL") ? (stocks||[]).filter(s=>s.editPending) : [];
+  const pendingStockDeletes = hasRole(currentUser, "TL") ? (stocks||[]).filter(s=>s.deletePending) : [];
   const pendingStockCount = pendingStockMoves.length + pendingStockEdits.length + pendingStockDeletes.length;
 
   function stageLabelOf(t) {
@@ -15898,20 +16026,20 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
                   : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTxn(t)}>✅ SETUJUI — Stok Masuk</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
               )}
               {/* TUG-8 Draft dari TUG-7 */}
-              {isTUG8Draft && ["ADMIN","TL"].includes(currentUser.role) && (
+              {isTUG8Draft && hasRole(currentUser, "ADMIN","TL") && (
                 <button style={{...sty.btn("success"),flex:1}} onClick={()=>konfirmasiDraftTUG8(t)}>✅ Konfirmasi Draft TUG-8 — Aktifkan</button>
               )}
               {/* TUG-7 Draft UIT */}
-              {isTUG7Draft && currentUser.role==="ADMIN_UIT" && (
+              {isTUG7Draft && hasRole(currentUser, "ADMIN_UIT") && (
                 <button style={{...sty.btn("primary"),flex:1}} onClick={()=>{setTug7Form({uptPengirimId:"",atasBebanRekening:"",perintahKerja:t.perintahKerja||"",kodeAkun:t.kodeAkun||"",fungsi:t.fungsi||""});setTug7Modal(t);}}>📝 Lengkapi TUG-7 (Pilih UPT Pengirim)</button>
               )}
-              {t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && currentUser.role==="MGR_LOGISTIK_UIT" && (
+              {t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && hasRole(currentUser, "MGR_LOGISTIK_UIT") && (
                 rejectingId===t.id
                   ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG7_MgrLogistik(t)}>✅ SETUJUI TUG-7 → Generate Draft TUG-8</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
               )}
               {/* TUG-5 dari ULTG — approval Manager ULTG */}
-              {t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && currentUser.role==="MGR_ULTG" && (
+              {t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && hasRole(currentUser, "MGR_ULTG") && (
                 rejectingId===t.id
                   ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG5_MgrULTG(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
                   : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG5_MgrULTG(t)}>✅ SETUJUI (Manager ULTG)</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>

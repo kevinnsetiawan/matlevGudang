@@ -18,15 +18,19 @@
 //      node scripts/bulk_create_users.mjs scripts/users.csv
 //
 // Kolom CSV (header wajib persis ini, urutan bebas):
-//   username,password,name,role,jabatan,upt_id,ultg_id
-//   - username   : dipakai login (tanpa "@..."), huruf kecil, tanpa spasi
-//   - password   : minimal 6 karakter (syarat Supabase Auth)
-//   - name       : nama tampilan
-//   - role       : ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT /
-//                  ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER
-//   - jabatan    : opsional, boleh kosong
-//   - upt_id     : opsional (isi kalau perlu discope ke 1 UPT tertentu)
-//   - ultg_id    : WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG, selain itu boleh kosong
+//   username,password,name,role,jabatan,upt_id,ultg_id,uit_id,pengadaan_scope
+//   - username        : dipakai login (tanpa "@..."), huruf kecil, tanpa spasi
+//   - password        : minimal 6 karakter (syarat Supabase Auth)
+//   - name            : nama tampilan
+//   - role            : ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT /
+//                       ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER
+//                       (SUPERADMIN TIDAK BISA didaftarkan lewat script ini — manual SQL/Dashboard saja)
+//   - jabatan         : opsional, boleh kosong
+//   - upt_id          : wajib untuk role scope-UPT (ADMIN/TL/ASMAN/MANAGER, PENGADAAN mode UPT)
+//   - ultg_id         : WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG, selain itu boleh kosong
+//   - uit_id          : wajib untuk role ADMIN_UIT / MGR_LOGISTIK_UIT, atau PENGADAAN mode UIT
+//   - pengadaan_scope : "UPT" (default) atau "UIT" — cuma relevan kalau role=PENGADAAN, menentukan
+//                       field mana (upt_id atau uit_id) yang dipakai & kuota mana yang dicek
 
 import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
@@ -35,7 +39,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const AUTH_EMAIL_DOMAIN = "@warnoto.pln.local"; // harus SAMA PERSIS dengan AUTH_EMAIL_DOMAIN di App.jsx
 
-const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER"];
+const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
+
+// Kuota role per UPT/UIT (hard limit) — sama seperti admin-create-user/admin-update-user,
+// supaya batch import CSV tidak bisa bikin 2 Manager/Asman/TL/Admin/Pengadaan di 1 UPT/UIT
+// yang sama, konsisten dengan validasi yang sudah aktif di menu Kelola Akun.
+const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
+const UIT_SCOPED_ROLES = ["ADMIN_UIT", "MGR_LOGISTIK_UIT"];
+const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT" };
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.error("Env var SUPABASE_URL / SUPABASE_SECRET_KEY (service_role) belum di-set.");
@@ -74,14 +86,34 @@ async function run() {
 
   let created = 0, updated = 0, skipped = 0, failed = 0;
 
+  // Baseline kuota role per UPT/UIT dari data yang sudah ada di database, supaya
+  // baris CSV yang bentrok dengan akun existing (bukan cuma sesama baris CSV)
+  // ikut tertangkap. key = "ROLE|upt:<id>" atau "ROLE|uit:<id>" -> {username, name}.
+  const quotaRoles = [...new Set([...Object.keys(UPT_ROLE_QUOTA), ...Object.keys(UIT_ROLE_QUOTA)])];
+  const { data: existingProfiles } = await supabase.from("profiles")
+    .select("username, role, upt_id, uit_id, name").in("role", quotaRoles);
+  const quotaHolder = new Map();
+  for (const p of existingProfiles || []) {
+    if (p.upt_id) {
+      const key = `${p.role}|upt:${p.upt_id}`;
+      if (!quotaHolder.has(key)) quotaHolder.set(key, { username: p.username, name: p.name });
+    }
+    if (p.uit_id) {
+      const key = `${p.role}|uit:${p.uit_id}`;
+      if (!quotaHolder.has(key)) quotaHolder.set(key, { username: p.username, name: p.name });
+    }
+  }
+
   for (const row of rows) {
     const username = (row.username || "").trim().toLowerCase();
     const password = row.password || "";
     const name = row.name || username;
     const role = (row.role || "VIEWER").trim().toUpperCase();
     const jabatan = row.jabatan || null;
-    const uptId = row.upt_id || null;
+    const uptIdRaw = row.upt_id || null;
     const ultgId = row.ultg_id || null;
+    const uitIdRaw = row.uit_id || null;
+    const pengadaanScope = (row.pengadaan_scope || "UPT").trim().toUpperCase();
 
     if (!username || !password) {
       console.log(`⚠️  Skip baris (username/password kosong): ${JSON.stringify(row)}`);
@@ -91,9 +123,35 @@ async function run() {
       console.log(`⚠️  Skip "${username}": role "${role}" tidak dikenal. Pilihan valid: ${VALID_ROLES.join(", ")}`);
       skipped++; continue;
     }
+    if (role === "SUPERADMIN") {
+      console.log(`⚠️  Skip "${username}": role SUPERADMIN tidak bisa didaftarkan lewat script ini — pakai SQL/Dashboard manual.`);
+      skipped++; continue;
+    }
     if ((role === "ADMIN_ULTG" || role === "MGR_ULTG") && !ultgId) {
       console.log(`⚠️  "${username}" role ${role} WAJIB isi ultg_id di CSV — dilewati dulu, isi kolom ultg_id lalu jalankan ulang untuk baris ini.`);
       skipped++; continue;
+    }
+
+    const isUitScoped = UIT_SCOPED_ROLES.includes(role) || (role === "PENGADAAN" && pengadaanScope === "UIT");
+    const uptId = isUitScoped ? null : uptIdRaw;
+    const uitId = isUitScoped ? uitIdRaw : null;
+    if (isUitScoped && !uitId) {
+      console.log(`⚠️  "${username}" role ${ROLE_LABELS[role]||role} WAJIB isi uit_id di CSV — dilewati.`);
+      skipped++; continue;
+    }
+    if (!isUitScoped && !uptId) {
+      console.log(`⚠️  "${username}" role ${ROLE_LABELS[role]||role} WAJIB isi upt_id di CSV — dilewati.`);
+      skipped++; continue;
+    }
+
+    if (isUitScoped ? UIT_ROLE_QUOTA[role] !== undefined : UPT_ROLE_QUOTA[role] !== undefined) {
+      const quotaKey = isUitScoped ? `${role}|uit:${uitId}` : `${role}|upt:${uptId}`;
+      const holder = quotaHolder.get(quotaKey);
+      if (holder && holder.username !== username) {
+        const unitLabel = isUitScoped ? "UIT" : "UPT";
+        console.log(`⚠️  Skip "${username}": ${unitLabel} ini sudah punya ${ROLE_LABELS[role]||role} (${holder.name}, username "${holder.username}"). Turunkan role user itu dulu sebelum daftarkan yang baru.`);
+        skipped++; continue;
+      }
     }
 
     const email = `${username}${AUTH_EMAIL_DOMAIN}`;
@@ -123,14 +181,18 @@ async function run() {
 
     // 2. Update profil (trigger sudah bikin stub role VIEWER, timpa dengan data asli dari CSV)
     const { error: profErr } = await supabase.from("profiles").update({
-      username, name, role, jabatan, upt_id: uptId, ultg_id: ultgId,
+      username, name, role, jabatan, upt_id: uptId, ultg_id: ultgId, uit_id: uitId,
     }).eq("id", userId);
     if (profErr) {
       console.log(`❌ "${username}": akun Auth OK tapi gagal update profil — ${profErr.message}`);
       failed++; continue;
     }
     updated++;
-    console.log(`   → profil diperbarui: ${name}, role ${role}${jabatan?`, jabatan ${jabatan}`:""}${uptId?`, upt_id ${uptId}`:""}${ultgId?`, ultg_id ${ultgId}`:""}`);
+    if (isUitScoped ? UIT_ROLE_QUOTA[role] !== undefined : UPT_ROLE_QUOTA[role] !== undefined) {
+      const quotaKey = isUitScoped ? `${role}|uit:${uitId}` : `${role}|upt:${uptId}`;
+      quotaHolder.set(quotaKey, { username, name });
+    }
+    console.log(`   → profil diperbarui: ${name}, role ${role}${jabatan?`, jabatan ${jabatan}`:""}${uptId?`, upt_id ${uptId}`:""}${ultgId?`, ultg_id ${ultgId}`:""}${uitId?`, uit_id ${uitId}`:""}`);
   }
 
   console.log(`\nSelesai. ${created} akun baru dibuat, ${updated} profil diperbarui, ${skipped} dilewati, ${failed} gagal.`);

@@ -29,7 +29,19 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const AUTH_EMAIL_DOMAIN = "@warnoto.pln.local"; // harus SAMA PERSIS dengan App.jsx
 
-const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER"];
+const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
+
+// Kuota role per UPT — 1 unit UPT hanya boleh punya 1 orang di posisi kunci
+// ini sekaligus, supaya tidak ada rangkap jabatan struktural. Hard limit:
+// ditolak total kalau slot penuh, Admin wajib turunkan role user lama dulu
+// (bukan auto-downgrade, sesuai preferensi WARNOTO: review-first).
+const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
+// Kuota role per UIT — sama prinsipnya, level di atas UPT. PENGADAAN dibagi 2
+// scope independen (UPT vs UIT), dibedakan lewat upt_id vs uit_id yang terisi
+// (lihat pengecekan di bawah), bukan role value yang berbeda.
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
+const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT" };
+const UIT_SCOPED_ROLES = ["ADMIN_UIT", "MGR_LOGISTIK_UIT"]; // PENGADAAN scope UIT ditentukan lewat body.pengadaanScope, bukan role tetap
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -56,7 +68,7 @@ Deno.serve(async (req) => {
     if (callerErr || !callerAuth?.user) return json({ ok: false, error: "Sesi login tidak valid, silakan login ulang." }, 401);
 
     const { data: callerProfile } = await admin.from("profiles").select("role").eq("id", callerAuth.user.id).single();
-    if (!callerProfile || callerProfile.role !== "ADMIN") {
+    if (!callerProfile || (callerProfile.role !== "ADMIN" && callerProfile.role !== "SUPERADMIN")) {
       return json({ ok: false, error: "Hanya Admin yang bisa mendaftarkan akun baru." }, 403);
     }
 
@@ -69,6 +81,10 @@ Deno.serve(async (req) => {
     const jabatan = body.jabatan ? String(body.jabatan).trim() : null;
     const uptId = body.uptId ? String(body.uptId).trim() : null;
     const ultgId = body.ultgId ? String(body.ultgId).trim() : null;
+    const uitId = body.uitId ? String(body.uitId).trim() : null;
+    // Cuma relevan kalau role===PENGADAAN — role ini punya 2 slot kuota independen
+    // (1 di UPT, 1 di UIT), dibedakan lewat field mana yang diisi, bukan role value beda.
+    const pengadaanScope = String(body.pengadaanScope || "UPT").trim().toUpperCase();
 
     if (!username || !/^[a-z0-9._-]+$/.test(username)) {
       return json({ ok: false, error: "Username wajib diisi, huruf kecil/angka tanpa spasi." });
@@ -78,12 +94,44 @@ Deno.serve(async (req) => {
     }
     if (!name) return json({ ok: false, error: "Nama lengkap wajib diisi." });
     if (!jabatan) return json({ ok: false, error: "Jabatan wajib diisi." });
-    if (!uptId) return json({ ok: false, error: "UPT wajib dipilih." });
     if (!VALID_ROLES.includes(role)) {
       return json({ ok: false, error: `Role tidak dikenal. Pilihan valid: ${VALID_ROLES.join(", ")}` });
     }
+    if (role === "SUPERADMIN") {
+      return json({ ok: false, error: "Role SUPERADMIN tidak bisa dibuat lewat menu ini — hubungi pengelola sistem." });
+    }
     if ((role === "ADMIN_ULTG" || role === "MGR_ULTG") && !ultgId) {
       return json({ ok: false, error: `Role ${role} wajib memilih unit ULTG.` });
+    }
+
+    // Role level-UIT (ADMIN_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT pakai
+    // uitId, bukan uptId — field-nya saling eksklusif di form Kelola Akun.
+    const isUitScoped = UIT_SCOPED_ROLES.includes(role) || (role === "PENGADAAN" && pengadaanScope === "UIT");
+    if (isUitScoped) {
+      if (!uitId) return json({ ok: false, error: `Role ${ROLE_LABELS[role] || role} wajib memilih unit UIT.` });
+    } else {
+      if (!uptId) return json({ ok: false, error: "UPT wajib dipilih." });
+    }
+
+    // ── 2b. Kuota role per UPT/UIT (hard limit) ──
+    if (isUitScoped) {
+      if (UIT_ROLE_QUOTA[role] !== undefined) {
+        const { data: existing, error: quotaErr } = await admin
+          .from("profiles").select("name").eq("role", role).eq("uit_id", uitId);
+        if (quotaErr) return json({ ok: false, error: `Gagal memeriksa kuota role: ${quotaErr.message}` });
+        if ((existing?.length || 0) >= UIT_ROLE_QUOTA[role]) {
+          const holder = existing[0]?.name || "user lain";
+          return json({ ok: false, error: `UIT ini sudah punya ${ROLE_LABELS[role]}: ${holder}. Turunkan role user tersebut dulu sebelum menetapkan yang baru.` });
+        }
+      }
+    } else if (UPT_ROLE_QUOTA[role] !== undefined) {
+      const { data: existing, error: quotaErr } = await admin
+        .from("profiles").select("name").eq("role", role).eq("upt_id", uptId);
+      if (quotaErr) return json({ ok: false, error: `Gagal memeriksa kuota role: ${quotaErr.message}` });
+      if ((existing?.length || 0) >= UPT_ROLE_QUOTA[role]) {
+        const holder = existing[0]?.name || "user lain";
+        return json({ ok: false, error: `UPT ini sudah punya ${ROLE_LABELS[role]}: ${holder}. Turunkan role user tersebut dulu sebelum menetapkan yang baru.` });
+      }
     }
 
     // ── 3. Buat akun Auth ──
@@ -103,7 +151,10 @@ Deno.serve(async (req) => {
     // ── 4. Trigger on_auth_user_created sudah bikin stub profile (role VIEWER) —
     //        timpa dengan data asli dari form ──
     const { error: profErr } = await admin.from("profiles").update({
-      username, name, role, jabatan, upt_id: uptId, ultg_id: ultgId,
+      username, name, role, jabatan,
+      upt_id: isUitScoped ? null : uptId,
+      ultg_id: ultgId,
+      uit_id: isUitScoped ? uitId : null,
     }).eq("id", userId);
     if (profErr) {
       return json({ ok: false, error: `Akun Auth dibuat tapi gagal menyimpan profil: ${profErr.message}` });

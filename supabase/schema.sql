@@ -234,16 +234,22 @@ create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
   name text not null,
-  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER
+  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER / SUPERADMIN
   jabatan text,
   avatar text,
   upt_id text,                  -- diisi untuk role scoped ke 1 UPT tertentu (opsional, biasanya via UPT konstan app)
   ultg_id text,                 -- WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG — unit ULTG yang dia wakili
+  uit_id text,                  -- diisi untuk role scoped ke 1 UIT (ADMIN_UIT / MGR_LOGISTIK_UIT / PENGADAAN mode UIT)
   created_at timestamptz default now()
 );
+-- upt_id/ultg_id/uit_id SENGAJA tanpa foreign key ke tabel upt/uit di sini —
+-- tabel upt/uit baru didefinisikan di bagian 8 (MASTER DATA) di bawah, setelah
+-- section ini, jadi FK inline di sini akan gagal saat schema.sql dijalankan
+-- dari kosong (forward reference ke tabel yang belum ada).
 -- Migrasi installasi lama yang tabelnya sudah ada sebelum kolom ini ditambahkan:
 alter table profiles add column if not exists upt_id text;
 alter table profiles add column if not exists ultg_id text;
+alter table profiles add column if not exists uit_id text;
 
 alter table profiles enable row level security;
 drop policy if exists "Authenticated read profiles" on profiles;
