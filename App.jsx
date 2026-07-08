@@ -2104,6 +2104,91 @@ function downloadHeavyEquipmentLoanHTML(loan, equipment, users, showToast) {
   showToast && showToast("📄 File diunduh! Buka di browser lalu Print → Save as PDF.", "success");
 }
 
+// ─── BERITA ACARA STOCK OPNAME DOCUMENT BUILDER ──────────────────────────
+// Dipanggil downloadBeritaAcara() di StockOpnameTab. Sebelumnya tombol "Download
+// Berita Acara" pasti crash karena fungsi ini belum pernah dibuat (bug lama).
+function buildBeritaAcaraHTML(opn, katalogList, users) {
+  const items = opn.items || [];
+  const creator = (users||[]).find(u=>u.id===opn.dibuatOleh) || {};
+  const asmanUser = (users||[]).find(u=>u.id===opn.approvedByAsman) || {};
+  const mgrUser = (users||[]).find(u=>u.id===opn.approvedByManager) || {};
+  const fmt = (v) => (v===null||v===undefined||v==="") ? "-" : v;
+
+  const statusLabel = (s) => ({
+    SESUAI: "Sesuai",
+    TIDAK_ADA_DI_SAP: "Tidak ada di SAP",
+    TIDAK_ADA_DI_SISTEM: "Tidak terdaftar",
+  }[s] || s || "-");
+
+  const itemRows = items.map((it, idx) => `
+    <tr>
+      <td style="text-align:center">${idx+1}</td>
+      <td>${fmt(it.namaBarang)}</td>
+      <td style="text-align:center">${fmt(it.noKatalog)}</td>
+      <td style="text-align:center">${fmt(it.satuan)}</td>
+      <td style="text-align:center">${fmt(it.qtySistem)}</td>
+      <td style="text-align:center">${it.qtySAP===null||it.qtySAP===undefined?"-":it.qtySAP}</td>
+      <td style="text-align:center">${fmt(it.qtsFisik)}</td>
+      <td style="text-align:center">${fmt(it.selisih)}</td>
+      <td style="text-align:center">${statusLabel(it.statusItem)}</td>
+      <td>${fmt(it.keterangan)}</td>
+    </tr>`).join("");
+
+  const total = items.length;
+  const akurat = items.filter(i=>Number(i.selisih)===0).length;
+  const selisihCount = items.filter(i=>Number(i.selisih)!==0).length;
+  const belumTerdaftar = items.filter(i=>i.statusItem==="TIDAK_ADA_DI_SISTEM").length;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Berita Acara Opname ${opn.id}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10.5px;color:#111;background:#e5e7eb}.page{padding:28px;background:white;max-width:900px;margin:0 auto 16px;min-height:100vh}.topbar{height:5px;background:linear-gradient(90deg,#00377a,#0098da);margin-bottom:4px}.doctitle{text-align:center;margin-bottom:14px}.doctitle h2{font-size:14px;font-weight:800;text-decoration:underline}.doctitle .docno{font-size:10px;font-style:italic;color:#0098da;margin-top:2px}table.meta{width:100%;margin-bottom:14px;border:1px solid #ccc;border-radius:4px;padding:8px}table.meta td{padding:4px 6px;font-size:10.5px}table.meta td.label{width:160px}table.meta td.colon{width:10px}.kpi{display:flex;gap:8px;margin-bottom:12px}.kpi .box{flex:1;border:1px solid #ccc;border-radius:4px;padding:8px;text-align:center}.kpi .box .n{font-size:16px;font-weight:800;color:#00377a}.kpi .box .l{font-size:9px;color:#555;margin-top:2px}table.items{width:100%;border-collapse:collapse;margin-bottom:14px}table.items th{background:#003087;color:white;padding:6px 5px;font-size:9.5px;text-align:center;border:1px solid #ccc}table.items td{padding:5px 5px;border:1px solid #ccc;font-size:9.5px}.sig-row{display:flex;justify-content:space-around;margin-top:30px;text-align:center}.sig-col{width:200px;font-size:10px}.sig-space{height:55px}.sig-name{font-weight:700;text-decoration:underline;margin-top:2px}.print-bar{position:sticky;top:0;background:#003087;color:white;padding:8px 14px;text-align:center;font-size:12px;font-weight:700;z-index:10}.print-bar button{background:#16a34a;color:white;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer;margin-left:10px}@media print{.print-bar{display:none}body{background:white}}</style></head><body>
+<div class="print-bar">📄 Berita Acara Stock Opname siap cetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
+<div class="page">
+<div class="topbar"></div>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+  <div><b>PT PLN (PERSERO)</b><br/>UPT ${(creator.upt||"Surabaya")}</div>
+  <div style="font-weight:800;font-size:13px">BERITA ACARA<br/>STOCK OPNAME</div>
+</div>
+<div class="doctitle"><h2>BERITA ACARA STOCK OPNAME (${opn.jenisAlur})</h2><div class="docno">No. : ${opn.id}</div></div>
+<table class="meta">
+  <tr><td class="label">Semester</td><td class="colon">:</td><td>${fmt(opn.semester)}</td></tr>
+  <tr><td class="label">Jenis Opname</td><td class="colon">:</td><td>${fmt(opn.jenisAlur)} (${fmt(opn.kategori)})</td></tr>
+  <tr><td class="label">Tanggal Pelaksanaan</td><td class="colon">:</td><td>${fmtDate(opn.dibuatAt)}</td></tr>
+  <tr><td class="label">Tanggal Submit</td><td class="colon">:</td><td>${fmtDate(opn.submittedAt)}</td></tr>
+  <tr><td class="label">Approval Asman</td><td class="colon">:</td><td>${fmtDate(opn.approvedAtAsman)}${opn.catatanAsman?` • ${opn.catatanAsman}`:""}</td></tr>
+  <tr><td class="label">Approval Manager</td><td class="colon">:</td><td>${fmtDate(opn.approvedAtManager)}${opn.catatanManager?` • ${opn.catatanManager}`:""}</td></tr>
+</table>
+<div class="kpi">
+  <div class="box"><div class="n">${total}</div><div class="l">Total Item</div></div>
+  <div class="box"><div class="n">${akurat}</div><div class="l">Sesuai</div></div>
+  <div class="box"><div class="n">${selisihCount}</div><div class="l">Selisih</div></div>
+  <div class="box"><div class="n">${belumTerdaftar}</div><div class="l">Belum Terdaftar</div></div>
+</div>
+<p style="font-size:10px;margin-bottom:8px">Pada hari/tanggal tersebut di atas telah dilakukan pencatatan persediaan material ${opn.jenisAlur} secara fisik, dengan rincian sebagai berikut:</p>
+<table class="items">
+  <thead><tr><th>No.</th><th style="width:28%">Nama Barang</th><th>No. Katalog</th><th>Stn.</th><th>Qty Sistem</th><th>Qty SAP</th><th>Qty Fisik</th><th>Selisih</th><th>Status</th><th>Keterangan</th></tr></thead>
+  <tbody>${itemRows}</tbody>
+</table>
+<p style="font-size:10px;margin-bottom:20px">Demikian berita acara ini dibuat dengan sebenar-benarnya, menjadi bukti hasil pencatatan fisik yang telah disetujui pada tingkat Asman dan Manager.</p>
+<div class="sig-row">
+  <div class="sig-col">
+    <b>PELAKSANA OPNAME</b>
+    <div class="sig-space"></div>
+    <div class="sig-name">${creator.name||"....................."}</div>
+  </div>
+  <div class="sig-col">
+    <b>ASMAN KONSTRUKSI</b>
+    <div class="sig-space"></div>
+    <div class="sig-name">${asmanUser.name||"....................."}</div>
+  </div>
+  <div class="sig-col">
+    <b>MANAGER</b>
+    <div class="sig-space"></div>
+    <div class="sig-name">${mgrUser.name||"....................."}</div>
+  </div>
+</div>
+</div></body></html>`;
+}
+
 function downloadTUG7HTML(txn, katalogList, uitList, uptList, users, showToast) {
   const html = buildTUG7HTML(txn, katalogList, uitList, uptList, users);
   const blob = new Blob([html], {type:"text/html"});
@@ -6071,7 +6156,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             currentUser={currentUser}
           />
         )}
-        {tab==="dashboard" && hasRole(currentUser, "ASMAN") && (
+        {tab==="dashboard" && hasRole(currentUser, "ASMAN") && !hasRole(currentUser, "MANAGER") && (
           <DashboardAsman
             stocks={enrichedStocks} txns={txns} katalogList={katalogList}
             rencanaKedatanganList={rencanaKedatanganList}
