@@ -2570,6 +2570,11 @@ export default function PLNWarehouse() {
   const [katalogForm, setKatalogForm] = useState({});
   const [lokasiModal, setLokasiModal] = useState(null);
   const [lokasiForm, setLokasiForm] = useState({});
+  const [lokasiDeleteConfirm, setLokasiDeleteConfirm] = useState(null); // blok gudang (lokasi) yang sedang dikonfirmasi hapus
+  const [confirmDialog, setConfirmDialog] = useState(null); // popup konfirmasi hapus generik untuk Master Data lain (Katalog, Satpam, UIT, ULTG, UPT, Gudang): {title, message, warning, confirmLabel, onConfirm}
+  function askConfirmDelete({ title, message, warning, confirmLabel, onConfirm }) {
+    setConfirmDialog({ title: title||"Hapus Data?", message, warning, confirmLabel: confirmLabel||"🗑️ Ya, Hapus", onConfirm });
+  }
   const [timMutuModal, setTimMutuModal] = useState(null);
   const [timMutuForm, setTimMutuForm] = useState({});
   const [uitModal, setUitModal] = useState(null);
@@ -3269,14 +3274,22 @@ export default function PLNWarehouse() {
   }
   async function deleteKatalog(id) {
     if (stocks.some(s=>s.katalogId===id)) { showToast("Tidak bisa hapus: katalog ini masih dipakai di Data Stok!","error"); return; }
-    if (!window.confirm("Hapus katalog barang ini dari Master Data?")) return;
-    const nk = katalogList.filter(k=>k.id!==id);
-    setKatalogList(nk); await saveToCloud({katalogList: nk}); showToast("Katalog dihapus.");
+    const k = katalogList.find(x=>x.id===id);
+    askConfirmDelete({
+      title: "Hapus Katalog Barang?",
+      message: <>Apakah Anda yakin ingin menghapus katalog barang <b>{k?.name||"-"}</b> (No. Katalog {k?.katalog||"-"})?</>,
+      warning: "Tindakan ini tidak bisa dibatalkan.",
+      onConfirm: async () => {
+        const nk = katalogList.filter(x=>x.id!==id);
+        setKatalogList(nk); await saveToCloud({katalogList: nk}); showToast("Katalog dihapus.");
+      }
+    });
   }
 
   // ── MASTER LOKASI GUDANG CRUD ──
-  // Semua perubahan (tambah/edit/hapus) blok lokasi butuh approval TL,
-  // kecuali yang mengajukan sendiri adalah TL (langsung disetujui).
+  // Tambah/edit/hapus blok lokasi langsung berlaku, tanpa approval siapapun —
+  // menu ini cuma bisa diakses ADMIN (lihat gating hasRole di render Master
+  // Gudang), jadi tidak perlu alur PENDING/approval TL lagi (permintaan user 2026-07-09).
   function openAddLokasi() {
     setLokasiForm({ id:`LOK-${uid().slice(-6)}`, kode:"", keterangan:"", kapasitas:50 });
     setLokasiModal("add");
@@ -3309,34 +3322,29 @@ export default function PLNWarehouse() {
     if (isKodeDuplicateInGudang(lokasiForm.kode, lokasiForm.gudangId, lokasiModal==="edit"?lokasiForm.id:null)) {
       showToast(`Kode blok "${lokasiForm.kode}" sudah dipakai di gudang ini!`,"error"); return;
     }
-    const isTL = hasRole(currentUser, "TL");
     let nl;
     if (lokasiModal==="edit") {
-      nl = lokasiList.map(l => l.id===lokasiForm.id ? (
-        isTL
-          ? { ...l, ...lokasiForm, status:"APPROVED", pendingAction:null, pendingData:null }
-          : { ...l, status:"PENDING", pendingAction:"EDIT", pendingData:{...lokasiForm}, requestedBy:currentUser.id, requestedAt:Date.now() }
-      ) : l);
+      nl = lokasiList.map(l => l.id===lokasiForm.id ? { ...l, ...lokasiForm, status:"APPROVED", pendingAction:null, pendingData:null } : l);
     } else {
-      const baru = { ...lokasiForm, createdAt:Date.now(),
-        status: isTL ? "APPROVED" : "PENDING",
-        pendingAction: isTL ? null : "ADD",
-        requestedBy: currentUser.id, requestedAt: Date.now() };
+      const baru = { ...lokasiForm, createdAt:Date.now(), status:"APPROVED", pendingAction:null, requestedBy:currentUser.id, requestedAt:Date.now() };
       nl = [...lokasiList, baru];
     }
     setLokasiList(nl); setLokasiModal(null);
     await syncLokasi(nl);
-    showToast(isTL ? (lokasiModal==="edit"?"Master Lokasi diupdate!":"Lokasi gudang baru ditambahkan!") : "📨 Diajukan! Menunggu approval TL.");
+    showToast(lokasiModal==="edit" ? "Master Lokasi diupdate!" : "Lokasi gudang baru ditambahkan!");
   }
-  // Catatan: tombol pemanggil ini (App.jsx render Master Gudang) hanya dirender
-  // untuk role ADMIN, jadi cabang approval-flow "PENDING" di bawah ini
-  // (dulunya ditujukan untuk role non-TL mengajukan approval ke TL) tidak
-  // pernah tereksekusi lewat UI saat ini — ADMIN selalu hapus langsung.
-  async function deleteLokasi(id) {
-    if (stocks.some(s=>s.lokasiId===id)) { showToast("Tidak bisa hapus: lokasi ini masih dipakai di Data Stok!","error"); return; }
-    if (!window.confirm("Hapus lokasi gudang ini dari Master Data?")) return;
-    const nl = lokasiList.filter(l=>l.id!==id);
-    setLokasiList(nl); await syncLokasi(nl);
+  // Buka popup konfirmasi hapus blok gudang (bukan langsung hapus) —
+  // tombol pemanggil hanya dirender untuk role ADMIN.
+  function requestDeleteLokasi(l) {
+    if (stocks.some(s=>s.lokasiId===l.id)) { showToast("Tidak bisa hapus: lokasi ini masih dipakai di Data Stok!","error"); return; }
+    setLokasiDeleteConfirm(l);
+  }
+  async function confirmDeleteLokasi() {
+    const l = lokasiDeleteConfirm;
+    if (!l) return;
+    const nl = lokasiList.filter(x=>x.id!==l.id);
+    setLokasiList(nl); setLokasiDeleteConfirm(null);
+    await syncLokasi(nl);
     showToast("Lokasi dihapus.");
   }
 
@@ -3432,7 +3440,7 @@ export default function PLNWarehouse() {
         {hasRole(currentUser, "ADMIN") && (
           <div style={{display:"flex",gap:6}}>
             <button style={{...sty.btn("ghost","sm"),flex:1}} onClick={()=>openEditLokasi(l)} disabled={isPending}>✏️ Edit</button>
-            <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>deleteLokasi(l.id)} disabled={isPending}>🗑️ Hapus</button>
+            <button style={{...sty.btn("danger","sm"),flex:1}} onClick={()=>requestDeleteLokasi(l)} disabled={isPending}>🗑️ Hapus</button>
           </div>
         )}
       </div>
@@ -3546,9 +3554,16 @@ export default function PLNWarehouse() {
     showToast(satpamModal==="edit" ? "Data Satpam diupdate!" : "Satpam baru ditambahkan!");
   }
   async function deleteSatpam(id) {
-    if (!window.confirm("Hapus Satpam ini dari daftar?")) return;
-    const nsp = satpamList.filter(s=>s.id!==id);
-    setSatpamList(nsp); await syncMasterTable("satpam", nsp); showToast("Satpam dihapus.");
+    const s = satpamList.find(x=>x.id===id);
+    askConfirmDelete({
+      title: "Hapus Data Satpam?",
+      message: <>Apakah Anda yakin ingin menghapus data Satpam <b>{s?.name||"-"}</b>?</>,
+      warning: "Tindakan ini tidak bisa dibatalkan.",
+      onConfirm: async () => {
+        const nsp = satpamList.filter(x=>x.id!==id);
+        setSatpamList(nsp); await syncMasterTable("satpam", nsp); showToast("Satpam dihapus.");
+      }
+    });
   }
 
   // ── Master Tim Mutu CRUD (2 paket TETAP — hanya edit anggota, tidak tambah/hapus paket) ──
@@ -3571,9 +3586,17 @@ export default function PLNWarehouse() {
     showToast(uitModal==="add"?"UIT ditambahkan!":"UIT diupdate!");
   }
   async function deleteUIT(id) {
-    if (!window.confirm("Hapus UIT ini?")) return;
-    const nu = uitList.filter(u=>u.id!==id);
-    setUitList(nu); await syncMasterTable("uit", nu); showToast("UIT dihapus.");
+    const u = uitList.find(x=>x.id===id);
+    const uptCount = uptList.filter(p=>p.uitId===id).length;
+    askConfirmDelete({
+      title: "Hapus UIT?",
+      message: <>Apakah Anda yakin ingin menghapus UIT <b>{u?.nama||"-"}</b>?</>,
+      warning: uptCount>0 ? `Tindakan ini tidak bisa dibatalkan dan ada ${uptCount} UPT yang masih terhubung ke UIT ini.` : "Tindakan ini tidak bisa dibatalkan.",
+      onConfirm: async () => {
+        const nu = uitList.filter(x=>x.id!==id);
+        setUitList(nu); await syncMasterTable("uit", nu); showToast("UIT dihapus.");
+      }
+    });
   }
 
   // ── Master ULTG CRUD (unit di bawah UPT) ──
@@ -3589,9 +3612,16 @@ export default function PLNWarehouse() {
     showToast(ultgModal==="add"?"ULTG ditambahkan!":"ULTG diupdate!");
   }
   async function deleteULTG(id) {
-    if (!window.confirm("Hapus ULTG ini?")) return;
-    const nu = ultgList.filter(u=>u.id!==id);
-    setUltgList(nu); await syncUltg(nu); showToast("ULTG dihapus.");
+    const u = ultgList.find(x=>x.id===id);
+    askConfirmDelete({
+      title: "Hapus ULTG?",
+      message: <>Apakah Anda yakin ingin menghapus ULTG <b>{u?.nama||"-"}</b>?</>,
+      warning: "Tindakan ini tidak bisa dibatalkan.",
+      onConfirm: async () => {
+        const nu = ultgList.filter(x=>x.id!==id);
+        setUltgList(nu); await syncUltg(nu); showToast("ULTG dihapus.");
+      }
+    });
   }
 
   // ── Master UPT CRUD ──
@@ -3606,9 +3636,17 @@ export default function PLNWarehouse() {
     showToast(uptModal==="add"?"UPT ditambahkan!":"UPT diupdate!");
   }
   async function deleteUPT(id) {
-    if (!window.confirm("Hapus UPT ini?")) return;
-    const nu = uptList.filter(u=>u.id!==id);
-    setUptList(nu); await syncUpt(nu); showToast("UPT dihapus.");
+    const u = uptList.find(x=>x.id===id);
+    const ultgCount = ultgList.filter(g=>g.parentUptId===id).length;
+    askConfirmDelete({
+      title: "Hapus UPT?",
+      message: <>Apakah Anda yakin ingin menghapus UPT <b>{u?.nama||"-"}</b>?</>,
+      warning: ultgCount>0 ? `Tindakan ini tidak bisa dibatalkan dan ada ${ultgCount} ULTG yang masih terhubung ke UPT ini.` : "Tindakan ini tidak bisa dibatalkan.",
+      onConfirm: async () => {
+        const nu = uptList.filter(x=>x.id!==id);
+        setUptList(nu); await syncUpt(nu); showToast("UPT dihapus.");
+      }
+    });
   }
 
   // ── Master Gudang CRUD ──
@@ -3903,9 +3941,17 @@ export default function PLNWarehouse() {
     setGudangWizardStep(2);
   }
   async function deleteGudang(id) {
-    if (!window.confirm("Hapus gudang ini? Koordinat blok yang terkait akan hilang.")) return;
-    const ng = gudangList.filter(g=>g.id!==id);
-    setGudangList(ng); await syncGudang(ng); showToast("Gudang dihapus.");
+    const g = gudangList.find(x=>x.id===id);
+    const blokCount = lokasiList.filter(l=>l.gudangId===id).length;
+    askConfirmDelete({
+      title: "Hapus Gudang?",
+      message: <>Apakah Anda yakin ingin menghapus Gudang <b>{g?.nama||"-"}</b>?</>,
+      warning: `Tindakan ini tidak bisa dibatalkan dan ada ${blokCount} Blok Lokasi terkait yang akan kehilangan koordinat denah.`,
+      onConfirm: async () => {
+        const ng = gudangList.filter(x=>x.id!==id);
+        setGudangList(ng); await syncGudang(ng); showToast("Gudang dihapus.");
+      }
+    });
   }
   // Tambah blok langsung dari klik titik di denah pada wizard step 3 (tanpa modal Lokasi terpisah)
   async function addWizardBlok() {
@@ -3913,21 +3959,19 @@ export default function PLNWarehouse() {
     if (isKodeDuplicateInGudang(wizardBlokDraft.kode, gudangForm.id, null)) {
       showToast(`Kode blok "${wizardBlokDraft.kode}" sudah dipakai di gudang ini!`,"error"); return;
     }
-    const isTL = hasRole(currentUser, "TL");
     const baru = {
       id: `LOK-${uid().slice(-6)}`,
       kode: wizardBlokDraft.kode.trim(), keterangan: wizardBlokDraft.keterangan||"", kapasitas: wizardBlokDraft.kapasitas||50,
       mapX: wizardBlokDraft.xPct, mapY: wizardBlokDraft.yPct, gudangId: gudangForm.id,
       createdAt: Date.now(),
-      status: isTL ? "APPROVED" : "PENDING",
-      pendingAction: isTL ? null : "ADD",
+      status: "APPROVED", pendingAction: null,
       requestedBy: currentUser.id, requestedAt: Date.now(),
     };
     const nl = [...lokasiList, baru];
     setLokasiList(nl);
     await syncLokasi(nl);
     setWizardBlokDraft(null);
-    showToast(isTL ? "✅ Blok ditambahkan!" : "📨 Blok diajukan! Menunggu approval TL.");
+    showToast("✅ Blok ditambahkan!");
   }
 
   // Upload gambar denah gudang (PNG/JPG) — kompres otomatis jika > 1MB
@@ -4019,11 +4063,10 @@ export default function PLNWarehouse() {
   function dismissOcrSuggestions() {
     setOcrSuggestions([]); setOcrSuggestGudangId(null); setOcrSuggestSubGudangId(null);
   }
-  // Konfirmasi: usulan yang dicentang ditambahkan ke Master Lokasi (kena alur approval TL).
-  // subGudangId non-null = usulan berasal dari denah Sub Gudang -> koordinat disimpan di
-  // subMapX/subMapY (bukan mapX/mapY yang dipakai denah Gudang keseluruhan).
+  // Konfirmasi: usulan yang dicentang ditambahkan langsung ke Master Lokasi (tanpa approval —
+  // tools ini hanya bisa diakses ADMIN). subGudangId non-null = usulan berasal dari denah Sub
+  // Gudang -> koordinat disimpan di subMapX/subMapY (bukan mapX/mapY denah Gudang keseluruhan).
   async function confirmOcrSuggestions(gudangId, subGudangId=null) {
-    const isTL = hasRole(currentUser, "TL");
     const checked = ocrSuggestions.filter(s => s.checked);
     if (checked.length === 0) { showToast("Tidak ada usulan yang dicentang.","error"); return; }
     if (checked.some(s => !s.kode.trim())) { showToast("Nama Area wajib diisi untuk semua usulan yang dicentang!","error"); return; }
@@ -4049,8 +4092,7 @@ export default function PLNWarehouse() {
       ...(subGudangId ? { subMapX: s.xPct, subMapY: s.yPct, subGudangId } : { mapX: s.xPct, mapY: s.yPct }),
       gudangId,
       createdAt: Date.now(),
-      status: isTL ? "APPROVED" : "PENDING",
-      pendingAction: isTL ? null : "ADD",
+      status: "APPROVED", pendingAction: null,
       requestedBy: currentUser.id, requestedAt: Date.now(),
     }));
     const nl = [...lokasiList, ...baru];
@@ -4058,7 +4100,7 @@ export default function PLNWarehouse() {
     await syncLokasi(nl);
     setOcrSuggestions(s => s.filter(x => !checked.includes(x)));
     const dupMsg = duplikat.length ? ` (${duplikat.length} dilewati karena duplikat kode: ${duplikat.join(", ")})` : "";
-    showToast((isTL ? `✅ ${baru.length} blok ditambahkan!` : `📨 ${baru.length} blok diajukan! Menunggu approval TL.`) + dupMsg);
+    showToast(`✅ ${baru.length} blok ditambahkan!` + dupMsg);
   }
 
   // Cari label OCR terdekat dari titik klik untuk diusulkan sebagai kode blok.
@@ -6415,9 +6457,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
                           {hasRole(currentUser, "ADMIN","TL") ? (
                             <select
-                              value={stockGudangFilter[st.id] ?? gdg?.id ?? gudangList[0]?.id ?? ""}
+                              value={stockGudangFilter[st.id] ?? gdg?.id ?? ""}
                               style={{...sty.select,fontSize:11,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8}}
                               onChange={e=>setStockGudangFilter(prev=>({...prev,[st.id]:e.target.value}))}>
+                              <option value="">-- Pilih Gudang --</option>
                               {gudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
                             </select>
                           ) : (
@@ -6460,7 +6503,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   showToast(msg);
                                 }}>
                                 <option value="">-- Pilih Blok --</option>
-                                {lokasiList.filter(l=>(l.gudangId ?? gudangList[0]?.id) === (stockGudangFilter[st.id] ?? gdg?.id ?? gudangList[0]?.id)).map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
+                                {lokasiList.filter(l=>l.gudangId === (stockGudangFilter[st.id] ?? gdg?.id ?? "")).map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
                               </select>
                               {st.lokasiMovePending && <div style={{fontSize:9,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"TL"} → {st.pendingLokasiKode}</div>}
                             </>
@@ -6493,7 +6536,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   showToast(msg);
                                 }}>
                                 <option value="">-- Pilih Blok --</option>
-                                {lokasiList.filter(l=>(l.gudangId ?? gudangList[0]?.id) === (stockGudangFilter[st.id] ?? gdg?.id ?? gudangList[0]?.id)).map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
+                                {lokasiList.filter(l=>l.gudangId === (stockGudangFilter[st.id] ?? gdg?.id ?? "")).map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
                               </select>
                               {st.lokasiMovePending && <div style={{fontSize:9,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"Asman"} → {st.pendingLokasiKode}</div>}
                             </>
@@ -7051,45 +7094,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             <div key={grp.id||"umum"} style={{marginBottom:18,paddingLeft:10,borderLeft:`3px solid ${C.border}`}}>
                               {grp.sg && <div style={{fontSize:13,fontWeight:800,marginBottom:8}}>🏢 Sub Gudang: {grp.nama}</div>}
 
-                              {isUnregistered && grp.blok.length>0 && (
-                                <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
-                                  ⚠️ {grp.blok.length} blok belum dikelompokkan ke Sub Gudang manapun. Klik ✏️ di baris blok untuk assign ke Sub Gudang yang benar, baru atur koordinatnya di sana.
-                                </div>
-                              )}
-
-                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                                <div style={{fontSize:12,color:C.muted}}>📍 Daftar Blok Lokasi ({grp.blok.length})</div>
-                                {hasRole(currentUser, "ADMIN") && !isUnregistered && <button style={sty.btn("ghost","sm")} onClick={()=>openAddLokasiFor(g.id, grp.id)}>+ Tambah Blok</button>}
-                              </div>
-                              {grp.blok.length===0
-                                ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic",marginBottom:8}}>Belum ada blok lokasi di sub gudang ini.</div>
-                                : <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
-                                    {grp.blok.map(l=>{
-                                      const n = stocks.filter(s=>s.lokasiId===l.id).length;
-                                      const hasCoord = grp.sg ? l.subMapX!=null : l.mapX!=null;
-                                      return (
-                                        <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"#f9fafb",border:`1px solid ${C.border}`,borderRadius:6,fontSize:12}}>
-                                          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-                                            <span style={{fontWeight:700}}>{l.kode}</span>
-                                            {l.nama && <span style={{color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nama}</span>}
-                                            {l.status==="PENDING" && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>MENUNGGU APPROVAL TL</span>}
-                                            {!hasCoord && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>BELUM ADA KOORDINAT</span>}
-                                          </div>
-                                          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                                            <span style={{fontSize:11,color:n>0?C.accent:C.muted,fontWeight:700}}>{n} item</span>
-                                            {hasRole(currentUser, "ADMIN") && <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                              }
-
                               {/* Denah + Konfigurasi Koordinat level Sub Gudang — collapsed by default,
                                   sama alasan seperti level Gudang di atas. Hanya untuk grup real (grp.sg),
-                                  "Umum" tidak pernah dikasih tools konfigurasi sendiri. */}
+                                  "Umum" tidak pernah dikasih tools konfigurasi sendiri. Ditaruh di atas
+                                  Daftar Blok Lokasi (permintaan user 2026-07-09) supaya user langsung
+                                  ketemu tools denah/koordinat sebelum scroll ke daftar blok. */}
                               {grp.sg && (
-                                <div style={{marginTop:6}}>
+                                <div style={{marginBottom:14}}>
                                   <button style={sty.btn("ghost","sm")} onClick={toggleSubTools}>
                                     {isSubToolsOpen?"✕ Tutup Denah & Koordinat Sub Gudang":"🛠️ Kelola Denah & Koordinat Sub Gudang"}
                                   </button>
@@ -7141,6 +7152,41 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   )}
                                 </div>
                               )}
+
+                              {isUnregistered && grp.blok.length>0 && (
+                                <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 12px",marginBottom:10}}>
+                                  ⚠️ {grp.blok.length} blok belum dikelompokkan ke Sub Gudang manapun. Klik ✏️ di baris blok untuk assign ke Sub Gudang yang benar, baru atur koordinatnya di sana.
+                                </div>
+                              )}
+
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                                <div style={{fontSize:12,color:C.muted}}>📍 Daftar Blok Lokasi ({grp.blok.length})</div>
+                                {hasRole(currentUser, "ADMIN") && !isUnregistered && <button style={sty.btn("ghost","sm")} onClick={()=>openAddLokasiFor(g.id, grp.id)}>+ Tambah Blok</button>}
+                              </div>
+                              {grp.blok.length===0
+                                ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic",marginBottom:8}}>Belum ada blok lokasi di sub gudang ini.</div>
+                                : <div style={{display:"flex",flexDirection:"column",gap:4,marginBottom:8}}>
+                                    {grp.blok.map(l=>{
+                                      const n = stocks.filter(s=>s.lokasiId===l.id).length;
+                                      const hasCoord = grp.sg ? l.subMapX!=null : l.mapX!=null;
+                                      return (
+                                        <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:"#f9fafb",border:`1px solid ${C.border}`,borderRadius:6,fontSize:12}}>
+                                          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+                                            <span style={{fontWeight:700}}>{l.kode}</span>
+                                            {l.nama && <span style={{color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nama}</span>}
+                                            {l.status==="PENDING" && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>MENUNGGU APPROVAL TL</span>}
+                                            {!hasCoord && <span style={{fontSize:9,fontWeight:700,color:"#92400e",background:"#fef3c7",padding:"1px 6px",borderRadius:10}}>BELUM ADA KOORDINAT</span>}
+                                          </div>
+                                          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                                            <span style={{fontSize:11,color:n>0?C.accent:C.muted,fontWeight:700}}>{n} item</span>
+                                            {hasRole(currentUser, "ADMIN") && <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"2px 8px"}} onClick={()=>openEditLokasi(l)}>✏️</button>}
+                                            {hasRole(currentUser, "ADMIN") && <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"2px 8px"}} onClick={()=>requestDeleteLokasi(l)}>🗑️</button>}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                              }
                             </div>
                             );
                           }
@@ -7159,18 +7205,20 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   const key = grp.id||"umum";
                                   const isSelected = selectedSubGudangId===key;
                                   return (
-                                    <div key={key} onClick={()=>setSelectedSubGudangId(isSelected?null:key)}
-                                      style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:isSelected?"#eff6ff":"#f9fafb",border:`1px solid ${isSelected?"#93c5fd":C.border}`,borderRadius:8,cursor:"pointer"}}>
-                                      <div style={{fontSize:13,fontWeight:700}}>{grp.sg?"🏢":"📦"} {grp.nama}</div>
-                                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                                        <span style={{fontSize:11,color:C.muted}}>{grp.blok.length} blok</span>
-                                        <span style={{fontSize:12,color:C.muted,transition:"transform 0.15s",transform:isSelected?"rotate(90deg)":"rotate(0deg)",display:"inline-block"}}>▶</span>
+                                    <div key={key}>
+                                      <div onClick={()=>setSelectedSubGudangId(isSelected?null:key)}
+                                        style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:isSelected?"#eff6ff":"#f9fafb",border:`1px solid ${isSelected?"#93c5fd":C.border}`,borderRadius:8,cursor:"pointer"}}>
+                                        <div style={{fontSize:13,fontWeight:700}}>{grp.sg?"🏢":"📦"} {grp.nama}</div>
+                                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                          <span style={{fontSize:11,color:C.muted}}>{grp.blok.length} blok</span>
+                                          <span style={{fontSize:12,color:C.muted,transition:"transform 0.15s",transform:isSelected?"rotate(90deg)":"rotate(0deg)",display:"inline-block"}}>▶</span>
+                                        </div>
                                       </div>
+                                      {isSelected && renderGroupDetail(grp)}
                                     </div>
                                   );
                                 })}
                               </div>
-                              {menuGroups.filter(grp=>(grp.id||"umum")===selectedSubGudangId).map(renderGroupDetail)}
                             </>
                           );
                         })()}
@@ -7946,26 +7994,70 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             )}
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Gudang *</label>
-              <select style={sty.select} value={lokasiForm.gudangId||""} disabled={gudangList.length===0} onChange={e=>setLokasiForm(lf=>({...lf,gudangId:e.target.value||null,subGudangId:null}))}>
+              <select style={sty.select} value={lokasiForm.gudangId||""} disabled={gudangList.length===0 || lokasiModal==="edit"} onChange={e=>setLokasiForm(lf=>({...lf,gudangId:e.target.value||null,subGudangId:null}))}>
                 <option value="">-- Pilih Gudang --</option>
                 {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
               </select>
+              {lokasiModal==="edit" && <div style={{fontSize:10,color:C.muted,marginTop:4}}>Gudang tidak bisa diubah saat edit blok. Hapus & buat ulang blok jika perlu pindah Gudang.</div>}
             </div>
             {lokasiForm.gudangId && (
               <div style={{marginBottom:12}}>
                 <label style={sty.label}>Sub Gudang</label>
-                <select style={sty.select} value={lokasiForm.subGudangId||""} onChange={e=>setLokasiForm(lf=>({...lf,subGudangId:e.target.value||null}))}>
+                <select style={sty.select} value={lokasiForm.subGudangId||""} disabled={lokasiModal==="edit"} onChange={e=>setLokasiForm(lf=>({...lf,subGudangId:e.target.value||null}))}>
                   <option value="">-- Umum / Tidak ada Sub Gudang --</option>
                   {subGudangList.filter(sg=>sg.gudangId===lokasiForm.gudangId).map(sg=><option key={sg.id} value={sg.id}>{sg.nama}</option>)}
                 </select>
+                {lokasiModal==="edit" && <div style={{fontSize:10,color:C.muted,marginTop:4}}>Sub Gudang tidak bisa diubah saat edit blok.</div>}
               </div>
             )}
             <div style={{marginBottom:12}}><label style={sty.label}>Kode Lokasi (Blok)</label><input style={sty.input} value={lokasiForm.kode||""} placeholder="cth: Rak A-1" disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,kode:e.target.value}))}/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Keterangan Area</label><input style={sty.input} value={lokasiForm.keterangan||""} placeholder="cth: Area Transformator" disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,keterangan:e.target.value}))}/></div>
-            <div style={{marginBottom:12}}><label style={sty.label}>Kapasitas Maksimal</label><input style={sty.input} type="number" inputMode="decimal" value={lokasiForm.kapasitas||0} disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,kapasitas:Number(e.target.value)}))}/></div>
+            <div style={{marginBottom:12}}><label style={sty.label}>Kapasitas Maksimal (m²)</label><input style={sty.input} type="number" inputMode="decimal" value={lokasiForm.kapasitas||0} placeholder="cth: 50" disabled={!lokasiForm.gudangId} onChange={e=>setLokasiForm(lf=>({...lf,kapasitas:Number(e.target.value)}))}/></div>
             <div style={{display:"flex",gap:10,marginTop:20}}>
               <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setLokasiModal(null)}>Batal</button>
               <button style={{...sty.btn("primary"),flex:2}} disabled={!lokasiForm.gudangId} onClick={saveLokasi}>💾 Simpan ke Cloud</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KONFIRMASI HAPUS BLOK GUDANG */}
+      {lokasiDeleteConfirm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100,padding:16}} onClick={()=>setLokasiDeleteConfirm(null)}>
+          <div style={{...sty.card,width:380,maxWidth:"100%",textAlign:"center",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{width:56,height:56,borderRadius:"50%",background:"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",fontSize:26}}>🗑️</div>
+            <h3 style={{fontSize:16,fontWeight:800,marginBottom:6}}>Hapus Blok Gudang?</h3>
+            <div style={{fontSize:13,color:C.muted,marginBottom:14,lineHeight:1.5}}>
+              Apakah Anda yakin ingin menghapus blok gudang <b style={{color:C.text}}>{lokasiDeleteConfirm.kode}</b>
+              {lokasiDeleteConfirm.keterangan ? <> ({lokasiDeleteConfirm.keterangan})</> : null}
+              {" "}pada Gudang <b style={{color:C.text}}>{gudangList.find(g=>g.id===lokasiDeleteConfirm.gudangId)?.nama||"-"}</b>?
+            </div>
+            <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 12px",marginBottom:20}}>
+              ⚠️ Tindakan ini tidak bisa dibatalkan dan ada {stocks.filter(s=>s.lokasiId===lokasiDeleteConfirm.id).length} material terdaftar di blok ini.
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setLokasiDeleteConfirm(null)}>Batal</button>
+              <button style={{...sty.btn("danger"),flex:1}} onClick={confirmDeleteLokasi}>🗑️ Ya, Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KONFIRMASI HAPUS — GENERIK, dipakai semua Master Data lain (Katalog, Satpam, UIT, ULTG, UPT, Gudang) */}
+      {confirmDialog && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1100,padding:16}} onClick={()=>setConfirmDialog(null)}>
+          <div style={{...sty.card,width:380,maxWidth:"100%",textAlign:"center",boxShadow:"0 20px 50px rgba(0,0,0,0.3)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{width:56,height:56,borderRadius:"50%",background:"#fee2e2",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",fontSize:26}}>🗑️</div>
+            <h3 style={{fontSize:16,fontWeight:800,marginBottom:6}}>{confirmDialog.title}</h3>
+            <div style={{fontSize:13,color:C.muted,marginBottom:14,lineHeight:1.5}}>{confirmDialog.message}</div>
+            {confirmDialog.warning && (
+              <div style={{fontSize:11,color:"#92400e",background:"#fef3c7",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 12px",marginBottom:20}}>
+                ⚠️ {confirmDialog.warning}
+              </div>
+            )}
+            <div style={{display:"flex",gap:10}}>
+              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setConfirmDialog(null)}>Batal</button>
+              <button style={{...sty.btn("danger"),flex:1}} onClick={()=>{ const fn=confirmDialog.onConfirm; setConfirmDialog(null); fn?.(); }}>{confirmDialog.confirmLabel}</button>
             </div>
           </div>
         </div>
