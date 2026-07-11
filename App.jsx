@@ -71,6 +71,99 @@ async function cohereEmbedImage(dataUri) {
   if (!v) throw new Error("Cohere tidak mengembalikan embedding gambar");
   return v;
 }
+// OCR nameplate barang (mode pencarian foto "berdasarkan nameplate") — baca teks
+// yang tercetak di foto lewat OCR.space (OCREngine 2, lebih akurat utk teks cetak
+// & angka). Foto dikompres dulu ke <1MB karena itu batas free tier OCR.space.
+// Mengembalikan teks mentah (bisa multi-baris). Key di .env: VITE_OCRSPACE_API_KEY.
+async function ocrSpaceOCR(dataUri) {
+  const key = import.meta.env.VITE_OCRSPACE_API_KEY;
+  if (!key) throw new Error("VITE_OCRSPACE_API_KEY belum diisi di .env");
+  const compact = await compressImage(dataUri, { maxBytes: 900_000, maxDim: 1600 });
+  const form = new FormData();
+  form.append("base64Image", compact);
+  form.append("language", "eng");
+  form.append("OCREngine", "2");   // engine 2: lebih baik utk teks cetak/angka nameplate
+  form.append("scale", "true");    // upscale gambar kecil agar teks lebih terbaca
+  const resp = await fetch("https://api.ocr.space/parse/image", {
+    method: "POST",
+    headers: { apikey: key },      // JANGAN set Content-Type — biar boundary FormData otomatis
+    body: form,
+  });
+  if (!resp.ok) throw new Error(`OCR.space gagal (${resp.status}): ${await resp.text()}`);
+  const data = await resp.json();
+  if (data.IsErroredOnProcessing) {
+    const msg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join("; ") : (data.ErrorMessage || "OCR.space gagal memproses gambar");
+    throw new Error(msg);
+  }
+  return (data.ParsedResults || []).map(r => r.ParsedText || "").join("\n").trim();
+}
+// --- Util normalisasi teks nameplate (dipakai bersama semua pencocokan teks) ---
+const npNorm    = s => (s || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+const npTokens  = s => new Set(npNorm(s).split(" ").filter(t => t.length >= 3));
+const npNums    = s => npNorm(s).match(/\d{5,}/g) || []; // angka ≥5 digit = kandidat nomor katalog
+const NAMEPLATE_MIN = 0.45;
+
+// Cocokkan teks hasil OCR nameplate ke Master Katalog. Sinyal terkuat = nomor
+// katalog tercetak verbatim di foto; sinyal kedua = tumpang-tindih kata dari
+// nama/type/merk. Mengembalikan {katalog, similarity} 0..1 (sejajar bentuk hasil
+// visual search), disaring >= NAMEPLATE_MIN, top 10, terurut skor menurun.
+function matchNameplateToKatalog(ocrText, katalogList) {
+  const ocrNorm = npNorm(ocrText);
+  if (!ocrNorm) return [];
+  const ocrCompact = ocrNorm.replace(/\s+/g, "");
+  const ocrTokens = npTokens(ocrText);
+  const results = [];
+  for (const kat of katalogList) {
+    let score = 0;
+    // 1. Nomor katalog tercetak verbatim (>=5 digit) — sinyal paling kuat.
+    const cat = String(kat.katalog || "").replace(/[^0-9]/g, "");
+    if (cat.length >= 5 && ocrCompact.includes(cat)) score = Math.max(score, 0.95);
+    // 2. Tumpang-tindih kata dari nama/type/merk.
+    const katTokens = [...npTokens(`${kat.name} ${kat.type} ${kat.merk}`)];
+    if (katTokens.length) {
+      const hit = katTokens.filter(t => ocrTokens.has(t)).length;
+      score = Math.max(score, hit / katTokens.length);
+    }
+    if (score >= NAMEPLATE_MIN) results.push({ katalog: kat.katalog, similarity: score });
+  }
+  return results.sort((a, b) => b.similarity - a.similarity).slice(0, 10);
+}
+// Kemiripan teks nameplate query vs teks nameplate tersimpan (dua-duanya hasil
+// OCR). Angka katalog sama = sinyal kuat (0.95); selain itu overlap kata dibagi
+// himpunan terkecil (lebih toleran kalau salah satu nameplate teksnya lebih panjang).
+function nameplateTextSim(qTokens, qNums, storedText) {
+  const sTokens = npTokens(storedText);
+  const sNums = npNums(storedText);
+  let score = 0;
+  if (qNums.some(n => sNums.includes(n))) score = Math.max(score, 0.95);
+  if (qTokens.size && sTokens.size) {
+    let inter = 0; for (const t of qTokens) if (sTokens.has(t)) inter++;
+    score = Math.max(score, inter / Math.min(qTokens.size, sTokens.size));
+  }
+  return score;
+}
+// Pencocokan mode Nameplate gabungan: (1) ke Master Katalog + (2) ke teks foto
+// nameplate yang sudah di-OCR & disimpan di Data Stok (fotoNameplateOcr). Skor
+// per katalog diambil yang tertinggi antar dua sumber. Top 10, terurut menurun.
+function matchNameplateAll(ocrText, katalogList, stocks) {
+  const best = new Map(); // String(katalog) -> similarity tertinggi
+  const put = (kat, s) => {
+    if (kat == null || s < NAMEPLATE_MIN) return;
+    const k = String(kat);
+    if (!best.has(k) || best.get(k) < s) best.set(k, s);
+  };
+  for (const r of matchNameplateToKatalog(ocrText, katalogList)) put(r.katalog, r.similarity);
+  const qTokens = npTokens(ocrText);
+  const qNums = npNums(ocrText);
+  for (const st of (stocks || [])) {
+    if (!st.fotoNameplateOcr || st.katalog == null) continue;
+    put(st.katalog, nameplateTextSim(qTokens, qNums, st.fotoNameplateOcr));
+  }
+  return [...best.entries()]
+    .map(([katalog, similarity]) => ({ katalog, similarity }))
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 10);
+}
 // Teks deskriptif 1 katalog — dipakai sebagai 1 "chunk" RAG.
 // stockInfo (opsional): {qty, price, locations:[{gudang,blok,qty}]} hasil agregasi
 // enrichedStocks per katalogId — supaya chunk RAG ikut bawa angka real-time (qty/harga/
@@ -2976,6 +3069,9 @@ export default function PLNWarehouse() {
   const [photoSearchImg, setPhotoSearchImg] = useState(null);
   const [photoSearchLoading, setPhotoSearchLoading] = useState(false);
   const [photoSearchResults, setPhotoSearchResults] = useState(null); // null = belum cari; [] = tidak ada hasil
+  const [photoSearchMode, setPhotoSearchMode] = useState("bentuk"); // "bentuk" = Cohere visual | "nameplate" = OCR.space baca teks nameplate
+  const [photoSearchResultMode, setPhotoSearchResultMode] = useState("bentuk"); // mode yang menghasilkan photoSearchResults (utk label hasil)
+  const [photoSearchOcrText, setPhotoSearchOcrText] = useState(""); // teks nameplate terbaca (mode nameplate)
   const savingTxnRef = useRef(false); // cegah double-submit transaksi saat upload foto berjalan
   const syncingPhotosRef = useRef(false); // cegah tumpang-tindih auto-sync foto transaksi pending
   const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
@@ -3866,27 +3962,100 @@ export default function PLNWarehouse() {
   }
   // Upload langsung foto Nameplate/Keseluruhan dari modal detail (klik baris Data Stok) — khusus Admin/TL
   async function updateStockFoto(id, field, img) {
-    const ns = stocks.map(s=>s.id===id?{...s,[field]:img}:s);
+    let ns = stocks.map(s=>s.id===id?{...s,[field]:img}:s);
     setStocks(ns);
     await saveToCloud({stocks: ns});
     showToast(`📷 ${field==="fotoNameplate"?"Foto Nameplate":"Foto Keseluruhan"} diperbarui!`);
+    // Nameplate: OCR teksnya sekali & cache di fotoNameplateOcr, supaya foto ini
+    // ikut jadi pembanding di pencarian foto mode Nameplate tanpa OCR ulang tiap cari.
+    if (field==="fotoNameplate" && img && import.meta.env.VITE_OCRSPACE_API_KEY) {
+      try {
+        const text = await ocrSpaceOCR(img);
+        ns = ns.map(s=>s.id===id?{...s,fotoNameplateOcr:text}:s);
+        setStocks(ns);
+        await saveToCloud({stocks: ns});
+      } catch (e) {
+        // Senyap: user tak perlu tahu soal OCR. Foto tetap tersimpan; kalau OCR
+        // gagal, foto ini nanti ikut disapu ulang oleh auto-OCR latar belakang.
+        console.warn("Auto-OCR nameplate (upload) gagal:", id, e?.message||e);
+      }
+    }
   }
+  // Auto-OCR nameplate di LATAR BELAKANG (senyap) — tanpa tombol/aksi user. Menyapu
+  // foto Nameplate yang belum punya fotoNameplateOcr (mis. foto lama sebelum fitur
+  // ini) supaya ikut jadi pembanding pencarian foto mode Nameplate. Sekuensial +
+  // jeda 400ms (rate limit free tier OCR.space ~3 req/detik), simpan tiap 8 item
+  // pakai stateRef terkini agar hemat write & tak menimpa editan stok yang berjalan.
+  const nameplateAutoOcrRef = useRef(false); // guard: cukup sekali per sesi
+  async function runAutoOcrNameplates() {
+    const flush = async (updates) => {
+      if (!updates.size) return;
+      const ns = stateRef.current.stocks.map(s => updates.has(s.id) ? {...s, fotoNameplateOcr: updates.get(s.id)} : s);
+      setStocks(ns);
+      await saveToCloud({ stocks: ns });
+      updates.clear();
+    };
+    // `== null` (bukan sekadar falsy): foto yang sudah di-OCR tapi hasilnya kosong
+    // (nameplate tak terbaca) menyimpan "" — itu tetap dianggap SUDAH diproses, jadi
+    // tidak di-OCR ulang tiap sesi. Hanya null/undefined = benar-benar belum diproses.
+    const targets = (stateRef.current.stocks || []).filter(s => s.fotoNameplate && s.fotoNameplateOcr == null);
+    const pending = new Map();
+    for (const st0 of targets) {
+      const cur = stateRef.current.stocks.find(s => s.id === st0.id); // versi terkini
+      if (!cur || !cur.fotoNameplate || cur.fotoNameplateOcr != null) continue;
+      try {
+        pending.set(cur.id, await ocrSpaceOCR(cur.fotoNameplate));
+      } catch (e) {
+        console.warn("Auto-OCR nameplate gagal:", st0.id, e?.message||e);
+        continue;
+      }
+      if (pending.size >= 8) await flush(pending);
+      await new Promise(r => setTimeout(r, 400));
+    }
+    await flush(pending);
+  }
+  // Pemicu auto-OCR nameplate: jalan sekali (guard ref) begitu data stok siap &
+  // ada foto nameplate lama yang belum di-OCR. Hanya Admin/TL (yang berhak menulis
+  // data stok) & hanya kalau key OCR terpasang. Sepenuhnya latar belakang/senyap.
+  useEffect(() => {
+    if (nameplateAutoOcrRef.current) return;
+    if (!import.meta.env.VITE_OCRSPACE_API_KEY) return;
+    if (!hasRole(currentUser, "ADMIN","TL")) return;
+    if (!stocks.some(s => s.fotoNameplate && s.fotoNameplateOcr == null)) return;
+    nameplateAutoOcrRef.current = true;
+    runAutoOcrNameplates();
+  }, [stocks, currentUser]);
 
-  // Cari barang berdasarkan foto: embed foto query (Cohere image) → cocokkan ke
-  // stock_photo_embeddings via RPC match_stock_photos (skor tertinggi per katalog,
-  // ≥60%, top 10). p_upt=null: WARNOTO saat ini single-UPT (Surabaya), semua
-  // embedding memang Surabaya. Saat multi-UPT nanti, isi p_upt sesuai UPT viewer.
+  // Cari barang dengan foto — dua mode:
+  //  • "bentuk"   : embed foto query (Cohere image) → cocokkan ke stock_photo_embeddings
+  //                 via RPC match_stock_photos (skor tertinggi per katalog, ≥75%, top 10).
+  //                 p_upt=null: WARNOTO saat ini single-UPT (Surabaya), semua embedding
+  //                 memang Surabaya. Saat multi-UPT nanti, isi p_upt sesuai UPT viewer.
+  //  • "nameplate": OCR.space baca teks nameplate di foto → cocokkan ke Master
+  //                 Katalog (nomor katalog/nama/type/merk) DAN ke teks foto
+  //                 nameplate tersimpan (fotoNameplateOcr) — matchNameplateAll.
   async function runPhotoSearch() {
-    if (!photoSearchImg || !supabase) return;
+    if (!photoSearchImg) return;
     setPhotoSearchLoading(true);
     try {
-      const vec = await cohereEmbedImage(photoSearchImg);
-      const { data, error } = await supabase.rpc("match_stock_photos", {
-        query_embedding: vec, p_upt: null, match_count: 10, min_similarity: 0.75,
-      });
-      if (error) throw error;
-      setPhotoSearchResults(data || []);
-      setPhotoSearchOpen(false);
+      if (photoSearchMode === "nameplate") {
+        const text = await ocrSpaceOCR(photoSearchImg);
+        setPhotoSearchOcrText(text);
+        setPhotoSearchResultMode("nameplate");
+        setPhotoSearchResults(matchNameplateAll(text, katalogList, stocks));
+        setPhotoSearchOpen(false);
+      } else {
+        if (!supabase) return;
+        const vec = await cohereEmbedImage(photoSearchImg);
+        const { data, error } = await supabase.rpc("match_stock_photos", {
+          query_embedding: vec, p_upt: null, match_count: 10, min_similarity: 0.75,
+        });
+        if (error) throw error;
+        setPhotoSearchOcrText("");
+        setPhotoSearchResultMode("bentuk");
+        setPhotoSearchResults(data || []);
+        setPhotoSearchOpen(false);
+      }
     } catch (e) {
       showToast("Gagal cari dengan foto: " + (e.message || e), "error");
     }
@@ -6950,11 +7119,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {photoSearchResults && (
                 <div style={{...sty.card,padding:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:800,fontSize:13}}>📷 Hasil pencarian foto — {photoSearchResults.length} barang mirip</div>
+                    <div style={{fontWeight:800,fontSize:13}}>{photoSearchResultMode==="nameplate"?"🔖":"📷"} Hasil pencarian foto — {photoSearchResults.length} barang {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
                     <button style={sty.btn("ghost","sm")} onClick={()=>setPhotoSearchResults(null)}>✕ Reset</button>
                   </div>
+                  {photoSearchResultMode==="nameplate" && photoSearchOcrText && (
+                    <div style={{fontSize:10,color:C.muted,background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 8px",marginBottom:10,whiteSpace:"pre-wrap",maxHeight:60,overflowY:"auto"}}>
+                      <b>Teks nameplate terbaca:</b> {photoSearchOcrText}
+                    </div>
+                  )}
                   {photoSearchResults.length===0 ? (
-                    <div style={{fontSize:12,color:C.muted}}>Tidak ada barang dengan kemiripan ≥60%. Coba foto lain atau sudut/pencahayaan berbeda.</div>
+                    <div style={{fontSize:12,color:C.muted}}>{photoSearchResultMode==="nameplate"?"Tidak ada katalog yang cocok dengan teks nameplate. Pastikan nomor katalog/type terbaca jelas, atau coba foto lebih dekat & fokus.":"Tidak ada barang dengan kemiripan ≥75%. Coba foto lain atau sudut/pencahayaan berbeda."}</div>
                   ) : (
                     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
                       {photoSearchResults.map(r=>{
@@ -6967,7 +7141,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{fontWeight:700,fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{est?.name||"(tidak ada di Data Stok)"}</div>
                               <div style={{fontSize:10,color:"#0098da",fontWeight:700}}>📑 {r.katalog}</div>
-                              <div style={{fontSize:11,fontWeight:800,color:pct>=80?C.green:pct>=70?"#d97706":C.muted,marginTop:2}}>{pct}% mirip</div>
+                              <div style={{fontSize:11,fontWeight:800,color:pct>=80?C.green:pct>=70?"#d97706":C.muted,marginTop:2}}>{pct}% {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
                             </div>
                           </div>
                         );
@@ -7950,6 +8124,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 ultgList={ultgList}
                 approveTUG5_MgrULTG={approveTUG5_MgrULTG} rejectTUG5_MgrULTG={rejectTUG5_MgrULTG}
                 adoptTUG5ULTG={adoptTUG5ULTG} openDraftTug9={openDraftTug9}
+                isMobile={isMobile}
               />
             ) : tugSubTab==="TUG15" ? (
               <TUG15Tab
@@ -8744,7 +8919,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}} onClick={()=>!photoSearchLoading&&setPhotoSearchOpen(false)}>
           <div style={{...sty.card,width:420,maxWidth:"100%"}} onClick={e=>e.stopPropagation()}>
             <div style={{fontWeight:800,fontSize:16,marginBottom:6}}>📷 Cari Barang dengan Foto</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Ambil atau unggah foto barang — sistem mencari material paling mirip di Data Stok (kemiripan ≥60%, maks 10 hasil).</p>
+            {/* Pilih cara mencari: kemiripan bentuk visual (Cohere) atau baca teks nameplate (OCR.space) */}
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              {[
+                {m:"bentuk",   icon:"🔍", label:"Bentuk Barang"},
+                {m:"nameplate",icon:"🔖", label:"Foto Nameplate"},
+              ].map(opt=>(
+                <button key={opt.m} type="button" disabled={photoSearchLoading}
+                  onClick={()=>setPhotoSearchMode(opt.m)}
+                  style={{flex:1,padding:"8px 6px",borderRadius:8,border:`2px solid ${photoSearchMode===opt.m?C.accent:C.border}`,background:photoSearchMode===opt.m?"#eff6ff":"white",color:photoSearchMode===opt.m?C.accent:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+            <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
+              {photoSearchMode==="nameplate"
+                ? "Foto papan nama/label barang — sistem membaca teksnya (nomor katalog, type, merk) lalu mencocokkan ke Master Katalog & ke foto nameplate yang sudah di-upload di Data Stok."
+                : "Ambil/unggah foto barang — sistem mencari material paling mirip bentuknya di Data Stok (kemiripan ≥75%, maks 10 hasil)."}
+            </p>
             <label style={{...sty.btn("ghost"),display:"block",textAlign:"center",cursor:"pointer",marginBottom:10}}>
               {photoSearchImg?"🔄 Ganti Foto":"📸 Ambil / Pilih Foto"}
               <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setPhotoSearchImg(img))} style={{display:"none"}}/>
@@ -8752,7 +8944,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             {photoSearchImg && <img src={photoSearchImg} alt="query" style={{width:"100%",maxHeight:220,objectFit:"contain",borderRadius:8,marginBottom:12,border:`1px solid ${C.border}`,background:"#f8fafc"}}/>}
             <div style={{display:"flex",gap:8}}>
               <button style={{...sty.btn("ghost"),flex:1}} disabled={photoSearchLoading} onClick={()=>setPhotoSearchOpen(false)}>Batal</button>
-              <button style={{...sty.btn("primary"),flex:2}} disabled={!photoSearchImg||photoSearchLoading} onClick={runPhotoSearch}>{photoSearchLoading?"🔎 Menganalisa...":"Cari Barang Mirip"}</button>
+              <button style={{...sty.btn("primary"),flex:2}} disabled={!photoSearchImg||photoSearchLoading} onClick={runPhotoSearch}>{photoSearchLoading?(photoSearchMode==="nameplate"?"🔖 Membaca teks...":"🔎 Menganalisa..."):(photoSearchMode==="nameplate"?"Baca & Cocokkan Nameplate":"Cari Barang Mirip")}</button>
             </div>
           </div>
         </div>
@@ -9315,7 +9507,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <>
                 <div style={{background:"#dbeafe",border:`1px solid #93c5fd`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#1e40af",marginBottom:16}}>ℹ️ Alur: Admin Ajukan TUG-5 → Manager ULTG approve</div>
                 <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>HEADER DOKUMEN</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:14}}>
                   <div>
                     <label style={sty.label}>Unit ULTG Pengaju</label>
                     <input style={{...sty.input,background:"#f3f4f6"}} value={ultgList.find(u=>u.id===txnForm.ultgId)?.nama || "-"} disabled/>
@@ -9335,7 +9527,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{background:"#dbeafe",border:`1px solid #93c5fd`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#1e40af",marginBottom:16}}>ℹ️ Alur: Asman approve → Manager UPT approve → INTRACOMPANY: auto draft TUG-7 di UIT | INTERCOMPANY: auto draft TUG-5 UIT (cetak manual).</div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>HEADER DOKUMEN</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:14}}>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Kepada (UIT tujuan)</label>
                 <select style={sty.select} value={txnForm.uitId||""} onChange={e=>setTxnForm(tf=>({...tf,uitId:e.target.value}))}>
@@ -9345,7 +9537,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Jenis Transfer</label>
-                <div style={{display:"flex",gap:8}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8}}>
                   {["INTRACOMPANY","INTERCOMPANY"].map(jt=>(
                     <button key={jt} type="button" style={{flex:1,padding:"8px",borderRadius:8,border:`2px solid ${txnForm.jenisTransfer===jt?C.accent:C.border}`,background:txnForm.jenisTransfer===jt?"#eff6ff":"white",color:txnForm.jenisTransfer===jt?C.accent:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}} onClick={()=>setTxnForm(tf=>({...tf,jenisTransfer:jt}))}>
                       {jt==="INTRACOMPANY"?"🔄 Intracompany (sesama UIT-JBM)":"🌐 Intercompany (lintas UIT)"}
@@ -9369,19 +9561,21 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 const isExpanded = idx===tug5ExpandedIdx;
                 if (!isExpanded) {
                   return (
-                    <div key={idx} style={{display:"flex",alignItems:"center",gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",marginBottom:8,background:"white",cursor:"pointer"}} onClick={()=>setTug5ExpandedIdx(idx)}>
+                    <div key={idx} style={{display:"flex",alignItems:isMobile?"stretch":"center",flexDirection:isMobile?"column":"row",gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",marginBottom:8,background:"white",cursor:"pointer"}} onClick={()=>setTug5ExpandedIdx(idx)}>
                       <span style={{fontSize:11,fontWeight:700,color:C.muted}}>#{idx+1}</span>
                       <span style={{flex:1,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{kat ? `${kat.name} [${kat.katalog||"-"}]` : <span style={{color:C.muted,fontStyle:"italic"}}>Belum dipilih</span>}</span>
-                      <span style={{fontSize:11,color:C.accent,fontWeight:700}}>Qty: {si.permintaan||0}{kat?.satuan?` ${kat.satuan}`:""}</span>
-                      <span style={{fontSize:11,color:C.muted}}>✏️ Edit</span>
-                      {txnForm.stockItems.length>1 && <button type="button" style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={e=>{e.stopPropagation();removeItemRow(idx);if(tug5ExpandedIdx===idx)setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
+                      <div style={{display:"flex",alignItems:"center",justifyContent:isMobile?"space-between":"flex-start",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:C.accent,fontWeight:700}}>Qty: {si.permintaan||0}{kat?.satuan?` ${kat.satuan}`:""}</span>
+                        <span style={{fontSize:11,color:C.muted}}>✏️ Edit</span>
+                        {txnForm.stockItems.length>1 && <button type="button" title="Hapus material TUG-5 ini" style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={e=>{e.stopPropagation();removeItemRow(idx);if(tug5ExpandedIdx===idx)setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
+                      </div>
                     </div>
                   );
                 }
                 return (
                 <div key={idx} style={{border:`2px solid ${C.accent}`,borderRadius:8,padding:10,marginBottom:8,background:"#f9fafb"}}>
-                  <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}>
-                    <div style={{flex:3}}>
+                  <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8,alignItems:isMobile?"stretch":"flex-end",marginBottom:8}}>
+                    <div style={{flex:isMobile?undefined:3}}>
                       <label style={sty.label}>Nama Barang {idx+1}</label>
                       <SearchableSelect
                         options={katalogList}
@@ -9393,16 +9587,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         sty={sty} C={C} isMobile={isMobile}
                       />
                     </div>
-                    {txnForm.stockItems.length>1 && <button type="button" style={{...sty.btn("danger","sm")}} onClick={()=>{removeItemRow(idx);setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
+                    {txnForm.stockItems.length>1 && <button type="button" title="Hapus material TUG-5 ini" style={{...sty.btn("danger","sm")}} onClick={()=>{removeItemRow(idx);setTug5ExpandedIdx(Math.max(0,idx-1));}}>✕</button>}
                   </div>
                   {kat && <div style={{fontSize:10,color:C.muted,marginBottom:8}}>Nomor Normalisasi: {kat.katalog||"-"} • Satuan: {kat.satuan}</div>}
                   {txnForm.sourceType==="ULTG" ? (
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:8}}>
                       <div><label style={sty.label}>Sisa Persediaan <span style={{color:C.muted,fontWeight:400}}>(stok aktual UPT)</span></label><input style={{...sty.input,background:"#f3f4f6"}} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} disabled/></div>
                       <div><label style={sty.label}>Jumlah Permintaan {kat?.satuan && <span style={{color:C.muted,fontWeight:400}}>({kat.satuan})</span>}</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
                     </div>
                   ) : (
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:8}}>
                       <div><label style={sty.label}>Pemakaian/Bulan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.pemakaianBulan||0} onChange={e=>updateItemRow(idx,"pemakaianBulan",Number(e.target.value))}/></div>
                       <div><label style={sty.label}>Sisa Persediaan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} onChange={e=>updateItemRow(idx,"sisaPersediaan",Number(e.target.value))}/></div>
                       <div><label style={sty.label}>Jumlah Permintaan</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
@@ -9427,7 +9621,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>ADMINISTRASI</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:16}}>
                   <div><label style={sty.label}>Keterangan Umum</label><input style={sty.input} value={txnForm.keteranganUmum||""} onChange={e=>setTxnForm(tf=>({...tf,keteranganUmum:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit UPT Surabaya"/></div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:10}}>
                     <div><label style={sty.label}>Perintah Kerja</label><input style={sty.input} value={txnForm.perintahKerja||""} onChange={e=>setTxnForm(tf=>({...tf,perintahKerja:e.target.value}))}/></div>
                     <div><label style={sty.label}>Kode Perkiraan</label><input style={sty.input} value={txnForm.kodePerkiraan||""} onChange={e=>setTxnForm(tf=>({...tf,kodePerkiraan:e.target.value}))}/></div>
                     <div><label style={sty.label}>Fungsi</label><input style={sty.input} value={txnForm.fungsi||""} onChange={e=>setTxnForm(tf=>({...tf,fungsi:e.target.value}))}/></div>
@@ -17799,7 +17993,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   approveTUG5_Asman, rejectTUG5_Asman, approveTUG5_Manager, rejectTUG5_Manager,
   submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik,
   konfirmasiDraftTUG8, setDocPreview,
-  ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, adoptTUG5ULTG, openDraftTug9 }) {
+  ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, adoptTUG5ULTG, openDraftTug9, isMobile=false }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Modal, setTug7Modal] = useState(null);
@@ -17850,7 +18044,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
         const creator = users.find(u=>u.id===t.createdBy)||{};
         return (
           <div key={t.id} style={{...sty.card}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+            <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:8,marginBottom:8}}>
               <div>
                 <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug5}</div>
                 <div style={{fontSize:11,color:C.muted}}>Kepada: {uit?.kode||"-"} • {t.jenisTransfer} • {fmtDate(t.createdAt)}</div>
@@ -17905,18 +18099,20 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
 
             if (!isExpanded) {
               return (
-                <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,border:`1px solid ${C.border}`,borderLeft:"3px solid #0369a1",borderRadius:8,padding:"8px 12px",marginBottom:6,background:"white",cursor:"pointer"}} onClick={()=>setUltgExpandedId(t.id)}>
+                <div key={t.id} style={{display:"flex",alignItems:isMobile?"stretch":"center",flexDirection:isMobile?"column":"row",gap:10,border:`1px solid ${C.border}`,borderLeft:"3px solid #0369a1",borderRadius:8,padding:"8px 12px",marginBottom:6,background:"white",cursor:"pointer"}} onClick={()=>setUltgExpandedId(t.id)}>
                   <span style={{fontWeight:700,fontSize:12}}>{t.docNumbers?.tug5}</span>
                   <span style={{fontSize:11,color:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ultg?.nama||t.ultgId} • {t.namaPekerjaan||t.keteranganUmum||"-"} • {fmtDate(t.createdAt)}</span>
-                  {stageBadge5(t)}
-                  {canAdopt && <span style={{fontSize:10,fontWeight:700,color:"#0369a1"}}>👉 Siap Diadopsi</span>}
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    {stageBadge5(t)}
+                    {canAdopt && <span style={{fontSize:10,fontWeight:700,color:"#0369a1"}}>👉 Siap Diadopsi</span>}
+                  </div>
                 </div>
               );
             }
 
             return (
               <div key={t.id} style={{...sty.card,borderLeft:"3px solid #0369a1"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:8,marginBottom:8}}>
                   <div>
                     <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug5}</div>
                     <div style={{fontSize:11,color:C.muted}}>Dari: {ultg?.nama||t.ultgId} • {fmtDate(t.createdAt)}</div>
@@ -17970,7 +18166,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
             const tug5Ref = txns.find(x=>x.id===t.tug5Id);
             return (
               <div key={t.id} style={{...sty.card,borderLeft:`3px solid #7c3aed`}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:8,marginBottom:8}}>
                   <div>
                     <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug7||t.id}</div>
                     <div style={{fontSize:11,color:C.muted}}>Ref TUG-5: {tug5Ref?.docNumbers?.tug5||t.tug5DocNo||"-"}</div>
@@ -18010,7 +18206,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
           <div style={{fontSize:13,fontWeight:800,color:C.green,borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>📦 Draft TUG-8 — Perlu Konfirmasi UPT Pengirim</div>
           {tug8Drafts.map(t=>(
             <div key={t.id} style={{...sty.card,borderLeft:`3px solid ${C.green}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+              <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:8,marginBottom:8}}>
                 <div>
                   <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug8||t.id}</div>
                   <div style={{fontSize:11,color:C.muted}}>Berdasarkan: {t.noReferensiTug7} • Tujuan: {t.unitTujuan}</div>
@@ -18047,7 +18243,7 @@ function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
               </select>
             </div>
             <div style={{marginBottom:12}}><label style={sty.label}>Atas Beban Rekening</label><input style={sty.input} value={tug7Form.atasBebanRekening||""} onChange={e=>setTug7Form(f=>({...f,atasBebanRekening:e.target.value}))}/></div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:8,marginBottom:16}}>
               <div><label style={sty.label}>Perintah Kerja</label><input style={sty.input} value={tug7Form.perintahKerja||""} onChange={e=>setTug7Form(f=>({...f,perintahKerja:e.target.value}))}/></div>
               <div><label style={sty.label}>Kode Akun</label><input style={sty.input} value={tug7Form.kodeAkun||""} onChange={e=>setTug7Form(f=>({...f,kodeAkun:e.target.value}))}/></div>
               <div><label style={sty.label}>Fungsi</label><input style={sty.input} value={tug7Form.fungsi||""} onChange={e=>setTug7Form(f=>({...f,fungsi:e.target.value}))}/></div>
