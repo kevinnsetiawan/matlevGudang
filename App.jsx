@@ -2950,6 +2950,7 @@ export default function PLNWarehouse() {
   const [selectedSubGudangId, setSelectedSubGudangId] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [docPreview, setDocPreview] = useState(null); // txn object when previewing TUG-9 document
+  const [docPreviewDoc, setDocPreviewDoc] = useState(null); // versi docPreview dgn SIM/KTP privat sudah jadi signed URL
   const [kartuGantungDetail, setKartuGantungDetail] = useState(null);
   const [petaMiniDetail, setPetaMiniDetail] = useState(null); // {stock, lokasi, gudang}
   const [stockDetailId, setStockDetailId] = useState(null); // id stok yang dibuka detailnya (klik baris Data Stok)
@@ -2958,6 +2959,8 @@ export default function PLNWarehouse() {
   const [photoSearchImg, setPhotoSearchImg] = useState(null);
   const [photoSearchLoading, setPhotoSearchLoading] = useState(false);
   const [photoSearchResults, setPhotoSearchResults] = useState(null); // null = belum cari; [] = tidak ada hasil
+  const savingTxnRef = useRef(false); // cegah double-submit transaksi saat upload foto berjalan
+  const syncingPhotosRef = useRef(false); // cegah tumpang-tindih auto-sync foto transaksi pending
   const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
   const [lightboxImg, setLightboxImg] = useState(null); // src foto yang sedang di-overview full-screen
   const [scannerTarget, setScannerTarget] = useState(null); // "stockForm" | {index}
@@ -3489,6 +3492,43 @@ export default function PLNWarehouse() {
     });
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // Auto-sync foto transaksi yang belum ter-upload (mis. submit saat offline di
+  // gudang). Dicoba saat app load, saat daftar transaksi berubah, dan saat koneksi
+  // kembali online. Guard + cek _fotoPending mencegah loop.
+  const syncPendingTxnPhotos = useCallback(async () => {
+    if (syncingPhotosRef.current || !supabase) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    const list = stateRef.current.txns || [];
+    if (!list.some(x => x._fotoPending)) return;
+    syncingPhotosRef.current = true;
+    try {
+      let changed = false;
+      const updated = [];
+      for (const x of list) {
+        if (!x._fotoPending) { updated.push(x); continue; }
+        const { data } = await processTxnPhotos(x, x.id || `TXN-${x.docSeq}`);
+        updated.push(data); if (data !== x) changed = true;
+      }
+      if (changed) { setTxns(updated); await saveToCloud({ txns: updated }); }
+    } finally { syncingPhotosRef.current = false; }
+  }, [saveToCloud]);
+
+  useEffect(() => {
+    syncPendingTxnPhotos();
+    const on = () => syncPendingTxnPhotos();
+    window.addEventListener("online", on);
+    return () => window.removeEventListener("online", on);
+  }, [syncPendingTxnPhotos, txns]);
+
+  // Saat preview dokumen dibuka, ubah SIM/KTP "priv:<path>" jadi signed URL supaya
+  // tampil di iframe & ikut saat diunduh (foto lain sudah URL publik).
+  useEffect(() => {
+    let alive = true;
+    if (!docPreview) { setDocPreviewDoc(null); return; }
+    resolveTxnPrivPhotos(docPreview).then((r) => { if (alive) setDocPreviewDoc(r); });
+    return () => { alive = false; };
+  }, [docPreview]);
 
   // ── Stock CRUD ──
   // ── MASTER KATALOG BARANG CRUD ──
@@ -5374,6 +5414,19 @@ export default function PLNWarehouse() {
   }
 
   async function commitNewTxn(docType, formData) {
+    if (savingTxnRef.current) return;       // cegah double-submit saat upload foto berjalan
+    savingTxnRef.current = true;
+    try {
+    // Upload foto base64 ke Storage dulu → blob transaksi jadi ringan. Gagal upload
+    // (offline) → foto tetap base64 + _fotoPending; transaksi & dokumen tetap jadi,
+    // auto-sync menyusul saat online (syncPendingTxnPhotos).
+    const txnId = `${docType}-${uid().slice(-6)}`;
+    const _hasFoto = formData && ([formData.fotoKendaraan,formData.fotoSimKtp,formData.fotoSuratPengembalian,formData.fotoBAPengembalian,formData.fotoSuratJalanImg,formData.fotoKontrak].some(_isDataUrl) || (formData.fotoMaterial||[]).some(fm=>_isDataUrl(fm?.img)) || (formData.stockItems||[]).some(si=>_isDataUrl(si.fotoNameplate)||_isDataUrl(si.fotoBarangRetur)));
+    if (_hasFoto) showToast("⏳ Mengunggah foto & menyimpan transaksi...", "info");
+    const { data: _fd, pending: _pend } = await processTxnPhotos(formData, txnId);
+    formData = _fd;
+    if (_pend.length) showToast(`⚠️ ${_pend.length} foto belum terunggah (sinyal?). Transaksi & dokumen tetap tersimpan; foto disinkron otomatis saat online.`, "info");
+
     const seq = docSeq;
     const docCode = (docType === "TUG10" || docType === "TUG3") ? "LOG.00.01" : "LOG.00.02";
     const docNumbers = generateDocNumbers(seq, Date.now(), docCode);
@@ -5383,7 +5436,7 @@ export default function PLNWarehouse() {
       // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
       // Setelah approve, jadi pengajuan yang bisa di-adopt Admin/TL UPT induk (bukan auto-chain TUG-7).
       const nt5u = {
-        id: `TUG5-` + uid().slice(-6),
+        id: txnId,
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_MGR_ULTG",
@@ -5406,7 +5459,7 @@ export default function PLNWarehouse() {
       // TUG-5: 2-stage approval: Asman → Manager UPT
       // Then auto-generates: INTRACOMPANY → draft TUG-7, INTERCOMPANY → draft TUG-5 UIT
       const nt5 = {
-        id: `TUG5-` + uid().slice(-6),
+        id: txnId,
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_ASMAN",
@@ -5431,7 +5484,7 @@ export default function PLNWarehouse() {
       // PENDING_TL -> (TL approves) -> MENUNGGU_TUG4 -> (TUG-4 filled + Manager approves)
       // -> MENUNGGU_FINAL -> (lampiran final filled) -> PENDING_ASMAN -> (Asman approves) -> APPROVED
       const nt3 = {
-        id: `TUG3-` + uid().slice(-6),
+        id: txnId,
         docType, docSeq: seq, docNumbers,
         ...formData,
         stage: "PENDING_TL",
@@ -5453,7 +5506,7 @@ export default function PLNWarehouse() {
 
     const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
     const nt = {
-      id: `${docType}-` + uid().slice(-6),
+      id: txnId,
       docType, docSeq: seq, docNumbers,
       ...formData,
       status: "PENDING",
@@ -5468,6 +5521,7 @@ export default function PLNWarehouse() {
     setTxns(newTxns); setDocSeq(newSeq); setTxnModal(false);
     await saveToCloud({txns: newTxns, docSeq: newSeq});
     showToast(`Transaksi ${nt.docNumbers[docKey]} dibuat! Menunggu approval ${ROLES[requiredApprover]}. ⏳`);
+    } finally { savingTxnRef.current = false; }
   }
 
   function docKeyOf(txn) {
@@ -9712,17 +9766,21 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       )}
 
       {/* DOCUMENT PREVIEW MODAL (TUG-9 / TUG-8 / TUG-10 / TUG-3 package) */}
-      {docPreview && (
+      {docPreview && (() => {
+        // dp = transaksi dgn SIM/KTP privat sudah jadi signed URL (foto lain sudah
+        // URL publik). Fallback ke docPreview mentah selama resolusi berjalan.
+        const dp = docPreviewDoc || docPreview;
+        return (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",flexDirection:"column",zIndex:1500}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 18px",background:C.sidebar,flexShrink:0}}>
-            <div style={{color:"white",fontWeight:700,fontSize:14}}>📄 Dokumen {docPreview.docType.replace("TUG","TUG-")} — {docPreview.docNumbers?.[docKeyOf(docPreview)]||docPreview.id}</div>
+            <div style={{color:"white",fontWeight:700,fontSize:14}}>📄 Dokumen {dp.docType.replace("TUG","TUG-")} — {dp.docNumbers?.[docKeyOf(dp)]||dp.id}</div>
             <div style={{display:"flex",gap:8}}>
               <button style={{...sty.btn("success"),padding:"7px 16px"}} onClick={()=>{
-                if (docPreview.docType==="TUG10") downloadTUG10HTML(docPreview, katalogList, lokasiList, users, showToast);
-                else if (docPreview.docType==="TUG3") downloadTUG3HTML(docPreview, katalogList, lokasiList, timMutuList, users, showToast);
-                else if (docPreview.docType==="TUG5") downloadTUG5HTML(docPreview, katalogList, uitList, users, showToast, ultgList);
-                else if (docPreview.docType==="TUG7") downloadTUG7HTML(docPreview, katalogList, uitList, uptList, users, showToast);
-                else downloadTUG9HTML(docPreview, enrichedStocks, users, satpamList, showToast);
+                if (dp.docType==="TUG10") downloadTUG10HTML(dp, katalogList, lokasiList, users, showToast);
+                else if (dp.docType==="TUG3") downloadTUG3HTML(dp, katalogList, lokasiList, timMutuList, users, showToast);
+                else if (dp.docType==="TUG5") downloadTUG5HTML(dp, katalogList, uitList, users, showToast, ultgList);
+                else if (dp.docType==="TUG7") downloadTUG7HTML(dp, katalogList, uitList, uptList, users, showToast);
+                else downloadTUG9HTML(dp, enrichedStocks, users, satpamList, showToast);
               }}>⬇️ Unduh File (untuk Print/PDF)</button>
               <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600}} onClick={()=>setDocPreview(null)}>✕ Tutup</button>
             </div>
@@ -9730,7 +9788,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div style={{flex:1,background:"#e5e7eb",overflow:"hidden"}}>
             <iframe
               title="Document Preview"
-              srcDoc={docPreview.docType==="TUG10" ? buildTUG10HTML(docPreview, katalogList, lokasiList, users) : docPreview.docType==="TUG3" ? buildTUG3HTML(docPreview, katalogList, lokasiList, timMutuList, users) : docPreview.docType==="TUG5" ? buildTUG5HTML(docPreview, katalogList, uitList, users, ultgList) : docPreview.docType==="TUG7" ? buildTUG7HTML(docPreview, katalogList, uitList, uptList, users) : buildTUG9HTML(docPreview, enrichedStocks, users, satpamList)}
+              srcDoc={dp.docType==="TUG10" ? buildTUG10HTML(dp, katalogList, lokasiList, users) : dp.docType==="TUG3" ? buildTUG3HTML(dp, katalogList, lokasiList, timMutuList, users) : dp.docType==="TUG5" ? buildTUG5HTML(dp, katalogList, uitList, users, ultgList) : dp.docType==="TUG7" ? buildTUG7HTML(dp, katalogList, uitList, uptList, users) : buildTUG9HTML(dp, enrichedStocks, users, satpamList)}
               style={{width:"100%",height:"100%",border:"none"}}
             />
           </div>
@@ -9738,7 +9796,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             💡 Tips: klik "Unduh File", buka file-nya di browser HP/laptop, lalu pilih menu Print → Save as PDF untuk dapat file PDF asli.
           </div>
         </div>
-      )}
+        );
+      })()}
 
     </div>
   );
@@ -10096,6 +10155,50 @@ async function syncStockQtyToSupabase(stocks, katalogList) {
 // menampilkan foto tanpa perlu login.
 const FOTO_SYNCED_HASHES_STORAGE = "warnoto_synced_foto_hashes";
 
+// Kompres + resize foto ke JPEG di bawah target ukuran, mengembalikan data URL.
+// Dipakai sebelum upload ke Storage (foto transaksi TUG, stok, visual-search)
+// supaya hemat penyimpanan/bandwidth. Menerima File maupun data URL.
+//   maxBytes : batas ukuran hasil (default 1MB; SIM/KTP pakai ~300KB).
+//   maxDim   : sisi terpanjang maksimum (px) sebelum kualitas diturunkan.
+async function compressImage(input, { maxBytes = 1_000_000, maxDim = 1600 } = {}) {
+  const srcUrl = typeof input === "string" ? input : URL.createObjectURL(input);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error("Gagal memuat gambar untuk kompresi."));
+      im.src = srcUrl;
+    });
+    let width = img.naturalWidth || img.width;
+    let height = img.naturalHeight || img.height;
+    const scale = Math.min(1, maxDim / Math.max(width, height));
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";                 // cegah PNG transparan jadi hitam saat ke JPEG
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(img, 0, 0, width, height);
+
+    const bytesOf = (u) => Math.ceil((u.length - (u.indexOf(",") + 1)) * 0.75);
+    let quality = 0.85;
+    let dataUrl = canvas.toDataURL("image/jpeg", quality);
+    while (bytesOf(dataUrl) > maxBytes && quality > 0.4) {
+      quality -= 0.1;
+      dataUrl = canvas.toDataURL("image/jpeg", quality);
+    }
+    // Masih kegedean di kualitas minimum → kecilkan dimensi lalu ulang.
+    if (bytesOf(dataUrl) > maxBytes && Math.max(width, height) > 800) {
+      return compressImage(dataUrl, { maxBytes, maxDim: Math.round(Math.max(width, height) * 0.75) });
+    }
+    return dataUrl;
+  } finally {
+    if (typeof input !== "string") URL.revokeObjectURL(srcUrl);
+  }
+}
+
 function dataUrlToBlob(dataUrl) {
   const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
   if (!match) throw new Error("Format foto tidak valid (bukan base64 dataURL).");
@@ -10104,6 +10207,73 @@ function dataUrlToBlob(dataUrl) {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return new Blob([bytes], { type: mime });
+}
+
+// ── Foto transaksi TUG → Supabase Storage (bukan base64 di blob) ─────────────
+// SIM/KTP = data pribadi → bucket privat, disimpan sbg penanda "priv:<path>",
+// ditampilkan lewat signed URL. Foto lain → bucket publik (URL langsung).
+const TXN_PHOTO_SLOTS = [
+  { field: "fotoKendaraan",         bucket: "tug-photos",       maxBytes: 1_000_000 },
+  { field: "fotoSimKtp",            bucket: "tug-docs-private",  maxBytes:   300_000 },
+  { field: "fotoSuratPengembalian", bucket: "tug-photos",       maxBytes: 1_000_000 },
+  { field: "fotoBAPengembalian",    bucket: "tug-photos",       maxBytes: 1_000_000 },
+  { field: "fotoSuratJalanImg",     bucket: "tug-photos",       maxBytes: 1_000_000 },
+  { field: "fotoKontrak",           bucket: "tug-photos",       maxBytes: 1_000_000 },
+];
+const _isDataUrl = (v) => typeof v === "string" && v.startsWith("data:");
+
+async function _uploadTxnPhoto(dataUrl, bucket, path) {
+  const blob = dataUrlToBlob(dataUrl);
+  const { error } = await supabase.storage.from(bucket).upload(path, blob, { upsert: true, contentType: blob.type });
+  if (error) throw error;
+  return bucket === "tug-docs-private"
+    ? `priv:${path}`                                                     // render via signed URL
+    : supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+}
+
+// Upload semua foto base64 sebuah transaksi ke Storage → ganti jadi URL/penanda.
+// Foto yang gagal upload (mis. offline) dibiarkan base64 & dicatat di `pending`
+// (transaksi tetap tersimpan + dokumen tetap bisa dibuat; disinkron ulang nanti).
+async function processTxnPhotos(txn, prefix) {
+  if (!supabase) return { data: txn, pending: [] };
+  const t = { ...txn };
+  const pending = [];
+  for (const { field, bucket, maxBytes } of TXN_PHOTO_SLOTS) {
+    if (_isDataUrl(t[field])) {
+      try { t[field] = await _uploadTxnPhoto(await compressImage(t[field], { maxBytes }), bucket, `${prefix}/${field}.jpg`); }
+      catch { pending.push(field); }
+    }
+  }
+  if (Array.isArray(t.fotoMaterial)) {
+    t.fotoMaterial = await Promise.all(t.fotoMaterial.map(async (fm) => {
+      if (!_isDataUrl(fm?.img)) return fm;
+      try { return { ...fm, img: await _uploadTxnPhoto(await compressImage(fm.img, { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/material-${fm.stockId}.jpg`) }; }
+      catch { pending.push(`material:${fm.stockId}`); return fm; }
+    }));
+  }
+  if (Array.isArray(t.stockItems)) {
+    t.stockItems = await Promise.all(t.stockItems.map(async (si, idx) => {
+      const nsi = { ...si };
+      for (const field of ["fotoNameplate", "fotoBarangRetur"]) {
+        if (_isDataUrl(nsi[field])) {
+          try { nsi[field] = await _uploadTxnPhoto(await compressImage(nsi[field], { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/item${idx}-${field}.jpg`); }
+          catch { pending.push(`item${idx}.${field}`); }
+        }
+      }
+      return nsi;
+    }));
+  }
+  if (pending.length) t._fotoPending = true; else if (t._fotoPending) delete t._fotoPending;
+  return { data: t, pending };
+}
+
+// SIM/KTP "priv:<path>" → signed URL (1 jam) untuk ditampilkan/dicetak.
+async function resolveTxnPrivPhotos(txn) {
+  if (!supabase || !txn || typeof txn.fotoSimKtp !== "string" || !txn.fotoSimKtp.startsWith("priv:")) return txn;
+  try {
+    const { data } = await supabase.storage.from("tug-docs-private").createSignedUrl(txn.fotoSimKtp.slice(5), 3600);
+    return data?.signedUrl ? { ...txn, fotoSimKtp: data.signedUrl } : txn;
+  } catch { return txn; }
 }
 
 async function syncFotoMaterialToSupabase(stocks, katalogList) {

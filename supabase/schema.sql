@@ -1057,3 +1057,47 @@ create policy "Public upload stock-photos" on storage.objects
   for insert with check (bucket_id = 'stock-photos');
 create policy "Public update stock-photos" on storage.objects
   for update using (bucket_id = 'stock-photos');
+
+-- ────────────────────────────────────────────────────────────
+-- 25. FOTO TRANSAKSI TUG — dipindah dari base64 (blob window.storage, limit
+--     ~5MB/key) ke Supabase Storage supaya blob transaksi tetap ringan & muat
+--     ratusan transaksi. Field foto di data transaksi menyimpan URL (publik)
+--     atau path (privat), BUKAN base64. Foto dikompres di client sebelum upload
+--     (compressImage): foto barang/surat ≤1MB, SIM/KTP ≤300KB.
+--
+--     DUA bucket dengan sifat berbeda:
+--       tug-photos       PUBLIC  — foto kendaraan/material/surat jalan/BA/kontrak
+--                                  (bukan data pribadi; perlu tampil cepat & di
+--                                  dokumen TUG yang bisa disimpan/di-print).
+--       tug-docs-private PRIVATE — SIM/KTP pengemudi (DATA PRIBADI). Diakses via
+--                                  signed URL berumur pendek, hanya user login.
+--                                  Upload/baca dari app pakai sesi Supabase Auth
+--                                  (role authenticated), bukan anon key.
+-- ────────────────────────────────────────────────────────────
+insert into storage.buckets (id, name, public)
+values ('tug-photos', 'tug-photos', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Public read tug-photos" on storage.objects;
+drop policy if exists "Public upload tug-photos" on storage.objects;
+drop policy if exists "Public update tug-photos" on storage.objects;
+create policy "Public read tug-photos" on storage.objects
+  for select using (bucket_id = 'tug-photos');
+create policy "Public upload tug-photos" on storage.objects
+  for insert with check (bucket_id = 'tug-photos');
+create policy "Public update tug-photos" on storage.objects
+  for update using (bucket_id = 'tug-photos');
+
+insert into storage.buckets (id, name, public)
+values ('tug-docs-private', 'tug-docs-private', false)
+on conflict (id) do update set public = false;
+
+drop policy if exists "Auth read tug-docs-private" on storage.objects;
+drop policy if exists "Auth upload tug-docs-private" on storage.objects;
+drop policy if exists "Auth update tug-docs-private" on storage.objects;
+create policy "Auth read tug-docs-private" on storage.objects
+  for select using (bucket_id = 'tug-docs-private' and auth.role() = 'authenticated');
+create policy "Auth upload tug-docs-private" on storage.objects
+  for insert with check (bucket_id = 'tug-docs-private' and auth.role() = 'authenticated');
+create policy "Auth update tug-docs-private" on storage.objects
+  for update using (bucket_id = 'tug-docs-private' and auth.role() = 'authenticated');
