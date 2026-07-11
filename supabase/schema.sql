@@ -979,3 +979,81 @@ drop policy if exists "Authenticated read attb_list" on attb_list;
 drop policy if exists "Authenticated write attb_list" on attb_list;
 create policy "Authenticated read attb_list" on attb_list for select using (auth.role() = 'authenticated');
 create policy "Authenticated write attb_list" on attb_list for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ────────────────────────────────────────────────────────────
+-- 24. STOCK_PHOTO_EMBEDDINGS — pencarian barang Data Stok BERDASARKAN FOTO
+--     (visual search ala toko online). Tiap baris = 1 foto material + embedding
+--     vektornya (Cohere embed-multilingual-v3.0, input_type=image, 1024 dim).
+--
+--     SCOPE PER-UPT (Opsi B): foto TIDAK dicampur antar-UPT walau nomor katalog
+--     sama (katalog PLN itu standar nasional, 36 nomor dipakai >1 UPT). Tiap UPT
+--     punya fotonya sendiri → onboarding UPT baru murni menambah, tidak menimpa
+--     data UPT lain. Primary key & path Storage di-namespace slug UPT.
+--       id           = "spe_<uptslug>_<katalog>_<source>"
+--       storage path = stock-photos/<uptslug>/<katalog>/<source>.jpg
+--
+--     Sumber awal: migrasi foto dari AppSheet (scripts/migrate_material_photos.mjs,
+--     per UPT). Ke depan: upload foto baru di app langsung di-embed real-time.
+--     Dikunci per NOMOR KATALOG (foto = identitas jenis material, bukan per lokasi
+--     stok), jadi semua baris stok dari katalog itu berbagi foto yang sama.
+-- ────────────────────────────────────────────────────────────
+create extension if not exists vector;   -- (idempotent; sudah ada dari section 9 RAG)
+
+create table if not exists stock_photo_embeddings (
+  id         text primary key,      -- "spe_<uptslug>_<katalog>_<source>", stabil → re-run = upsert
+  upt        text not null,         -- scope UPT (Opsi B) — "UPT Surabaya" dst
+  katalog    text not null,         -- join key ke Master Katalog / stocks
+  source     text not null,         -- 'utama' | 'tambahan' | 'nameplate'
+  photo_url  text not null,         -- URL publik di bucket stock-photos
+  embedding  vector(1024),
+  ocr_text   text,                  -- Fase 2 (OCR nameplate); null utk sekarang
+  updated_at timestamptz default now()
+);
+create index if not exists idx_spe_upt_katalog on stock_photo_embeddings(upt, katalog);
+create index if not exists idx_spe_embedding on stock_photo_embeddings using hnsw (embedding vector_cosine_ops);
+
+alter table stock_photo_embeddings enable row level security;
+drop policy if exists "Authenticated read spe" on stock_photo_embeddings;
+drop policy if exists "Authenticated write spe" on stock_photo_embeddings;
+create policy "Authenticated read spe"  on stock_photo_embeddings for select using (auth.role() = 'authenticated');
+create policy "Authenticated write spe" on stock_photo_embeddings for all   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- Pencarian similarity per MATERIAL: skor = kemiripan tertinggi antar foto katalog
+-- itu, disaring >= min_similarity (default 0.60), top match_count (default 10).
+-- p_upt: viewer hanya mencocokkan foto UPT-nya sendiri (stok memang per-UPT);
+-- null = lintas semua UPT. Dipanggil App.jsx lewat supabase.rpc('match_stock_photos', ...).
+create or replace function match_stock_photos(
+  query_embedding vector(1024),
+  p_upt text default null,
+  match_count int default 10,
+  min_similarity float default 0.6
+)
+returns table(katalog text, similarity float)
+language sql stable
+as $$
+  select katalog, max(1 - (embedding <=> query_embedding)) as similarity
+  from stock_photo_embeddings
+  where embedding is not null
+    and (p_upt is null or upt = p_upt)
+  group by katalog
+  having max(1 - (embedding <=> query_embedding)) >= min_similarity
+  order by similarity desc
+  limit match_count;
+$$;
+
+-- Bucket foto untuk visual search (dedicated, terpisah dari 'material-photos').
+-- Public-read supaya thumbnail cepat tampil; upload lewat service key (migrasi)
+-- maupun anon key (upload foto baru dari app), pola sama seperti material-photos.
+insert into storage.buckets (id, name, public)
+values ('stock-photos', 'stock-photos', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Public read stock-photos" on storage.objects;
+drop policy if exists "Public upload stock-photos" on storage.objects;
+drop policy if exists "Public update stock-photos" on storage.objects;
+create policy "Public read stock-photos" on storage.objects
+  for select using (bucket_id = 'stock-photos');
+create policy "Public upload stock-photos" on storage.objects
+  for insert with check (bucket_id = 'stock-photos');
+create policy "Public update stock-photos" on storage.objects
+  for update using (bucket_id = 'stock-photos');

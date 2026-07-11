@@ -54,6 +54,23 @@ async function cohereEmbed(texts, inputType) {
   const data = await resp.json();
   return data.embeddings; // array of vectors, sejajar urutan dengan `texts`
 }
+// Embedding untuk GAMBAR (visual search Data Stok) — model & dimensi sama dgn teks
+// (1024), tapi input_type=image + param images (1 data-URL base64 per panggilan).
+// Dipakai saat user cari barang dengan foto → dicocokkan ke stock_photo_embeddings.
+async function cohereEmbedImage(dataUri) {
+  const key = import.meta.env.VITE_COHERE_API_KEY;
+  if (!key) throw new Error("VITE_COHERE_API_KEY belum diisi di .env");
+  const resp = await fetch("https://api.cohere.com/v1/embed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+    body: JSON.stringify({ model: "embed-multilingual-v3.0", input_type: "image", images: [dataUri] }),
+  });
+  if (!resp.ok) throw new Error(`Cohere image embed gagal (${resp.status}): ${await resp.text()}`);
+  const data = await resp.json();
+  const v = data.embeddings?.[0] || data.embeddings?.float?.[0];
+  if (!v) throw new Error("Cohere tidak mengembalikan embedding gambar");
+  return v;
+}
 // Teks deskriptif 1 katalog — dipakai sebagai 1 "chunk" RAG.
 // stockInfo (opsional): {qty, price, locations:[{gudang,blok,qty}]} hasil agregasi
 // enrichedStocks per katalogId — supaya chunk RAG ikut bawa angka real-time (qty/harga/
@@ -2936,6 +2953,11 @@ export default function PLNWarehouse() {
   const [kartuGantungDetail, setKartuGantungDetail] = useState(null);
   const [petaMiniDetail, setPetaMiniDetail] = useState(null); // {stock, lokasi, gudang}
   const [stockDetailId, setStockDetailId] = useState(null); // id stok yang dibuka detailnya (klik baris Data Stok)
+  // Cari barang dengan foto (visual search) di Data Stok
+  const [photoSearchOpen, setPhotoSearchOpen] = useState(false);
+  const [photoSearchImg, setPhotoSearchImg] = useState(null);
+  const [photoSearchLoading, setPhotoSearchLoading] = useState(false);
+  const [photoSearchResults, setPhotoSearchResults] = useState(null); // null = belum cari; [] = tidak ada hasil
   const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
   const [lightboxImg, setLightboxImg] = useState(null); // src foto yang sedang di-overview full-screen
   const [scannerTarget, setScannerTarget] = useState(null); // "stockForm" | {index}
@@ -3788,6 +3810,27 @@ export default function PLNWarehouse() {
     setStocks(ns);
     await saveToCloud({stocks: ns});
     showToast(`📷 ${field==="fotoNameplate"?"Foto Nameplate":"Foto Keseluruhan"} diperbarui!`);
+  }
+
+  // Cari barang berdasarkan foto: embed foto query (Cohere image) → cocokkan ke
+  // stock_photo_embeddings via RPC match_stock_photos (skor tertinggi per katalog,
+  // ≥60%, top 10). p_upt=null: WARNOTO saat ini single-UPT (Surabaya), semua
+  // embedding memang Surabaya. Saat multi-UPT nanti, isi p_upt sesuai UPT viewer.
+  async function runPhotoSearch() {
+    if (!photoSearchImg || !supabase) return;
+    setPhotoSearchLoading(true);
+    try {
+      const vec = await cohereEmbedImage(photoSearchImg);
+      const { data, error } = await supabase.rpc("match_stock_photos", {
+        query_embedding: vec, p_upt: null, match_count: 10, min_similarity: 0.6,
+      });
+      if (error) throw error;
+      setPhotoSearchResults(data || []);
+      setPhotoSearchOpen(false);
+    } catch (e) {
+      showToast("Gagal cari dengan foto: " + (e.message || e), "error");
+    }
+    setPhotoSearchLoading(false);
   }
   // Catatan: satu-satunya tombol pemanggil ini dirender ADMIN-only, jadi cabang
   // "ajukan approval TL" di bawah ini tidak pernah tereksekusi lewat UI saat ini.
@@ -6811,19 +6854,54 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-              <div style={{position:"relative",width:"100%"}}>
-                <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama, kode, no. katalog, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
-                {search && (
-                  <button
-                    onClick={()=>setSearch("")}
-                    title="Hapus pencarian"
-                    style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
-                  >✕</button>
-                )}
+              <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
+                <div style={{position:"relative",flex:1}}>
+                  <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama, kode, no. katalog, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                  {search && (
+                    <button
+                      onClick={()=>setSearch("")}
+                      title="Hapus pencarian"
+                      style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
+                    >✕</button>
+                  )}
+                </div>
+                <button type="button" title="Cari barang berdasarkan foto" onClick={()=>{setPhotoSearchImg(null);setPhotoSearchOpen(true);}}
+                  style={{...sty.btn("primary"),whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                  📷{!isMobile && <span>Cari Foto</span>}
+                </button>
               </div>
               <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
                 <option value="ALL">Semua Jenis</option>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}
               </select>
+              {photoSearchResults && (
+                <div style={{...sty.card,padding:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                    <div style={{fontWeight:800,fontSize:13}}>📷 Hasil pencarian foto — {photoSearchResults.length} barang mirip</div>
+                    <button style={sty.btn("ghost","sm")} onClick={()=>setPhotoSearchResults(null)}>✕ Reset</button>
+                  </div>
+                  {photoSearchResults.length===0 ? (
+                    <div style={{fontSize:12,color:C.muted}}>Tidak ada barang dengan kemiripan ≥60%. Coba foto lain atau sudut/pencahayaan berbeda.</div>
+                  ) : (
+                    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
+                      {photoSearchResults.map(r=>{
+                        const est = enrichedStocks.find(s=>String(s.katalog)===String(r.katalog));
+                        const thumb = est?.fotoKeseluruhan || est?.img;
+                        const pct = Math.round((r.similarity||0)*100);
+                        return (
+                          <div key={r.katalog} onClick={()=>est&&setStockDetailId(est.id)} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:10,cursor:est?"pointer":"default",display:"flex",gap:10,alignItems:"center",background:C.surface}}>
+                            {thumb ? <img src={thumb} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0,border:`1px solid ${C.border}`}}/> : <div style={{width:54,height:54,borderRadius:8,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>📦</div>}
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{fontWeight:700,fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{est?.name||"(tidak ada di Data Stok)"}</div>
+                              <div style={{fontSize:10,color:"#0098da",fontWeight:700}}>📑 {r.katalog}</div>
+                              <div style={{fontSize:11,fontWeight:800,color:pct>=80?C.green:pct>=70?"#d97706":C.muted,marginTop:2}}>{pct}% mirip</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {katalogList.length===0 && (
               <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,marginBottom:16}}>
@@ -8587,6 +8665,25 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       )}
 
       {/* KARTU GANTUNG DIGITAL DETAIL MODAL */}
+      {/* CARI DENGAN FOTO — modal upload foto query untuk visual search Data Stok */}
+      {photoSearchOpen && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}} onClick={()=>!photoSearchLoading&&setPhotoSearchOpen(false)}>
+          <div style={{...sty.card,width:420,maxWidth:"100%"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:6}}>📷 Cari Barang dengan Foto</div>
+            <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Ambil atau unggah foto barang — sistem mencari material paling mirip di Data Stok (kemiripan ≥60%, maks 10 hasil).</p>
+            <label style={{...sty.btn("ghost"),display:"block",textAlign:"center",cursor:"pointer",marginBottom:10}}>
+              {photoSearchImg?"🔄 Ganti Foto":"📸 Ambil / Pilih Foto"}
+              <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setPhotoSearchImg(img))} style={{display:"none"}}/>
+            </label>
+            {photoSearchImg && <img src={photoSearchImg} alt="query" style={{width:"100%",maxHeight:220,objectFit:"contain",borderRadius:8,marginBottom:12,border:`1px solid ${C.border}`,background:"#f8fafc"}}/>}
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...sty.btn("ghost"),flex:1}} disabled={photoSearchLoading} onClick={()=>setPhotoSearchOpen(false)}>Batal</button>
+              <button style={{...sty.btn("primary"),flex:2}} disabled={!photoSearchImg||photoSearchLoading} onClick={runPhotoSearch}>{photoSearchLoading?"🔎 Menganalisa...":"Cari Barang Mirip"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DETAIL DATA STOK — klik baris di tabel Data Stok, termasuk foto Nameplate + Foto Keseluruhan */}
       {stockDetailId && (() => {
         const st = stocks.find(s=>s.id===stockDetailId);
@@ -10024,6 +10121,22 @@ async function syncFotoMaterialToSupabase(stocks, katalogList) {
     const img = stockRow.fotoKeseluruhan;
     const fingerprint = `${img.length}:${img.slice(0, 60)}`;
     if (synced[kat.id] === fingerprint) continue;
+
+    // Foto hasil migrasi AppSheet sudah berupa URL Storage (bukan base64 data URL).
+    // Tidak perlu di-upload ulang — cukup pakai URL-nya langsung sebagai
+    // fotoKeseluruhanUrl (dipakai halaman scan QR). Tanpa guard ini, dataUrlToBlob
+    // akan error karena img bukan format "data:...;base64,".
+    if (!/^data:/i.test(img)) {
+      const katRes = await fetch(`${SUPABASE_URL}/rest/v1/katalog?on_conflict=id`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates" },
+        body: JSON.stringify([{ id: kat.id, data: { ...kat, fotoKeseluruhanUrl: img } }]),
+      });
+      if (!katRes.ok) throw new Error(`Gagal simpan URL foto ke katalog: ${await katRes.text()}`);
+      synced[kat.id] = fingerprint;
+      uploadCount++;
+      continue;
+    }
 
     const blob = dataUrlToBlob(img);
     const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
