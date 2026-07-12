@@ -2899,6 +2899,7 @@ export default function PLNWarehouse() {
   const [lastSaved, setLastSaved] = useState(null);
 
   const [tab, setTab] = useState("dashboard");
+  const [dashTab, setDashTab] = useState("ringkasan"); // sub-tab Dashboard: ringkasan | peta | kinerja | detail
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
   const [stockPage, setStockPage] = useState(1);
@@ -3396,7 +3397,7 @@ export default function PLNWarehouse() {
 
   // Peta Wilayah Gudang UPT Surabaya — render/refresh marker Leaflet tiap kali Dashboard dibuka atau data gudang berubah
   useEffect(() => {
-    if (tab !== "dashboard" || !petaWilayahDivRef.current || typeof window.L === "undefined") return;
+    if (tab !== "dashboard" || dashTab !== "peta" || !petaWilayahDivRef.current || typeof window.L === "undefined") return;
     // Tab Dashboard di-unmount/mount ulang tiap pindah tab, jadi <div> peta selalu jadi node DOM baru —
     // kalau instance map lama masih nempel ke container lama (sudah lepas dari DOM), buang & buat ulang.
     if (petaWilayahMapRef.current && petaWilayahMapRef.current.getContainer() !== petaWilayahDivRef.current) {
@@ -3436,7 +3437,7 @@ export default function PLNWarehouse() {
       map.setView([gudangWithCoord[0].coord.lat, gudangWithCoord[0].coord.lng], gudangWithCoord.length===1?13:11);
     }
     setTimeout(()=>map.invalidateSize(), 100);
-  }, [tab, gudangList, stocks, lokasiList, maturityAssessments, currentUser]);
+  }, [tab, dashTab, gudangList, stocks, lokasiList, maturityAssessments, currentUser]);
 
   // Toast error dibiarkan tampil lebih lama (5.5s) daripada sukses (3.5s) —
   // pesan error biasanya lebih panjang/penting untuk dibaca tuntas, terutama
@@ -6587,7 +6588,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
 
   // ── DESIGN TOKENS ──
-  const C = { bg:"#f0f4f8", surface:"#ffffff", sidebar:"#003087", accent:"#003087", yellow:"#f59e0b", green:"#16a34a", red:"#dc2626", text:"#111827", muted:"#6b7280", border:"#e5e7eb" };
+  const C = { bg:"#f4f6fb", surface:"#ffffff", sidebar:"#0b2559", accent:"#1d4ed8", yellow:"#f59e0b", green:"#16a34a", red:"#dc2626", text:"#0f172a", muted:"#64748b", border:"#e6eaf1" };
   // Target sentuh & ukuran font input dibesarkan otomatis di HP (isMobile):
   // - tombol minimal ~44px tinggi (standar minimum tap target Apple/Google)
   //   supaya tidak gampang salah pencet pakai jari.
@@ -6595,7 +6596,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   //   field di-tap (auto-zoom terjadi kalau font input <16px).
   const sty = {
     btn:(v="primary",sz="md")=>({ padding:isMobile?(sz==="sm"?"10px 14px":"12px 18px"):(sz==="sm"?"5px 10px":"9px 18px"), minHeight:isMobile?44:undefined, borderRadius:8, border:"none", cursor:"pointer", fontWeight:600, fontSize:isMobile?(sz==="sm"?13:14):(sz==="sm"?11:13), background: v==="primary"?C.accent:v==="danger"?C.red:v==="success"?C.green:v==="warn"?C.yellow:"#f3f4f6", color:v==="ghost"?C.text:"white" }),
-    card:{ background:C.surface, borderRadius:12, border:`1px solid ${C.border}`, padding:20 },
+    card:{ background:C.surface, borderRadius:12, border:`1px solid ${C.border}`, padding:20, boxShadow:"0 1px 3px rgba(15,23,42,0.06)" },
     // Tombol Batal/Simpan "menempel" di bawah kartu modal (position:sticky)
     // supaya di form panjang (banyak baris material) user tidak perlu scroll
     // balik ke bawah cuma untuk menemukan tombol submit. bottom/marginBottom
@@ -6632,10 +6633,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:"white",borderRadius:20,padding:40,width:400,boxShadow:"0 25px 60px rgba(0,0,0,0.35)"}}>
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:72,height:72,background:"#003087",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,margin:"0 auto 16px"}}>⚡</div>
-          <div style={{fontSize:11,color:C.muted,fontWeight:600,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{COMPANY}</div>
-          <div style={{fontSize:16,fontWeight:800,color:"#003087"}}>{UPT}</div>
-          <div style={{fontSize:13,color:C.muted}}>{WAREHOUSE} — Sistem TUG Digital</div>
+          <div style={{width:76,height:76,background:"linear-gradient(135deg,#fbbf24,#f59e0b)",borderRadius:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 14px",boxShadow:"0 10px 28px rgba(245,158,11,0.45)"}}>⚡</div>
+          <div style={{fontSize:28,fontWeight:800,color:C.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
+          <div style={{fontSize:10.5,color:C.muted,fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"8px 0 3px"}}>{COMPANY}</div>
+          <div style={{fontSize:12.5,color:C.muted}}>{UPT} · {WAREHOUSE}</div>
         </div>
         <div style={{marginBottom:16}}>
           <label style={sty.label}>Username</label>
@@ -6654,7 +6655,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   if (loading) return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
-      <div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>⚡</div><div style={{fontSize:16,fontWeight:700,color:"#003087"}}>Memuat data dari cloud...</div></div>
+      <div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>⚡</div><div style={{fontSize:16,fontWeight:700,color:C.accent}}>Memuat data dari cloud...</div></div>
     </div>
   );
 
@@ -6717,12 +6718,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           transition:"transform 0.25s ease", boxShadow:"4px 0 16px rgba(0,0,0,0.3)",
         } : {}),
       }}>
-        <div style={{padding:"20px 16px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-            <div style={{width:36,height:36,background:"rgba(255,255,255,0.15)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>⚡</div>
-            <div><div style={{color:"white",fontWeight:800,fontSize:13,lineHeight:1.2}}>PLN TUG Digital</div><div style={{color:"rgba(255,255,255,0.6)",fontSize:10}}>{WAREHOUSE}</div></div>
+        <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.12)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:11}}>
+            <div style={{width:36,height:36,background:"linear-gradient(135deg,#fbbf24,#f59e0b)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0,boxShadow:"0 2px 8px rgba(245,158,11,0.35)"}}>⚡</div>
+            <div style={{minWidth:0,lineHeight:1.15}}>
+              <div style={{color:"white",fontWeight:800,fontSize:17,letterSpacing:".5px"}}>WARNOTO</div>
+              <div style={{color:"rgba(255,255,255,0.6)",fontSize:10,letterSpacing:".5px",textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{UPT}</div>
+            </div>
           </div>
-          <div style={{fontSize:10,color:"rgba(255,255,255,0.5)",lineHeight:1.4}}>{UPT}</div>
         </div>
         <div style={{flex:1,padding:"12px 8px",overflowY:"auto"}}>
           {navItems.map(n => {
@@ -6902,6 +6905,18 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
         {tab==="dashboard" && !hasRole(currentUser, "MANAGER","ASMAN") && (
           <>
+          {/* ── TAB BAR DASHBOARD (satu section per klik, tidak menumpuk) ── */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
+            {[{id:"ringkasan",label:"📊 Ringkasan"},{id:"peta",label:"🗺️ Peta"},{id:"kinerja",label:"🎯 Kinerja"},{id:"detail",label:"📦 Detail Stok"}].map(t=>(
+              <button key={t.id} onClick={()=>setDashTab(t.id)} style={{padding:isMobile?"9px 14px":"8px 16px",minHeight:isMobile?44:undefined,borderRadius:9,border:`1px solid ${dashTab===t.id?C.accent:C.border}`,background:dashTab===t.id?C.accent:C.surface,color:dashTab===t.id?"white":C.muted,fontWeight:700,fontSize:isMobile?13:12.5,cursor:"pointer",boxShadow:dashTab===t.id?"0 2px 8px rgba(29,78,216,0.25)":"none"}}>{t.label}</button>
+            ))}
+          </div>
+
+          {dashTab==="ringkasan" && (
+            <ExecOverview totalVal={totalVal} lowStocks={lowStocks} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
+          )}
+
+          {dashTab==="peta" && (<>
           {/* ── PETA WILAYAH GUDANG UPT SURABAYA ── */}
           <div style={{...sty.card}}>
             <div style={{fontWeight:800,fontSize:15,marginBottom:4}}>🗺️ Peta Wilayah Gudang UPT Surabaya</div>
@@ -6913,7 +6928,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div style={{fontSize:11,color:"#92400e",marginTop:8}}>⚠️ Ada gudang belum punya koordinat GPS — isi di Master Data → Master Gudang → Edit.</div>
             )}
           </div>
+          </>)}
 
+          {dashTab==="kinerja" && (<>
           {/* ── STOCK COUNT (SAP vs Aplikasi) — ringkasan sesi terakhir ── */}
           {(()=>{
             const latest = stockCountList[0];
@@ -6978,8 +6995,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             );
           })()}
+          </>)}
 
-          <div style={{marginTop:20}}/>
+          {dashTab==="detail" && (
           <DashboardDefault
             stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList}
             rencanaKedatanganList={rencanaKedatanganList}
@@ -6992,6 +7010,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             materialCadangData={materialCadangData}
             attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           />
+          )}
         </>
         )}
 
@@ -7144,7 +7163,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{...sty.card,padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:980}}>
                 <thead>
-                  <tr style={{background:"#003087",color:"white"}}>
+                  <tr style={{background:C.sidebar,color:"white"}}>
                     {["Foto","Nama Barang","Kategori","Qty","Gudang","Blok","Harga","Status","Aksi"].map(h=>(
                       <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"||h==="Foto"?"center":"left",whiteSpace:"nowrap",fontSize:11}}>{h}</th>
                     ))}
@@ -7467,7 +7486,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div style={{...sty.card,padding:0,overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:860}}>
                   <thead>
-                    <tr style={{background:"#003087",color:"white"}}>
+                    <tr style={{background:C.sidebar,color:"white"}}>
                       {["Foto","No Katalog","Nama Barang","Kategori","Jenis","Satuan","Status","Aksi"].map(h=>(
                         <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"||h==="Foto"?"center":"left",whiteSpace:"nowrap",fontSize:11}}>{h}</th>
                       ))}
@@ -7589,7 +7608,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     expand semua (keluhan user 2026-07-06: "kurang informatif"). */}
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
                   {[
-                    {label:"Total UIT",val:uitList.length,color:"#003087"},
+                    {label:"Total UIT",val:uitList.length,color:C.accent},
                     {label:"Total UPT",val:uptList.length,color:"#0369a1"},
                     {label:"Total ULTG",val:ultgList.length,color:"#0891b2"},
                   ].map(kpi=>(
@@ -7631,7 +7650,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             <div style={{fontSize:22,flexShrink:0}}>🏢</div>
                             <div style={{minWidth:0}}>
                               <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-                                <span style={{fontSize:9,fontWeight:800,color:"white",background:"#003087",padding:"2px 6px",borderRadius:4,letterSpacing:0.5}}>UIT</span>
+                                <span style={{fontSize:9,fontWeight:800,color:"white",background:C.sidebar,padding:"2px 6px",borderRadius:4,letterSpacing:0.5}}>UIT</span>
                                 <span style={{fontWeight:800,fontSize:14}}>{uit.kode} — {uit.nama}</span>
                               </div>
                               <div style={{fontSize:11,color:C.muted,marginTop:3}}>📍 {uit.alamat||"Alamat belum diisi"}</div>
@@ -10621,13 +10640,13 @@ function ScanPublicView({ katalogId }) {
           <div style={{fontSize:11,color:"#047857",fontWeight:700}}>QTY STOK SAAT INI</div>
           <div style={{fontSize:26,fontWeight:800,color:"#047857"}}>{fmtNum(qty)}</div>
         </div>
-        <div style={{fontSize:12,fontWeight:800,color:"#003087",marginBottom:8}}>📋 Riwayat Mutasi (TUG-2)</div>
+        <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8}}>📋 Riwayat Mutasi (TUG-2)</div>
         {history.length===0 && <div style={{fontSize:12,color:"#9ca3af",textAlign:"center",padding:14}}>Belum ada riwayat mutasi untuk material ini.</div>}
         {history.length>0 && (
           <div style={{overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:10.5}}>
               <thead>
-                <tr style={{background:"#003087",color:"white"}}>
+                <tr style={{background:C.sidebar,color:"white"}}>
                   <th style={{padding:"5px 6px",textAlign:"left"}}>TGL</th>
                   <th style={{padding:"5px 6px",textAlign:"left"}}>NO. BON</th>
                   <th style={{padding:"5px 6px",textAlign:"center"}}>MASUK</th>
@@ -11085,6 +11104,66 @@ function CollapsibleSection({ id, title, icon, defaultOpen = true, C, children }
   );
 }
 
+// Ringkasan eksekutif Dashboard (tab "Ringkasan") — status + 4 KPI + panel "Butuh Perhatian".
+// Prinsip manage-by-exception: sorot yang bermasalah/menunggu keputusan; detail via tab lain.
+function ExecOverview({ totalVal, lowStocks, approvalCount, stockCountPendingCount, attbActionCount, akurasi, maturity, setTab, setOpnameSubTab, C, sty, isMobile }) {
+  const kritisCount = (lowStocks||[]).length;
+  const attention = [
+    approvalCount>0 && { icon:"✅", text:`${approvalCount} dokumen menunggu approval Anda`, go:()=>setTab("approval") },
+    stockCountPendingCount>0 && { icon:"📊", text:`${stockCountPendingCount} temuan Stock Count menunggu keputusan`, go:()=>{ setTab("opname"); setOpnameSubTab && setOpnameSubTab("stockCount"); } },
+    kritisCount>0 && { icon:"🔴", text:`${kritisCount} material stok kritis (≤ minimum)`, go:()=>setTab("stock") },
+    attbActionCount>0 && { icon:"🗂️", text:`${attbActionCount} aset ATTB butuh tindak lanjut`, go:()=>setTab("attb") },
+  ].filter(Boolean);
+  const statusLabel = attention.length===0 ? "SEHAT" : "PERLU PERHATIAN";
+  const kpis = [
+    { icon:"💰", label:"Nilai Inventory", val:fmtRp(totalVal), color:C.green },
+    { icon:"🔴", label:"Material Kritis", val:kritisCount, color:kritisCount>0?C.red:C.green },
+    { icon:"🎯", label:"Akurasi SAP vs Fisik", val:akurasi!=null?akurasi+"%":"—", color:akurasi==null?C.muted:akurasi>=90?C.green:akurasi>=70?C.yellow:C.red },
+    { icon:"🏆", label:"Maturity Gudang", val:maturity?("Lv "+maturity.level):"—", color:C.accent },
+  ];
+  return (
+    <div>
+      <div style={{background:`linear-gradient(135deg,${C.sidebar},${C.accent})`,borderRadius:14,padding:isMobile?"16px 18px":"18px 24px",color:"white",marginBottom:16,boxShadow:"0 4px 16px rgba(11,37,89,0.25)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+          <div>
+            <div style={{fontSize:12,opacity:0.85,marginBottom:2}}>Status Gudang · {WAREHOUSE}</div>
+            <div style={{fontSize:isMobile?20:24,fontWeight:800,letterSpacing:.3}}>{statusLabel}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,opacity:0.85,marginBottom:2}}>Butuh perhatian Anda</div>
+            <div style={{fontSize:isMobile?20:24,fontWeight:800}}>{attention.length} hal</div>
+          </div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}}>
+        {kpis.map(k=>(
+          <div key={k.label} style={{...sty.card,padding:16}}>
+            <div style={{fontSize:22,marginBottom:6}}>{k.icon}</div>
+            <div style={{fontSize:isMobile?18:20,fontWeight:800,color:k.color,lineHeight:1.1}}>{k.val}</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:4}}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{...sty.card}}>
+        <div style={{fontWeight:800,fontSize:15,marginBottom:12}}>📌 Butuh Perhatian Anda</div>
+        {attention.length===0 ? (
+          <div style={{fontSize:13,color:C.green,fontWeight:600,padding:"8px 0"}}>✅ Semua aman — tidak ada yang menunggu keputusan Anda saat ini.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {attention.map((a,i)=>(
+              <button key={i} onClick={a.go} style={{display:"flex",alignItems:"center",gap:12,width:"100%",textAlign:"left",background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:isMobile?"12px 14px":"11px 14px",minHeight:isMobile?44:undefined,cursor:"pointer"}}>
+                <span style={{fontSize:18,flexShrink:0}}>{a.icon}</span>
+                <span style={{flex:1,fontSize:13,fontWeight:600,color:C.text}}>{a.text}</span>
+                <span style={{fontSize:14,color:C.accent,fontWeight:700,flexShrink:0}}>→</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
 
@@ -11425,7 +11504,7 @@ function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanga
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
-              <tr style={{background:"#003087",color:"white"}}>
+              <tr style={{background:C.sidebar,color:"white"}}>
                 {["UPT","Total Item","Nilai Stok","Stok Kritis","Aktivitas Bulan Ini","Status"].map(h=>(
                   <th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600}}>{h}</th>
                 ))}
@@ -11756,7 +11835,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
             {chatHistory.map((m,i)=>(
               <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",marginBottom:14}}>
                 {m.role==="ai" && (
-                  <div style={{width:34,height:34,borderRadius:"50%",background:"#003087",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,marginRight:8,flexShrink:0}}>⚡</div>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:C.sidebar,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,marginRight:8,flexShrink:0}}>⚡</div>
                 )}
                 <div style={{maxWidth:"78%",padding:"10px 14px",
                   borderRadius:m.role==="user"?"12px 12px 2px 12px":"12px 12px 12px 2px",
@@ -11773,7 +11852,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
             ))}
             {chatLoading && (
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <div style={{width:34,height:34,borderRadius:"50%",background:"#003087",display:"flex",alignItems:"center",justifyContent:"center"}}>⚡</div>
+                <div style={{width:34,height:34,borderRadius:"50%",background:C.sidebar,display:"flex",alignItems:"center",justifyContent:"center"}}>⚡</div>
                 <div style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:12,padding:"10px 14px",fontSize:12,color:C.muted}}>
                   Menganalisa data gudang... ⏳
                 </div>
@@ -12623,7 +12702,7 @@ function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, s
               </div>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead>
-                  <tr style={{background:"#003087",color:"white"}}>
+                  <tr style={{background:C.sidebar,color:"white"}}>
                     {!isMobile && <th style={{padding:"7px 8px",textAlign:"center",width:36}}>No</th>}
                     <th style={{padding:"7px 8px",textAlign:"left"}}>Nama Barang</th>
                     {!isMobile && <th style={{padding:"7px 8px",textAlign:"center"}}>No Katalog</th>}
@@ -13112,7 +13191,7 @@ function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount,
           <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto",marginBottom:14,border:`1px solid ${C.border}`,borderRadius:8}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
               <thead>
-                <tr style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+                <tr style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
                   <th style={{padding:"7px 8px",width:30}}></th>
                   <th style={{padding:"7px 8px",textAlign:"left"}}>Nama Barang</th>
                   <th style={{padding:"7px 8px",textAlign:"center"}}>No. Katalog</th>
@@ -13531,7 +13610,7 @@ function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasi
           <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Preview {rows.length} baris — scroll kanan untuk lihat semua kolom</div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:1050}}>
             <thead>
-              <tr style={{background:"#003087",color:"white"}}>
+              <tr style={{background:C.sidebar,color:"white"}}>
                 {["No","No Katalog","Deskripsi","Status SAP","Jenis","Satuan","Saldo Awal","Masuk","Keluar","Saldo Akhir","TUG/BA","Keterangan","Tgl Mutasi"].map(h=>(
                   <th key={h} style={{padding:"6px 8px",textAlign:["No","Saldo Awal","Masuk","Keluar","Saldo Akhir"].includes(h)?"center":"left",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
@@ -14342,7 +14421,7 @@ function AttbTab({ attbList, currentUser, users, sty, C, createItem, saveEdit, s
           <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:24}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:820}}>
               <thead>
-                <tr style={{background:"#003087",color:"white"}}>
+                <tr style={{background:C.sidebar,color:"white"}}>
                   {["Material","Qty","No Seri","No Asset","Sumber TUG-10","Tanggal","Status TUG-10","Aksi"].map(h=>(
                     <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"?"center":"left",whiteSpace:"nowrap",fontSize:11}}>{h}</th>
                   ))}
@@ -14415,7 +14494,7 @@ function AttbTab({ attbList, currentUser, users, sty, C, createItem, saveEdit, s
       <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:920}}>
           <thead>
-            <tr style={{background:"#003087",color:"white"}}>
+            <tr style={{background:C.sidebar,color:"white"}}>
               {["Nomor AT/ATTB","Jenis / UPT","Deskripsi","Lokasi","Nilai Perolehan","Nilai Buku","Status","Tahap","Aksi"].map(h=>(
                 <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"?"center":h.startsWith("Nilai")?"right":"left",whiteSpace:"nowrap",fontSize:11}}>{h}</th>
               ))}
@@ -14671,7 +14750,7 @@ function AttbTab({ attbList, currentUser, users, sty, C, createItem, saveEdit, s
                 </div>
                 <div style={{overflowX:"auto",maxHeight:280,overflowY:"auto",marginBottom:12,border:`1px solid ${C.border}`,borderRadius:8}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:480}}>
-                    <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+                    <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
                       <tr>{["Nomor AT","Description","Nilai Perolehan","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
                     </thead>
                     <tbody>
@@ -15539,7 +15618,7 @@ function UsulanKatalogTab({ maraReference, setMaraReference, katalogList, setKat
             {search.trim() && (
               <div style={{...sty.card,padding:0,overflowX:"auto",maxHeight:440,overflowY:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+                  <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
                     <tr>{["","No Katalog","Nama Material","Group","Satuan","Status di Master"].map(h=><th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
                   </thead>
                   <tbody>
@@ -16064,7 +16143,7 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, material
           ) : (
             <div style={{...sty.card,padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:1100}}>
-                <thead style={{background:"#003087",color:"white"}}>
+                <thead style={{background:C.sidebar,color:"white"}}>
                   <tr>
                     {["No Katalog","Nama Material","Health Index","Status","Confidence","Kelas","Policy","Stok","Ideal","Gap","Nilai Gap","AI Recommendation"].map(h=>(
                       <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -16211,7 +16290,7 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, material
               </div>
               <div style={{overflowX:"auto",marginBottom:14,maxHeight:300,overflowY:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                  <thead style={{position:"sticky",top:0,background:"#003087",color:"white"}}>
+                  <thead style={{position:"sticky",top:0,background:C.sidebar,color:"white"}}>
                     <tr>
                       {["No Katalog","Nama Material","Cluster","Populasi","Failure","Penggantian","Lead Time","Status","Warning"].map(h=>(
                         <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -16256,7 +16335,7 @@ function MaterialCadangTab({ materialCadangData, setMaterialCadangData, material
           ) : (
             <div style={{...sty.card,padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:900}}>
-                <thead style={{background:"#003087",color:"white"}}>
+                <thead style={{background:C.sidebar,color:"white"}}>
                   <tr>
                     {["No Katalog","Nama Material","Cluster","Kelas","Policy","Stok Saat Ini","Ideal","Gap","Status","Nilai Gap","Aksi"].map(h=>(
                       <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -16740,7 +16819,7 @@ function KapasitasGudangImportTab({ gudangCapacityImports, setGudangCapacityImpo
           })()}
           <div style={{overflowX:"auto",maxHeight:440,overflowY:"auto",marginBottom:14}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:1050}}>
-              <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+              <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
                 <tr>
                   {["UPT","Gudang","Sub Gudang","Luas Lahan (m²)","Terpakai (m²)","Utilization","Status","Warning","Aksi"].map(h=>(
                     <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -16943,7 +17022,7 @@ function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangList, lok
           </div>
           <div style={{...sty.card,padding:0,overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:900}}>
-              <thead style={{background:"#003087",color:"white"}}>
+              <thead style={{background:C.sidebar,color:"white"}}>
                 <tr>
                   {["UPT","Gudang","Sub Gudang","Luas Lahan (m²)","Terpakai (m²)","Sisa (m²)","Utilization","Status","Update","Detail"].map(h=>(
                     <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -17729,7 +17808,7 @@ function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15Hi
           )}
           <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:16,maxHeight:350,overflowY:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:700}}>
-              <thead style={{background:"#003087",color:"white",position:"sticky",top:0}}>
+              <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
                 <tr>
                   {["No Katalog","Deskripsi","Jenis","Qty File","Qty Aplikasi","Harga","Match WARNOTO","Match MARA","Timpa?","Review"].map(h=>(
                     <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
@@ -17916,7 +17995,7 @@ function KartuGantungModal({ katalog, stocks, txns, lokasiList, sty, C, onClose 
             <div style={{overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
                 <thead>
-                  <tr style={{background:"#003087",color:"white"}}>
+                  <tr style={{background:C.sidebar,color:"white"}}>
                     <th style={{padding:"6px 8px",textAlign:"left"}}>TGL</th>
                     <th style={{padding:"6px 8px",textAlign:"left"}}>NO. BON</th>
                     <th style={{padding:"6px 8px",textAlign:"center"}}>MASUK</th>
