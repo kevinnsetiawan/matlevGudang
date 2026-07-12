@@ -29,6 +29,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent } from "../src/lib/ragShared.mjs";
+import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -40,17 +41,6 @@ if (!SUPABASE_URL || !SUPABASE_SECRET_KEY || !COHERE_API_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
-
-async function cohereEmbed(texts, inputType) {
-  const resp = await fetch("https://api.cohere.com/v1/embed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${COHERE_API_KEY}` },
-    body: JSON.stringify({ model: "embed-multilingual-v3.0", texts, input_type: inputType }),
-  });
-  if (!resp.ok) throw new Error(`Cohere embed gagal (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  return data.embeddings;
-}
 
 async function main() {
   console.log("=== WARNOTO nightly_sync mulai ===", new Date().toISOString());
@@ -165,7 +155,7 @@ async function main() {
   const BATCH = 90;
   for (let i = 0; i < allChunks.length; i += BATCH) {
     const batch = allChunks.slice(i, i + BATCH);
-    const vectors = await cohereEmbed(batch.map((c) => c.content), "search_document");
+    const vectors = await cohereEmbed(batch.map((c) => c.content), "search_document", COHERE_API_KEY);
     const rows = batch.map((c, idx) => ({ ...c, embedding: vectors[idx], updated_at: new Date().toISOString() }));
     const { error } = await supabase.from("rag_chunks").upsert(rows, { onConflict: "id" });
     if (error) throw error;

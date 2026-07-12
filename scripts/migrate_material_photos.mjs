@@ -28,6 +28,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
 import { createRequire } from "module";
+import { cohereEmbedImage } from "./lib/cohere.mjs";
 
 // xlsx adalah paket CommonJS — di file .mjs diakses lewat createRequire supaya
 // XLSX.readFile tersedia (import * as tidak mengekspos API-nya dengan benar).
@@ -91,28 +92,20 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 // ── Cohere image embedding (Fase 1) ──────────────────────────────────────────
-// embed-multilingual-v3.0 mendukung input gambar (input_type=image, param images,
-// maks 1 gambar/request). Mengembalikan vektor 1024-dim, konsisten dgn RAG teks.
-async function cohereEmbedImage(dataUri, attempt = 0) {
-  const resp = await fetch("https://api.cohere.com/v1/embed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${COHERE_API_KEY}` },
-    body: JSON.stringify({ model: "embed-multilingual-v3.0", input_type: "image", images: [dataUri] }),
-  });
-  // 429 = kena limit per-menit (umumnya key trial). Tunggu sampai window reset
-  // lalu ulang — bikin migrasi tuntas sekali jalan tanpa foto yang terlewat.
-  if (resp.status === 429) {
+// Embed gambar via helper bersama (scripts/lib/cohere.mjs), dibungkus retry untuk 429
+// (limit per-menit, umumnya key trial): tunggu window reset lalu ulang — bikin migrasi
+// tuntas sekali jalan tanpa foto yang terlewat.
+async function embedImageWithRetry(dataUri, attempt = 0) {
+  try {
+    return await cohereEmbedImage(dataUri, COHERE_API_KEY);
+  } catch (e) {
+    if (e.status !== 429) throw e;
     if (attempt >= 15) throw new Error("Cohere 429 berulang — limit trial sangat ketat, pertimbangkan production key.");
     const waitMs = 65000;
     console.log(`    ⏳ rate limit Cohere, tunggu ${waitMs / 1000}s lalu ulang (percobaan ${attempt + 1}) ...`);
     await new Promise((r) => setTimeout(r, waitMs));
-    return cohereEmbedImage(dataUri, attempt + 1);
+    return embedImageWithRetry(dataUri, attempt + 1);
   }
-  if (!resp.ok) throw new Error(`Cohere image embed gagal (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  const v = data.embeddings?.[0] || data.embeddings?.float?.[0];
-  if (!v) throw new Error("Cohere tidak mengembalikan embedding");
-  return v;
 }
 
 // ── util ─────────────────────────────────────────────────────────────────────
@@ -368,7 +361,7 @@ async function main() {
         const publicUrl = `${SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/stock-photos/${encodeURI(storagePath)}`;
 
         // b. embedding gambar (Cohere)
-        const vec = await cohereEmbedImage(`data:${mime};base64,${buf.toString("base64")}`);
+        const vec = await embedImageWithRetry(`data:${mime};base64,${buf.toString("base64")}`);
 
         embRows.push({
           id: embId,
