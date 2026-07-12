@@ -3391,7 +3391,7 @@ export default function PLNWarehouse() {
     if (loading) return;
     if (gudangList.length === 0) return;
     dedupeGudangRanRef.current = true;
-    dedupeGudangDanSubGudang();
+    dedupeGudangDanSubGudang(true); // auto-run diam: jangan spam toast "tidak ada duplikat" tiap load
   }, [loading, gudangList]);
 
   // Peta Wilayah Gudang UPT Surabaya — render/refresh marker Leaflet tiap kali Dashboard dibuka atau data gudang berubah
@@ -4337,7 +4337,7 @@ export default function PLNWarehouse() {
   // dan satu lagi otomatis dari import Kapasitas Gudang). Ini penyebab umum denah/koordinat "hilang":
   // datanya nyasar ke ID duplikat yang sedang tidak ditampilkan. Blok Lokasi & Sub Gudang direassign
   // ke ID "primary" yang dipilih (prioritas: sudah punya denah > sudah punya koordinat > paling lama).
-  async function dedupeGudangDanSubGudang() {
+  async function dedupeGudangDanSubGudang(silent = false) {
     const norm = s => String(s||"").trim().toUpperCase().replace(/\s+/g," ");
     let newGudangList = [...gudangList];
     let newSubGudangList = [...subGudangList];
@@ -4395,7 +4395,7 @@ export default function PLNWarehouse() {
       newLokasiList = newLokasiList.map(l => loserIds.has(l.subGudangId) ? {...l, subGudangId: primary.id} : l);
     });
 
-    if (mergedGudang===0 && mergedSub===0) { showToast("Tidak ada Gudang/Sub Gudang duplikat ditemukan.", "success"); return; }
+    if (mergedGudang===0 && mergedSub===0) { if (!silent) showToast("Tidak ada Gudang/Sub Gudang duplikat ditemukan.", "success"); return; }
 
     setGudangList(newGudangList);
     setSubGudangList(newSubGudangList);
@@ -7407,7 +7407,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         <div style={{fontSize:11,color:C.muted,marginTop:4}}>Pakai kalau titik lokasi Gudang di peta hilang/salah, padahal data Kapasitas Gudang untuk gudang itu sudah live — menarik ulang koordinat lat/lng dari sana.</div>
                       </div>
                       <div>
-                        <button style={sty.btn("ghost","sm")} onClick={dedupeGudangDanSubGudang}>🧹 Gabungkan Gudang Duplikat</button>
+                        <button style={sty.btn("ghost","sm")} onClick={() => dedupeGudangDanSubGudang()}>🧹 Gabungkan Gudang Duplikat</button>
                         <div style={{fontSize:11,color:C.muted,marginTop:4}}>Pakai kalau ada 2 Gudang/Sub Gudang dengan nama sama yang seharusnya satu (biasanya bikin denah/koordinat kelihatan "hilang" karena data nyasar ke ID yang berbeda).</div>
                       </div>
                     </div>
