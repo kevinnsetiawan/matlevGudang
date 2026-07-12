@@ -11,6 +11,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
+import { fmtNum, getSAPLabel, buildKatalogRagContent } from "./src/lib/ragShared.mjs";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────
 const COMPANY = "PT. PLN (Persero)";
@@ -164,20 +165,8 @@ function matchNameplateAll(ocrText, katalogList, stocks) {
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, 10);
 }
-// Teks deskriptif 1 katalog — dipakai sebagai 1 "chunk" RAG.
-// stockInfo (opsional): {qty, price, locations:[{gudang,blok,qty}]} hasil agregasi
-// enrichedStocks per katalogId — supaya chunk RAG ikut bawa angka real-time (qty/harga/
-// nilai Rupiah) + lokasi presisi (gudang & blok mana), bukan cuma teks deskriptif.
-// Tanpa ini bot WA/Telegram cuma bisa jawab nama/satuan untuk material di luar top-20/kritis,
-// dan tidak tahu sama sekali material itu fisiknya ada di gudang/blok mana.
-function buildKatalogRagContent(k, stockInfo) {
-  const sap = getSAPLabel(k.katalog);
-  if (!stockInfo) return `Material: ${k.name}. Nomor Katalog: ${k.katalog||"-"}. Kategori: ${k.category||"-"}. Jenis Barang: ${k.jenisBarang||"-"}. Satuan: ${k.satuan||"-"}. Keterangan: ${k.keterangan||"-"}. Status: ${sap}. Belum ada data stok untuk material ini.`;
-  const angka = ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan||"-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty*stockInfo.price))}.`;
-  const lokasiText = (stockInfo.locations||[]).length===0 ? " Lokasi: belum diisi." :
-    ` Lokasi fisik: ${stockInfo.locations.map(l=>`${fmtNum(l.qty)} ${k.satuan||""} di ${l.gudang||"Gudang tidak diketahui"} blok ${l.blok||"-"}`).join("; ")}.`;
-  return `Material: ${k.name}. Nomor Katalog: ${k.katalog||"-"}. Kategori: ${k.category||"-"}. Jenis Barang: ${k.jenisBarang||"-"}. Satuan: ${k.satuan||"-"}. Keterangan: ${k.keterangan||"-"}. Status: ${sap}.${angka}${lokasiText}`;
-}
+// buildKatalogRagContent (teks 1 chunk RAG katalog) + fmtNum + getSAPLabel pindah ke
+// src/lib/ragShared.mjs — dipakai bersama nightly_sync.mjs supaya isi chunk selalu identik.
 // Ringkasan 1 transaksi TUG (approved) — dipakai sebagai 1 "chunk" RAG.
 function buildTxnRagContent(t) {
   const namaBarang = (t.stockItems||[]).map(si=>si.namaBarang||si.name).filter(Boolean).join(", ") || "-";
@@ -1168,7 +1157,6 @@ function generateDocNumbers(seq, date, docCode) {
 function uid() { return "PLN" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase(); }
 function fmtDate(ts) { if (!ts) return "-"; return new Date(ts).toLocaleDateString("id-ID", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" }); }
 function fmtDateOnly(ts) { if (!ts) return "-"; return new Date(ts).toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" }); }
-function fmtNum(n) { return Number(n||0).toLocaleString("id-ID"); }
 function fmtRp(n) { return "Rp " + fmtNum(n); }
 
 // ── Statistik Stok: saldo per jenis barang & persentase SAP vs Non-SAP ──
@@ -1656,13 +1644,7 @@ function getSAPStatus(katalog) {
   if (/^\d{7,8}$/.test(k)) return "SAP";
   return "Non-SAP";
 }
-function getSAPLabel(katalog) {
-  if (!katalog || katalog.trim() === "") return "Non-SAP";
-  const k = katalog.trim();
-  if (/^\d{10}$/.test(k)) return "SAP — Cadang";
-  if (/^\d{7,8}$/.test(k)) return "SAP — Persediaan";
-  return "Non-SAP";
-}
+// getSAPLabel pindah ke src/lib/ragShared.mjs (dipakai bersama nightly_sync.mjs).
 function getSAPBadgeStyle(katalog) {
   return getSAPStatus(katalog) === "SAP"
     ? { bg:"#dbeafe", fg:"#1d4ed8" }

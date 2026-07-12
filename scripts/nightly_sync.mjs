@@ -28,6 +28,7 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
+import { fmtNum, getSAPLabel, buildKatalogRagContent } from "../src/lib/ragShared.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -40,10 +41,6 @@ if (!SUPABASE_URL || !SUPABASE_SECRET_KEY || !COHERE_API_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
 
-function fmtNum(n) {
-  return Math.round(n || 0).toLocaleString("id-ID");
-}
-
 async function cohereEmbed(texts, inputType) {
   const resp = await fetch("https://api.cohere.com/v1/embed", {
     method: "POST",
@@ -53,27 +50,6 @@ async function cohereEmbed(texts, inputType) {
   if (!resp.ok) throw new Error(`Cohere embed gagal (${resp.status}): ${await resp.text()}`);
   const data = await resp.json();
   return data.embeddings;
-}
-
-// Replika persis getSAPLabel() di App.jsx — deterministik dari kode katalog SAP.
-function getSAPLabel(kodeKatalog) {
-  if (!kodeKatalog || String(kodeKatalog).trim() === "") return "Non-SAP";
-  const k = String(kodeKatalog).trim();
-  if (/^\d{10}$/.test(k)) return "SAP — Cadang";
-  if (/^\d{7,8}$/.test(k)) return "SAP — Persediaan";
-  return "Non-SAP";
-}
-
-// Replika PERSIS buildKatalogRagContent() di App.jsx (baris ~173) supaya teks chunk yang
-// dihasilkan nightly identik dengan yang dihasilkan sinkron browser (id chunk sama:
-// `katalog_<id>`), jadi keduanya tidak menimpa satu sama lain dengan konten berbeda.
-function buildKatalogRagContent(k, stockInfo) {
-  const sap = getSAPLabel(k.katalog);
-  if (!stockInfo) return `Material: ${k.name}. Nomor Katalog: ${k.katalog || "-"}. Kategori: ${k.category || "-"}. Jenis Barang: ${k.jenisBarang || "-"}. Satuan: ${k.satuan || "-"}. Keterangan: ${k.keterangan || "-"}. Status: ${sap}. Belum ada data stok untuk material ini.`;
-  const angka = ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan || "-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty * stockInfo.price))}.`;
-  const lokasiText = (stockInfo.locations || []).length === 0 ? " Lokasi: belum diisi." :
-    ` Lokasi fisik: ${stockInfo.locations.map((l) => `${fmtNum(l.qty)} ${k.satuan || ""} di ${l.gudang || "Gudang tidak diketahui"} blok ${l.blok || "-"}`).join("; ")}.`;
-  return `Material: ${k.name}. Nomor Katalog: ${k.katalog || "-"}. Kategori: ${k.category || "-"}. Jenis Barang: ${k.jenisBarang || "-"}. Satuan: ${k.satuan || "-"}. Keterangan: ${k.keterangan || "-"}. Status: ${sap}.${angka}${lokasiText}`;
 }
 
 async function main() {
