@@ -18,3 +18,4 @@ migration-tools/node_modules/
 
 # Vercel CLI (link/deploy artefak lokal) — jangan commit.
 .vercel
+.env*
