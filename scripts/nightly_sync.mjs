@@ -1,20 +1,28 @@
 // WARNOTO — Sinkron Knowledge Base bot WA/Telegram, jalan tiap malam via GitHub Actions
 // (jaminan cadangan tanpa perlu browser Admin terbuka sama sekali).
 //
-// Cakupan (dibatasi oleh data apa yang benar-benar ada di Supabase, tanpa browser):
-//   - stocks_snapshot (qty/harga/lokasi/kode katalog SAP) -> chunk RAG "katalog" (nama, qty,
-//     harga Rupiah, status SAP/Non-SAP, lokasi fisik gudang+blok). PENTING: tabel `katalog`
-//     terpisah di Supabase TIDAK PERNAH disinkron App.jsx (orphan/basi) -- stocks_snapshot
-//     dipakai sebagai satu-satunya sumber, sengaja TIDAK join ke tabel `katalog`.
-//   - ai_faq_curated (jawaban resmi hasil kurasi Admin) -> chunk RAG "faq"
-//   - tug15_history 6 bulan terakhir -> chunk RAG ringkas "mutasi" (bukan detail TUG penuh
-//     seperti nama pekerjaan/lokasi -- itu cuma ada di state browser, lihat catatan di README)
-//   - warnoto_state: top-20 by value + stok kritis dari stocks_snapshot (TIDAK termasuk TUG
-//     pending approval / rencana kedatangan -- data itu cuma ada di state browser, auto-sync
-//     client-side 90 detik yang meng-cover itu selama ada Admin yang aktif pakai web)
+// ARSITEKTUR (revisi 2026-07-12):
+//   Sumber data dibaca LANGSUNG dari tabel jsonb hidup di Supabase — sama seperti yang
+//   dipakai App.jsx (syncRagChunks / buildKatalogRagContent). Sebelumnya script ini membaca
+//   tabel datar `stocks_snapshot` yang diisi oleh browser (fungsi syncStocksSnapshot). Tabel
+//   itu ternyata cuma "jembatan" yang baru terisi kalau ada Admin membuka web & mengedit
+//   stok (debounce 90 detik). Setelah migrasi skema ke model jsonb (katalog/stocks), jembatan
+//   itu sering kosong, sehingga nightly membaca 0 baris LALU menghapus chunk bagus (bug
+//   "hapus-basi"). Kejadian nyata 2026-07-12: 212 chunk katalog/faq terhapus. Sekarang nightly
+//   mandiri (tidak bergantung stocks_snapshot) + ADA GUARD: kalau sumber (katalog/stocks)
+//   kosong, script ABORT sebelum menghapus apa pun.
 //
-// Jadi nightly ini adalah "jaminan cadangan untuk data inventori", bukan pengganti penuh
-// auto-sync client-side -- keduanya saling melengkapi (lihat App.jsx saveToCloud).
+// Cakupan (dari tabel Supabase, tanpa browser):
+//   - katalog + stocks (jsonb) -> chunk RAG "katalog" (nama, qty, harga Rupiah, status SAP,
+//     lokasi fisik gudang+blok). Isi chunk dibuat PERSIS seperti buildKatalogRagContent di
+//     App.jsx supaya nightly & sinkron browser tidak saling menimpa dengan teks berbeda.
+//   - ai_faq_curated (jawaban resmi kurasi Admin) -> chunk RAG "faq"
+//   - tug15_history 6 bulan terakhir -> chunk RAG ringkas "mutasi"
+//   - warnoto_state: top-20 by value + stok kritis (versi "v1-nightly", tanpa TUG pending /
+//     rencana kedatangan yang hanya ada di state browser)
+//
+// Nightly ini SENGAJA hanya menghapus chunk source_type katalog/faq/mutasi (bukan 'txn' —
+// itu domain sinkron client-side App.jsx, punya siklus hidup sendiri).
 //
 // Env vars (GitHub Secrets, sama seperti ml/train_forecast.py):
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
@@ -47,95 +55,109 @@ async function cohereEmbed(texts, inputType) {
   return data.embeddings;
 }
 
-// Replika persis getSAPLabel() di App.jsx -- deterministik dari kode katalog SAP,
-// aman diduplikasi di sini (bukan di-import, karena App.jsx bukan modul Node biasa).
+// Replika persis getSAPLabel() di App.jsx — deterministik dari kode katalog SAP.
 function getSAPLabel(kodeKatalog) {
-  if (!kodeKatalog || kodeKatalog.trim() === "") return "Non-SAP";
-  const k = kodeKatalog.trim();
+  if (!kodeKatalog || String(kodeKatalog).trim() === "") return "Non-SAP";
+  const k = String(kodeKatalog).trim();
   if (/^\d{10}$/.test(k)) return "SAP — Cadang";
   if (/^\d{7,8}$/.test(k)) return "SAP — Persediaan";
   return "Non-SAP";
 }
 
-// Replika CATEGORY_SYNONYMS di App.jsx (dari sheet PLN-Terminology, file CATALOG
-// MASTER.xlsx, 2026-07-06) -- aman diduplikasi di sini karena App.jsx bukan modul
-// Node biasa. Dipakai supaya bot Telegram/WA (RAG berbasis embedding, bukan
-// keyword) tetap paham kalau user tanya pakai bahasa awam ("pemutus", "penangkal
-// petir") padahal nama material di data cuma singkatan teknis ("CB", "LA").
-const CATEGORY_SYNONYMS = {
-  trf: "transformator trafo", cb: "circuit breaker pemutus tenaga pmt",
-  ds: "disconnecting switch pemisah pms", pt: "potential transformer trafo tegangan",
-  ct: "current transformer trafo arus", acc: "accessories aksesoris",
-  al: "aluminium", cu: "tembaga copper",
-  ngr: "neutral grounding resistance resistor pentanahan",
-  cond: "conductor kawat penghantar", gsw: "galvanized steel wire kawat baja",
-  sw: "switch saklar", cub: "kubikel cubicle", relay: "rele",
-  la: "lightning arrester penangkal petir", gis: "gas insulation substation",
-  oh: "over head line saluran udara", ug: "under ground bawah tanah saluran tanah",
-  od: "out door outdoor terpasang di luar ruang gedung",
-  id: "indoor terpasang di dalam ruang gedung", iso: "isolated isolasi",
-  distan: "distance relay rele jarak", ocr: "over current relay rele arus lebih",
-  ovr: "over voltage relay rele tegangan lebih",
-  lw: "live working pekerjaan tanpa pemadaman",
-  lvsb: "low voltage switch board papan hubung bagi rak tegangan rendah",
-  mccb: "molded case circuit breaker", mcb: "mini circuit breaker pembatas arus",
-  circl: "circular bulat bundar", strg: "straight lurus", pier: "piercing bergigi",
-  wp: "water proof kedap air", cap: "capacity kapasitas", comb: "combo kombinasi",
-  card: "modul module", mtr: "meter", rtu: "remote terminal unit",
-  plc: "power line carrier", recl: "recloser",
-  saco: "switch automatic change over", sclv: "single core low voltage",
-  scmv: "single core medium voltage", nclbl: "non clamp block",
-  llc: "live line connector", clv: "connector low voltage", conn: "connector",
-  term: "termination terminal", diff: "differential", dist: "distribution",
-  dt: "double tarif", ef: "earth fault", flv: "for low voltage",
-  ind: "inductive", co: "cut out", cr: "capacitor",
-};
-
-// Nama katalog PLN pakai struktur "ITEM;SUBTIPE;SPEK..." penuh singkatan teknis --
-// tambahkan padanan bahasa awam/Indonesia di teks yang di-embed (bukan mengubah
-// nama aslinya), supaya pencarian semantik bot tetap kena walau user tidak tahu
-// istilah teknisnya.
-function expandNamaForEmbedding(nama) {
-  const words = String(nama || "").toLowerCase().replace(/[;,\-]/g, " ").replace(/\s+/g, " ").trim().split(" ");
-  const extra = new Set();
-  words.forEach((w) => { if (CATEGORY_SYNONYMS[w]) CATEGORY_SYNONYMS[w].split(" ").forEach((s) => extra.add(s)); });
-  return extra.size ? ` Juga dikenal sebagai: ${Array.from(extra).join(", ")}.` : "";
+// Replika PERSIS buildKatalogRagContent() di App.jsx (baris ~173) supaya teks chunk yang
+// dihasilkan nightly identik dengan yang dihasilkan sinkron browser (id chunk sama:
+// `katalog_<id>`), jadi keduanya tidak menimpa satu sama lain dengan konten berbeda.
+function buildKatalogRagContent(k, stockInfo) {
+  const sap = getSAPLabel(k.katalog);
+  if (!stockInfo) return `Material: ${k.name}. Nomor Katalog: ${k.katalog || "-"}. Kategori: ${k.category || "-"}. Jenis Barang: ${k.jenisBarang || "-"}. Satuan: ${k.satuan || "-"}. Keterangan: ${k.keterangan || "-"}. Status: ${sap}. Belum ada data stok untuk material ini.`;
+  const angka = ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan || "-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty * stockInfo.price))}.`;
+  const lokasiText = (stockInfo.locations || []).length === 0 ? " Lokasi: belum diisi." :
+    ` Lokasi fisik: ${stockInfo.locations.map((l) => `${fmtNum(l.qty)} ${k.satuan || ""} di ${l.gudang || "Gudang tidak diketahui"} blok ${l.blok || "-"}`).join("; ")}.`;
+  return `Material: ${k.name}. Nomor Katalog: ${k.katalog || "-"}. Kategori: ${k.category || "-"}. Jenis Barang: ${k.jenisBarang || "-"}. Satuan: ${k.satuan || "-"}. Keterangan: ${k.keterangan || "-"}. Status: ${sap}.${angka}${lokasiText}`;
 }
 
 async function main() {
   console.log("=== WARNOTO nightly_sync mulai ===", new Date().toISOString());
 
-  const [{ data: stocks, error: eStock }, { data: faqRows, error: eFaq }, { data: mutasi, error: eMut }] = await Promise.all([
-    supabase.from("stocks_snapshot").select("*"),
-    supabase.from("ai_faq_curated").select("*").eq("is_active", true),
+  const [
+    { data: katalogRows, error: eKat },
+    { data: stockRows, error: eStock },
+    { data: lokasiRows, error: eLok },
+    { data: gudangRows, error: eGdg },
+    { data: faqRows, error: eFaq },
+    { data: mutasi, error: eMut },
+  ] = await Promise.all([
+    supabase.from("katalog").select("id, data"),
+    supabase.from("stocks").select("id, katalog_id, lokasi_id, data"),
+    supabase.from("lokasi").select("id, data"),
+    supabase.from("gudang").select("id, data"),
+    supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true),
     supabase.from("tug15_history").select("*").gte("tanggal", new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).limit(500),
   ]);
+  if (eKat) throw eKat;
   if (eStock) throw eStock;
+  if (eLok) throw eLok;
+  if (eGdg) throw eGdg;
   if (eFaq) throw eFaq;
   if (eMut) throw eMut;
 
-  // Group per katalog_id (bisa ada beberapa baris stocks_snapshot untuk katalog yang sama,
-  // 1 per lokasi/blok) -- stocks_snapshot sendiri sudah cukup lengkap (nama/satuan/jenis/
-  // kode katalog SAP/lokasi), tidak perlu join ke tabel `katalog` yang basi.
-  const grouped = {};
-  (stocks || []).forEach((s) => {
-    const key = s.katalog_id || s.id;
-    if (!grouped[key]) grouped[key] = { nama: s.nama, satuan: s.satuan, jenisBarang: s.jenis_barang, kodeKatalog: s.kode_katalog, harga: s.harga || 0, minQty: s.min_qty || 0, qty: 0, locations: [] };
-    grouped[key].qty += s.qty || 0;
-    if (s.qty > 0) grouped[key].locations.push({ gudang: s.gudang_nama || "Gudang tidak diketahui", blok: s.lokasi_kode || "-", qty: s.qty });
+  // GUARD KRITIS: kalau sumber utama (katalog + stocks) kosong, JANGAN lanjut — kalau lanjut,
+  // langkah "hapus-basi" di bawah akan menghapus semua chunk katalog/faq/mutasi yang bagus
+  // (persis bug 2026-07-12). Lempar error supaya tercatat sebagai ERROR di wa_sync_status,
+  // bukan sukses palsu yang mengosongkan knowledge base bot.
+  if ((katalogRows || []).length === 0 && (stockRows || []).length === 0) {
+    throw new Error("Sumber kosong: tabel katalog & stocks 0 baris. Abort sebelum hapus chunk (guard anti-wipe).");
+  }
+
+  // Peta lokasi/gudang untuk resolusi blok + nama gudang (mirror lokasiList/gudangList App.jsx).
+  const gudangById = {};
+  (gudangRows || []).forEach((r) => { gudangById[r.id] = { id: r.id, nama: r.data?.nama || "" }; });
+  const lokasiById = {};
+  (lokasiRows || []).forEach((r) => { lokasiById[r.id] = { id: r.id, kode: r.data?.kode || "", gudangId: r.data?.gudangId || "" }; });
+
+  // katalog: ratakan jsonb `data` jadi objek {id, name, katalog, category, jenisBarang, satuan, keterangan}.
+  const katalogList = (katalogRows || []).map((r) => {
+    const d = r.data || {};
+    return { id: r.id, name: d.name || "", katalog: d.katalog || "", category: d.category || "", jenisBarang: d.jenisBarang || "", satuan: d.satuan || "", keterangan: d.keterangan || "" };
   });
 
-  const katalogChunks = Object.entries(grouped).map(([katalogId, d]) => {
-    const sap = getSAPLabel(d.kodeKatalog);
-    const angka = ` Qty saat ini: ${fmtNum(d.qty)} ${d.satuan || "-"}. Harga satuan: Rp ${fmtNum(d.harga)}. Nilai total: Rp ${fmtNum(d.qty * d.harga)}.`;
-    const lokasiText = d.locations.length === 0 ? " Lokasi: belum diisi." : ` Lokasi fisik: ${d.locations.map((l) => `${fmtNum(l.qty)} ${d.satuan || ""} di ${l.gudang} blok ${l.blok}`).join("; ")}.`;
+  // stocks: ratakan jsonb `data` (kolom katalog_id/lokasi_id dipakai lebih dulu, fallback ke data).
+  const stocks = (stockRows || []).map((r) => {
+    const d = r.data || {};
     return {
-      id: `katalog_${katalogId}`,
-      source_type: "katalog",
-      source_id: katalogId,
-      content: `Material: ${d.nama}. Nomor Katalog: ${d.kodeKatalog || "-"}. Jenis Barang: ${d.jenisBarang || "-"}. Satuan: ${d.satuan || "-"}. Status: ${sap}.${angka}${lokasiText}${expandNamaForEmbedding(d.nama)}`,
+      id: r.id,
+      katalogId: r.katalog_id || d.katalogId || null,
+      lokasiId: r.lokasi_id || d.lokasiId || null,
+      qty: Number(d.qty) || 0,
+      price: Number(d.price) || 0,
+      name: d.name || "",
+      unit: d.unit || "",
+      minQty: Number(d.minQty) || 0,
+      katalog: d.katalog || "",
+      jenisBarang: d.jenisBarang || "",
+      lokasi: d.lokasi || "",
     };
   });
+
+  // Agregasi qty+harga per katalogId (jumlah semua lokasi/blok) — mirror App.jsx syncRagChunks.
+  const stockByKatalog = {};
+  stocks.forEach((s) => {
+    if (!s.katalogId) return;
+    if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty: 0, price: s.price || 0, locations: [] };
+    stockByKatalog[s.katalogId].qty += s.qty || 0;
+    if (s.qty > 0) {
+      const lok = lokasiById[s.lokasiId];
+      const gdg = lok?.gudangId ? gudangById[lok.gudangId] : null;
+      stockByKatalog[s.katalogId].locations.push({ gudang: gdg?.nama || "", blok: lok?.kode || s.lokasi || "", qty: s.qty || 0 });
+    }
+  });
+
+  const katalogChunks = katalogList.map((k) => ({
+    id: `katalog_${k.id}`,
+    source_type: "katalog",
+    source_id: k.id,
+    content: buildKatalogRagContent(k, stockByKatalog[k.id]),
+  }));
 
   const faqChunks = (faqRows || []).map((f) => ({
     id: `faq_${f.id}`,
@@ -144,8 +166,7 @@ async function main() {
     content: `Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}`,
   }));
 
-  // Ringkas per katalog (bukan per transaksi individual -- tug15_history tidak bawa nama
-  // pekerjaan/lokasi lengkap seperti "txns" di browser) supaya tetap ada sinyal pemakaian.
+  // Ringkas mutasi per katalog dari tug15_history (tetap valid — tabel ini tidak ikut migrasi).
   const mutasiByKatalog = {};
   (mutasi || []).forEach((m) => {
     if (!mutasiByKatalog[m.katalog_id]) mutasiByKatalog[m.katalog_id] = { masuk: 0, keluar: 0, count: 0 };
@@ -153,15 +174,14 @@ async function main() {
     else mutasiByKatalog[m.katalog_id].keluar += Number(m.qty) || 0;
     mutasiByKatalog[m.katalog_id].count += 1;
   });
-  const mutasiChunks = Object.entries(mutasiByKatalog).map(([katalogId, d]) => {
-    const nama = grouped[katalogId]?.nama || katalogId;
-    return {
-      id: `mutasi_${katalogId}`,
-      source_type: "mutasi",
-      source_id: katalogId,
-      content: `Ringkasan mutasi 6 bulan terakhir untuk ${nama}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
-    };
-  });
+  const namaByKatalogId = {};
+  katalogList.forEach((k) => { namaByKatalogId[k.id] = k.name; });
+  const mutasiChunks = Object.entries(mutasiByKatalog).map(([katalogId, d]) => ({
+    id: `mutasi_${katalogId}`,
+    source_type: "mutasi",
+    source_id: katalogId,
+    content: `Ringkasan mutasi 6 bulan terakhir untuk ${namaByKatalogId[katalogId] || katalogId}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
+  }));
 
   const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks];
   console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi)`);
@@ -176,8 +196,8 @@ async function main() {
     console.log(`  embed batch ${i}-${i + batch.length} OK`);
   }
 
-  // Hapus chunk katalog/faq/mutasi lama yang sumbernya sudah tidak ada -- TIDAK menyentuh
-  // source_type='txn' (itu domain client-side sync, punya siklus hidup sendiri).
+  // Hapus chunk katalog/faq/mutasi lama yang sumbernya sudah tidak ada — TIDAK menyentuh
+  // source_type='txn' (domain sinkron client-side App.jsx).
   const currentIds = new Set(allChunks.map((c) => c.id));
   const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "faq", "mutasi"]);
   const toDelete = (existing || []).filter((r) => !currentIds.has(r.id)).map((r) => r.id);
@@ -186,18 +206,23 @@ async function main() {
     console.log(`  hapus ${toDelete.length} chunk basi`);
   }
 
-  // warnoto_state: top-20 by value + stok kritis dari stocks_snapshot (server-side, tanpa TUG
-  // pending/rencana kedatangan -- lihat catatan cakupan di atas file).
-  const enriched = (stocks || []).map((s) => ({ ...s, nilai: (s.qty || 0) * (s.harga || 0) }));
+  // warnoto_state (v1-nightly): top-20 by value + stok kritis — mirror buildWarnotoStateSnapshot
+  // App.jsx, subset yang bisa dihitung server-side (tanpa TUG pending / rencana kedatangan).
+  const withLokasi = (s) => {
+    const lok = lokasiById[s.lokasiId];
+    const gdg = lok?.gudangId ? gudangById[lok.gudangId] : null;
+    return { gudang: gdg?.nama || "", blok: lok?.kode || s.lokasi || "-" };
+  };
+  const enriched = stocks.map((s) => ({ ...s, nilai: (s.qty || 0) * (s.price || 0) }));
   const top20 = [...enriched].sort((a, b) => b.nilai - a.nilai).slice(0, 20);
-  const kritis = enriched.filter((s) => s.min_qty > 0 && s.qty <= s.min_qty);
+  const kritis = enriched.filter((s) => s.minQty > 0 && s.qty <= s.minQty);
   const state_data = {
     generatedAt: new Date().toISOString(),
     generatedBy: "nightly_sync.mjs (cron)",
     totalItem: enriched.length,
     totalNilaiRp: Math.round(enriched.reduce((a, s) => a + s.nilai, 0)),
-    top20ByValue: top20.map((s) => ({ nama: s.nama, katalog: s.kode_katalog, qty: s.qty, satuan: s.satuan, hargaSatuan: s.harga, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.kode_katalog), gudang: s.gudang_nama, blok: s.lokasi_kode })),
-    materialKritis: kritis.map((s) => ({ nama: s.nama, katalog: s.kode_katalog, qty: s.qty, satuan: s.satuan, minQty: s.min_qty, gudang: s.gudang_nama, blok: s.lokasi_kode })),
+    top20ByValue: top20.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, hargaSatuan: s.price, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.katalog), ...withLokasi(s) })),
+    materialKritis: kritis.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, minQty: s.minQty, ...withLokasi(s) })),
   };
   await supabase.from("warnoto_state").insert({ state_data, version: "v1-nightly" });
 
