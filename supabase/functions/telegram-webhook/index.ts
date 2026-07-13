@@ -23,6 +23,39 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// Glosarium singkatan & istilah material PLN (sheet PLN-Terminology, CATALOG MASTER.xlsx).
+// Diinject ke system prompt supaya bot paham singkatan teknis di nama material / pertanyaan
+// user (mis. "PMT" = circuit breaker, "LA" = penangkal petir). SALINAN dari MATERIAL_GLOSSARY
+// di App.jsx — kalau salah satu diubah, samakan yang lain (Deno tidak bisa impor dari App.jsx).
+const MATERIAL_GLOSSARY = `2CCT = Double Circuit (Sirkuit Ganda)
+2W = 2 Wire (2 Kawat); 4W = 4 Wire (4 Kawat)
+AB = Air Blast; ACC = Accessories (Aksesoris)
+CABLE CTRL = Cable Control (Kabel Kontrol); CABLE PWR = Cable Power (Kabel Daya)
+CAP = Capacity (Kapasitas); CARD = Modul
+CB = Circuit Breaker / PMT (Pemutus Tenaga); CIRCL = Circular (Bulat/Bundar)
+CLV = Connector Low Voltage; CO = Cut Out; COMB = Combo (Kombinasi)
+COND = Conductor (Kawat/Konduktor); CONN = Connector; CR = Capacitor
+CT = Current Transformer (Trafo Arus); CUB = Cubicle (Kubikel); DGR = Degree (Derajat)
+DIFF = Differential; DIST = Distribution (Distribusi); DISTAN = Distance Relay (Rele Jarak)
+DS = Disconnecting Switch / PMS (Pemisah); DT = Double Tarif; EF = Earth Fault
+FLV = For Low Voltage; GIS = Gas Insulation Substation; H = Heat Shrink (Ciut Panas)
+ID = Indoor (terpasang di dalam ruang/gedung); IND = Inductive; ISO = Isolated (Isolasi)
+K = Konvensional; LA = Lightning Arrester (Penangkal Petir); LINE = Feeder (Jurusan)
+LLC = Live Line Connector; LVSB = Low Voltage Switch Board (Papan Hubung Bagi / Rak Tegangan Rendah)
+LW = Live Working (Pekerjaan Tanpa Pemadaman); M = Metering; MCB = Mini Circuit Breaker (Pembatas Arus)
+MCCB = Moulded Case Circuit Breaker; M-TPD = Manual Terpadu; MTR = Meter; N = Netral
+NCLBL = Non Clamp Block; OCR = Over Current Relay (Rele Arus Lebih)
+OD = Outdoor (terpasang di luar ruang/gedung); OH = Over Head Line / SU (Saluran Udara)
+OVR = Over Voltage Relay (Rele Tegangan Lebih); P = Phase (Fasa); PB = Plumbum
+PIER = Piercing (Bergigi); PLC = Power Line Carrier; PR = Press (Compress)
+PT = Potential/Voltage Transformer (Trafo Tegangan); RECL = Recloser; RTU = Remote Terminal Unit
+SACO = Switch Automatic Change Over; SCLV = Single Core Low Voltage; SCMV = Single Core Medium Voltage
+ST = Single Tariff (catatan: ST juga dipakai untuk UG/Saluran Tanah); STRG = Straight (Lurus); TERM = Termination
+TOOL E = Tool Electronic (Perangkat Kerja Elektronik); TOOL L = Tool Laboratory (Perangkat Kerja Laboratorium)
+TOOL M = Tool Mechanic (Perangkat Kerja Mekanik); TOOL S = Tool Safety (Perangkat Kerja Keselamatan)
+TRF = Transformer (Trafo); UG = Under Ground / ST (Saluran Tanah/Bawah Tanah)
+WAVE TRAP = Line Trap; WP = Water Proof (Kedap Air)`;
+
 // ── Teks balasan command tetap ──────────────────────────────────────────────
 
 const MSG_HELP = `🤖 *WARNOTO AI Agent*
@@ -350,6 +383,9 @@ ${conversationHistory ? `
 RIWAYAT PERCAKAPAN SEBELUMNYA DENGAN USER INI (masih dalam sesi yang sama, gunakan sebagai konteks lanjutan kalau relevan — tapi kalau pertanyaan sekarang ganti topik, abaikan histori ini dan jawab topik barunya):
 ${conversationHistory}
 ` : ""}
+GLOSARIUM SINGKATAN & ISTILAH MATERIAL PLN (pakai untuk memahami nama material di data maupun pertanyaan user yang pakai singkatan/bahasa awam — mis. user tanya "PMT" atau "pemutus" maksudnya CB/circuit breaker, "penangkal petir" = LA, "trafo arus" = CT. Jangan sebut istilah "glosarium" ke user):
+${MATERIAL_GLOSSARY}
+
 REFERENSI YANG BISA KAMU PAKAI (jangan sebut nama/istilah ini ke user, cukup pakai isinya secara natural):
 
 Referensi Master Katalog & riwayat transaksi TUG yang relevan dengan pertanyaan:

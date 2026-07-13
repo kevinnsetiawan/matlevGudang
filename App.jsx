@@ -1551,6 +1551,42 @@ const CATEGORY_SYNONYMS = {
   cr: "capacitor",
 };
 
+// Glosarium LENGKAP singkatan & istilah material PLN (sheet PLN-Terminology, CATALOG
+// MASTER.xlsx). KHUSUS untuk konteks AI (AI Agent web & Telegram bot) supaya paham
+// singkatan teknis di nama material maupun pertanyaan user. SENGAJA terpisah dari
+// CATEGORY_SYNONYMS: ini cuma teks yang dibaca LLM (aman memuat singkatan 1-2 huruf
+// ambigu), sedangkan CATEGORY_SYNONYMS dipakai mesin pencarian yang harus tetap kurasi.
+// Catatan: kalau daftar ini diubah, samakan juga salinannya di
+// supabase/functions/telegram-webhook/index.ts (runtime Deno, tidak bisa impor dari sini).
+const MATERIAL_GLOSSARY = `2CCT = Double Circuit (Sirkuit Ganda)
+2W = 2 Wire (2 Kawat); 4W = 4 Wire (4 Kawat)
+AB = Air Blast; ACC = Accessories (Aksesoris)
+CABLE CTRL = Cable Control (Kabel Kontrol); CABLE PWR = Cable Power (Kabel Daya)
+CAP = Capacity (Kapasitas); CARD = Modul
+CB = Circuit Breaker / PMT (Pemutus Tenaga); CIRCL = Circular (Bulat/Bundar)
+CLV = Connector Low Voltage; CO = Cut Out; COMB = Combo (Kombinasi)
+COND = Conductor (Kawat/Konduktor); CONN = Connector; CR = Capacitor
+CT = Current Transformer (Trafo Arus); CUB = Cubicle (Kubikel); DGR = Degree (Derajat)
+DIFF = Differential; DIST = Distribution (Distribusi); DISTAN = Distance Relay (Rele Jarak)
+DS = Disconnecting Switch / PMS (Pemisah); DT = Double Tarif; EF = Earth Fault
+FLV = For Low Voltage; GIS = Gas Insulation Substation; H = Heat Shrink (Ciut Panas)
+ID = Indoor (terpasang di dalam ruang/gedung); IND = Inductive; ISO = Isolated (Isolasi)
+K = Konvensional; LA = Lightning Arrester (Penangkal Petir); LINE = Feeder (Jurusan)
+LLC = Live Line Connector; LVSB = Low Voltage Switch Board (Papan Hubung Bagi / Rak Tegangan Rendah)
+LW = Live Working (Pekerjaan Tanpa Pemadaman); M = Metering; MCB = Mini Circuit Breaker (Pembatas Arus)
+MCCB = Moulded Case Circuit Breaker; M-TPD = Manual Terpadu; MTR = Meter; N = Netral
+NCLBL = Non Clamp Block; OCR = Over Current Relay (Rele Arus Lebih)
+OD = Outdoor (terpasang di luar ruang/gedung); OH = Over Head Line / SU (Saluran Udara)
+OVR = Over Voltage Relay (Rele Tegangan Lebih); P = Phase (Fasa); PB = Plumbum
+PIER = Piercing (Bergigi); PLC = Power Line Carrier; PR = Press (Compress)
+PT = Potential/Voltage Transformer (Trafo Tegangan); RECL = Recloser; RTU = Remote Terminal Unit
+SACO = Switch Automatic Change Over; SCLV = Single Core Low Voltage; SCMV = Single Core Medium Voltage
+ST = Single Tariff (catatan: ST juga dipakai untuk UG/Saluran Tanah); STRG = Straight (Lurus); TERM = Termination
+TOOL E = Tool Electronic (Perangkat Kerja Elektronik); TOOL L = Tool Laboratory (Perangkat Kerja Laboratorium)
+TOOL M = Tool Mechanic (Perangkat Kerja Mekanik); TOOL S = Tool Safety (Perangkat Kerja Keselamatan)
+TRF = Transformer (Trafo); UG = Under Ground / ST (Saluran Tanah/Bawah Tanah)
+WAVE TRAP = Line Trap; WP = Water Proof (Kedap Air)`;
+
 // Pasangan istilah 1:1 (awam <-> teknis) yang AMAN dipakai dua arah karena
 // kata penggantinya spesifik/tidak dibagi kategori lain — ini yang membuat
 // "klem" nemu "CLAMP", "saklar" nemu kata "switch" (hasil expand DS di atas),
@@ -6416,7 +6452,7 @@ GLOSARIUM SINGKATAN & ISTILAH MATERIAL PLN (dari CATALOG MASTER PLN — pakai in
 memahami nama material di data di bawah maupun pertanyaan user yang pakai bahasa awam
 atau singkatan teknis, mis. user tanya "pemutus" artinya cari "CB"/circuit breaker,
 "penangkal petir" artinya "LA"/lightning arrester):
-${Object.entries(CATEGORY_SYNONYMS).map(([abbr,desc])=>`${abbr.toUpperCase()}=${desc}`).join("; ")}
+${MATERIAL_GLOSSARY}
 
 ---
 SNAPSHOT DATA SISTEM SAAT INI:
