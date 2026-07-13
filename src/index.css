@@ -5,3 +5,18 @@
 
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+
+/* Palet PLN — disalin persis dari objek C di src/theme.js.
+   Dipakai sbg token Tailwind: bg-accent, text-pln-navy, border-border, dst. */
+@theme {
+  --color-bg:       #f4f6fb;
+  --color-surface:  #ffffff;
+  --color-pln-navy: #0b2559;   /* sidebar */
+  --color-accent:   #1d4ed8;   /* biru utama */
+  --color-yellow:   #f59e0b;
+  --color-green:    #16a34a;
+  --color-red:      #dc2626;
+  --color-text:     #0f172a;
+  --color-muted:    #64748b;
+  --color-border:   #e6eaf1;
+}
