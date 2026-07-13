@@ -285,3 +285,17 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
   }
   return withSisa;
 }
+
+// Normalisasi nomor katalog (buang zero-padding) untuk pencocokan — dipindah dari App.jsx Fase 5c.
+export function normalizeKatalog(k) { return String(k||"").trim().replace(/^0+/, "") || ""; }
+
+// QR di label Kartu Gantung TUG-2 (lihat KartuGantungModal "Label QR Print") berisi URL lengkap
+// "?scan=<katalogId>", bukan sekadar nomor katalog. Ekstrak katalogId-nya supaya scan QR fisik di
+// rak langsung match ke material yang benar, baik via URL utuh maupun fallback regex kalau kamera
+// cuma menangkap sebagian teks. Top-level (bukan nested di komponen App) supaya dipakai ulang di
+// komponen anak juga (mis. StockOpnameTab), bukan cuma di handleScanResult.
+export function extractKatalogIdFromScan(code) {
+  try { const u = new URL(code); const id = u.searchParams.get("scan"); if (id) return id; } catch {}
+  const m = code.match(/[?&]scan=([^&\s]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
