@@ -3931,7 +3931,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:"white",borderRadius:20,padding:40,width:400,boxShadow:"0 25px 60px rgba(0,0,0,0.35)"}}>
         <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:76,height:76,background:"linear-gradient(135deg,#fbbf24,#f59e0b)",borderRadius:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 14px",boxShadow:"0 10px 28px rgba(245,158,11,0.45)"}}>⚡</div>
+          <div style={{width:88,height:88,background:"white",borderRadius:18,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",boxShadow:"0 8px 24px rgba(0,0,0,0.10)",border:`1px solid ${C.border}`,padding:14}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
           <div style={{fontSize:28,fontWeight:800,color:C.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
           <div style={{fontSize:10.5,color:C.muted,fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"8px 0 3px"}}>{COMPANY}</div>
           <div style={{fontSize:12.5,color:C.muted}}>{UPT} · {WAREHOUSE}</div>
@@ -3953,7 +3953,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   if (loading) return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
-      <div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>⚡</div><div style={{fontSize:16,fontWeight:700,color:C.accent}}>Memuat data dari cloud...</div></div>
+      <div style={{textAlign:"center"}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{height:56,marginBottom:14,objectFit:"contain"}}/><div style={{fontSize:16,fontWeight:700,color:C.accent}}>Memuat data dari cloud...</div></div>
     </div>
   );
 
@@ -4018,7 +4018,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       }}>
         <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.12)"}}>
           <div style={{display:"flex",alignItems:"center",gap:11}}>
-            <div style={{width:36,height:36,background:"linear-gradient(135deg,#fbbf24,#f59e0b)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,flexShrink:0,boxShadow:"0 2px 8px rgba(245,158,11,0.35)"}}>⚡</div>
+            <div style={{width:38,height:38,background:"white",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:5,boxShadow:"0 2px 8px rgba(0,0,0,0.22)"}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
             <div style={{minWidth:0,lineHeight:1.15}}>
               <div style={{color:"white",fontWeight:800,fontSize:17,letterSpacing:".5px"}}>WARNOTO</div>
               <div style={{color:"rgba(255,255,255,0.6)",fontSize:10,letterSpacing:".5px",textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{UPT}</div>
