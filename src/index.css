@@ -1,0 +1,7 @@
+/* Tailwind v4 — via @tailwindcss/postcss (Vite 4).
+   Urutan layer: preflight (base) sengaja TIDAK di-import supaya style lama
+   (inline-style di App.jsx) tidak berubah oleh reset global Tailwind. */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
