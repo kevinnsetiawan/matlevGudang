@@ -2,6 +2,7 @@
 // Alat Berat) — dipindah dari App.jsx (refactor Fase 3b). Pure: terima data,
 // kembalikan string HTML / buka window cetak. Tanpa React/state.
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
+import QRCode from "qrcode";
 import { fmtNum, getSAPLabel } from "./ragShared.mjs";
 import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari } from "./utils.js";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE } from "../constants.js";
@@ -869,4 +870,36 @@ export function downloadTUG9HTML(txn, stocks, users, satpamList, showToast) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   showToast && showToast("📄 File diunduh! Buka di browser HP/laptop, lalu Print > Save as PDF.", "success");
+}
+
+// Lembar barcode/QR kartu gantung (cetak massal) — dipindah dari App.jsx Fase 5e.
+// Lembar cetak barcode/QR kartu gantung (5×5 cm/label). QR di-generate LOKAL (library qrcode —
+// offline & andal untuk cetak massal), encode katalog.id yang sama dgn label per-1 TUG-2.
+export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const labels = await Promise.all(katalogItems.map(async (k) => {
+    const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(k.id)}`;
+    const qr = await QRCode.toDataURL(scanUrl, { margin: 1, width: 220 });
+    const lok = (lokasiByKatalog[k.id] || []).join("; ") || "-";
+    return `<div class="label"><img src="${qr}" alt="QR"/><div class="nm">${esc(k.name || "-")}</div><div class="kt">No. Kat: ${esc(k.katalog || "-")}</div><div class="meta">${esc(k.jenisBarang || "-")} · ${esc(getSAPLabel(k.katalog))}</div><div class="lk">📍 ${esc(lok)}</div></div>`;
+  }));
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"/><title>Cetak Barcode Kartu Gantung — ${labels.length} label</title>
+<style>
+  @page { size: A4; margin: 8mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #e5e7eb; }
+  .bar { position: sticky; top: 0; background: #0b2559; color: #fff; padding: 10px 16px; text-align: center; font-size: 13px; font-weight: 700; z-index: 10; }
+  .bar button { background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 700; cursor: pointer; margin-left: 12px; }
+  .sheet { display: flex; flex-wrap: wrap; gap: 3mm; padding: 8mm; }
+  .label { width: 5cm; height: 5cm; border: 1px dashed #94a3b8; border-radius: 4px; padding: 2.5mm; display: flex; flex-direction: column; align-items: center; text-align: center; background: #fff; page-break-inside: avoid; overflow: hidden; }
+  .label img { width: 26mm; height: 26mm; }
+  .label .nm { font-size: 7.5px; font-weight: 700; line-height: 1.12; margin-top: 1mm; max-height: 2.3em; overflow: hidden; }
+  .label .kt { font-size: 7px; color: #374151; margin-top: 0.5mm; }
+  .label .meta { font-size: 6.5px; color: #111; font-weight: 700; margin-top: 0.5mm; }
+  .label .lk { font-size: 6.5px; color: #374151; margin-top: auto; max-height: 2.2em; overflow: hidden; line-height: 1.1; }
+  @media print { .bar { display: none; } body { background: #fff; } .sheet { padding: 0; } }
+</style></head><body>
+<div class="bar">🏷️ ${labels.length} label barcode 5×5 cm — potong per kotak, tempel di kartu gantung <button onclick="window.print()">🖨️ Print / Save PDF</button></div>
+<div class="sheet">${labels.join("")}</div>
+</body></html>`;
 }
