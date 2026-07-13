@@ -11,6 +11,9 @@ import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQu
 import { ROLES, CAN_CREATE, hasRole, getUserUptScope } from "./src/lib/roles.js";
 import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentStatusFromKondisi, normalizeHeavyEquipmentRecord, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName, normalizeHeavyEquipmentLoanStatus, isPendingHeavyEquipmentLoan, getHeavyEquipmentLoanRuntimeStatus, canApproveHeavyEquipmentLoan } from "./src/lib/heavyEquipment.js";
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
+import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
+import { computeForecast } from "./src/lib/forecast.js";
+import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, seedMasterTableIfEmpty, syncMaterialCadangRows } from "./src/lib/masterSync.js";
 import { DEFAULT_UIT } from "./src/data/masterUit.js";
 import { DEFAULT_UPT_LIST } from "./src/data/masterUpt.js";
 import { DEFAULT_GUDANG, DEFAULT_SATPAM } from "./src/data/masterGudang.js";
@@ -28,141 +31,18 @@ import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverN
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import QRCode from "qrcode";
 
-// ─── RAG (Retrieval-Augmented Generation) — knowledge base AI Agent ────
-// Embedding pakai Cohere (embed-multilingual-v3.0, 1024 dim) — model
-// terpisah dari Groq (dipakai untuk chat), karena Groq tidak punya endpoint
-// embedding. Vector disimpan di Supabase (pgvector, tabel rag_chunks, lihat
-// schema.sql section 9), dicari via fungsi match_rag_chunks (cosine
-// similarity) saat user bertanya ke AI Agent.
-async function cohereEmbed(texts, inputType) {
-  const key = import.meta.env.VITE_COHERE_API_KEY;
-  if (!key) throw new Error("VITE_COHERE_API_KEY belum diisi di .env");
-  const resp = await fetch("https://api.cohere.com/v1/embed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-    body: JSON.stringify({ model: "embed-multilingual-v3.0", texts, input_type: inputType }),
-  });
-  if (!resp.ok) throw new Error(`Cohere embed gagal (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  return data.embeddings; // array of vectors, sejajar urutan dengan `texts`
-}
-// Embedding untuk GAMBAR (visual search Data Stok) — model & dimensi sama dgn teks
-// (1024), tapi input_type=image + param images (1 data-URL base64 per panggilan).
-// Dipakai saat user cari barang dengan foto → dicocokkan ke stock_photo_embeddings.
-async function cohereEmbedImage(dataUri) {
-  const key = import.meta.env.VITE_COHERE_API_KEY;
-  if (!key) throw new Error("VITE_COHERE_API_KEY belum diisi di .env");
-  const resp = await fetch("https://api.cohere.com/v1/embed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-    body: JSON.stringify({ model: "embed-multilingual-v3.0", input_type: "image", images: [dataUri] }),
-  });
-  if (!resp.ok) throw new Error(`Cohere image embed gagal (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  const v = data.embeddings?.[0] || data.embeddings?.float?.[0];
-  if (!v) throw new Error("Cohere tidak mengembalikan embedding gambar");
-  return v;
-}
-// OCR nameplate barang (mode pencarian foto "berdasarkan nameplate") — baca teks
-// yang tercetak di foto lewat OCR.space (OCREngine 2, lebih akurat utk teks cetak
-// & angka). Foto dikompres dulu ke <1MB karena itu batas free tier OCR.space.
-// Mengembalikan teks mentah (bisa multi-baris). Key di .env: VITE_OCRSPACE_API_KEY.
-async function ocrSpaceOCR(dataUri) {
-  const key = import.meta.env.VITE_OCRSPACE_API_KEY;
-  if (!key) throw new Error("VITE_OCRSPACE_API_KEY belum diisi di .env");
-  const compact = await compressImage(dataUri, { maxBytes: 900_000, maxDim: 1600 });
-  const form = new FormData();
-  form.append("base64Image", compact);
-  form.append("language", "eng");
-  form.append("OCREngine", "2");   // engine 2: lebih baik utk teks cetak/angka nameplate
-  form.append("scale", "true");    // upscale gambar kecil agar teks lebih terbaca
-  const resp = await fetch("https://api.ocr.space/parse/image", {
-    method: "POST",
-    headers: { apikey: key },      // JANGAN set Content-Type — biar boundary FormData otomatis
-    body: form,
-  });
-  if (!resp.ok) throw new Error(`OCR.space gagal (${resp.status}): ${await resp.text()}`);
-  const data = await resp.json();
-  if (data.IsErroredOnProcessing) {
-    const msg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join("; ") : (data.ErrorMessage || "OCR.space gagal memproses gambar");
-    throw new Error(msg);
-  }
-  return (data.ParsedResults || []).map(r => r.ParsedText || "").join("\n").trim();
-}
-// --- Util normalisasi teks nameplate (dipakai bersama semua pencocokan teks) ---
-const npNorm    = s => (s || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
-const npTokens  = s => new Set(npNorm(s).split(" ").filter(t => t.length >= 3));
-const npNums    = s => npNorm(s).match(/\d{5,}/g) || []; // angka ≥5 digit = kandidat nomor katalog
-const NAMEPLATE_MIN = 0.45;
 
-// Cocokkan teks hasil OCR nameplate ke Master Katalog. Sinyal terkuat = nomor
-// katalog tercetak verbatim di foto; sinyal kedua = tumpang-tindih kata dari
-// nama/type/merk. Mengembalikan {katalog, similarity} 0..1 (sejajar bentuk hasil
-// visual search), disaring >= NAMEPLATE_MIN, top 10, terurut skor menurun.
-function matchNameplateToKatalog(ocrText, katalogList) {
-  const ocrNorm = npNorm(ocrText);
-  if (!ocrNorm) return [];
-  const ocrCompact = ocrNorm.replace(/\s+/g, "");
-  const ocrTokens = npTokens(ocrText);
-  const results = [];
-  for (const kat of katalogList) {
-    let score = 0;
-    // 1. Nomor katalog tercetak verbatim (>=5 digit) — sinyal paling kuat.
-    const cat = String(kat.katalog || "").replace(/[^0-9]/g, "");
-    if (cat.length >= 5 && ocrCompact.includes(cat)) score = Math.max(score, 0.95);
-    // 2. Tumpang-tindih kata dari nama/type/merk.
-    const katTokens = [...npTokens(`${kat.name} ${kat.type} ${kat.merk}`)];
-    if (katTokens.length) {
-      const hit = katTokens.filter(t => ocrTokens.has(t)).length;
-      score = Math.max(score, hit / katTokens.length);
-    }
-    if (score >= NAMEPLATE_MIN) results.push({ katalog: kat.katalog, similarity: score });
-  }
-  return results.sort((a, b) => b.similarity - a.similarity).slice(0, 10);
-}
-// Kemiripan teks nameplate query vs teks nameplate tersimpan (dua-duanya hasil
-// OCR). Angka katalog sama = sinyal kuat (0.95); selain itu overlap kata dibagi
-// himpunan terkecil (lebih toleran kalau salah satu nameplate teksnya lebih panjang).
-function nameplateTextSim(qTokens, qNums, storedText) {
-  const sTokens = npTokens(storedText);
-  const sNums = npNums(storedText);
-  let score = 0;
-  if (qNums.some(n => sNums.includes(n))) score = Math.max(score, 0.95);
-  if (qTokens.size && sTokens.size) {
-    let inter = 0; for (const t of qTokens) if (sTokens.has(t)) inter++;
-    score = Math.max(score, inter / Math.min(qTokens.size, sTokens.size));
-  }
-  return score;
-}
-// Pencocokan mode Nameplate gabungan: (1) ke Master Katalog + (2) ke teks foto
-// nameplate yang sudah di-OCR & disimpan di Data Stok (fotoNameplateOcr). Skor
-// per katalog diambil yang tertinggi antar dua sumber. Top 10, terurut menurun.
-function matchNameplateAll(ocrText, katalogList, stocks) {
-  const best = new Map(); // String(katalog) -> similarity tertinggi
-  const put = (kat, s) => {
-    if (kat == null || s < NAMEPLATE_MIN) return;
-    const k = String(kat);
-    if (!best.has(k) || best.get(k) < s) best.set(k, s);
-  };
-  for (const r of matchNameplateToKatalog(ocrText, katalogList)) put(r.katalog, r.similarity);
-  const qTokens = npTokens(ocrText);
-  const qNums = npNums(ocrText);
-  for (const st of (stocks || [])) {
-    if (!st.fotoNameplateOcr || st.katalog == null) continue;
-    put(st.katalog, nameplateTextSim(qTokens, qNums, st.fotoNameplateOcr));
-  }
-  return [...best.entries()]
-    .map(([katalog, similarity]) => ({ katalog, similarity }))
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, 10);
-}
-// buildKatalogRagContent (teks 1 chunk RAG katalog) + fmtNum + getSAPLabel pindah ke
-// src/lib/ragShared.mjs — dipakai bersama nightly_sync.mjs supaya isi chunk selalu identik.
-// Ringkasan 1 transaksi TUG (approved) — dipakai sebagai 1 "chunk" RAG.
-function buildTxnRagContent(t) {
-  const namaBarang = (t.stockItems||[]).map(si=>si.namaBarang||si.name).filter(Boolean).join(", ") || "-";
-  return `Transaksi ${t.docType||"-"} (${t.id}) — Pekerjaan: ${t.namaPekerjaan||t.pekerjaan||"-"}. Lokasi: ${t.lokasiPekerjaan||"-"}. Tanggal: ${fmtDateOnly(t.createdAt)}. Status: ${t.status||"-"}. Barang: ${namaBarang}.`;
-}
+
+
+
+
+
+
+
+
+
+
+
 
 const JENIS_BARANG = ["Pre Memory", "Cadang", "Persediaan", "Persediaan Bursa", "ATTB", "Non-Stock", "Bongkaran"];
 const STATUS_MATERIAL_RETUR = ["Material Sisa Baru", "Bongkaran", "Bongkaran ATTB (MTU)"]; // used in TUG-10 returns
@@ -259,125 +139,16 @@ const CLOUD = {
   },
 };
 
-// ─── MASTER DATA TABLES (Supabase = sumber utama) ──────────────────────
-// Satpam, Tim Mutu, UIT, UPT, Gudang, Lokasi dulu hanya tersimpan di
-// localStorage/CLOUD (per-browser, tidak sinkron antar device/user). Sekarang
-// disimpan sebagai baris asli di Supabase: 1 baris = {id, data jsonb, ...kolom
-// relasi}. Kolom `data` menyimpan object JS apa adanya (field-nya beragam dan
-// berkembang seiring waktu, mis. lokasi punya mapX/mapY/pendingData/jenisArea
-// yang tidak semua dipakai di semua baris) — kolom id/relasi/status dipisah
-// supaya tetap bisa di-query/relasikan di Supabase Studio, tapi tidak perlu
-// mendaftar ulang setiap field yang mungkin ada.
-// Blok (Lokasi) bisa diplot koordinatnya lewat 2 denah berbeda: denah Gudang keseluruhan
-// (mapX/mapY, terhadap gdg.denahImageData) ATAU denah Sub Gudang (subMapX/subMapY, terhadap
-// sg.denahImageData, kalau blok itu di-assign ke sebuah Sub Gudang). Dulu "Lihat di Peta
-// Gudang" di Data Stok cuma cek mapX/gdg.denahImageData, jadi blok yang koordinatnya sudah
-// diplot lewat denah Sub Gudang tetap dianggap "belum diplot" — bug ditemukan 2026-07-09.
-// Singkatan 3 huruf dari nama Sub Gudang, dipakai sebagai tag di depan kode blok supaya
-// blok yang namanya sama antar Sub Gudang tetap terbedakan (mis. "Terbuka" vs "Tertutup"
-// -> TRB vs TRT). Sengaja pakai huruf pertama + konsonan berikutnya, bukan 3 huruf pertama,
-// supaya nama berawalan sama ("Ter...") tidak tabrakan jadi singkatan yang sama.
-function subGudangAbbr(nama) {
-  const clean = (nama||"").toUpperCase().replace(/[^A-Z ]/g,"").replace(/\bSUB\b|\bGUDANG\b/g," ").replace(/\s+/g," ").trim();
-  const letters = clean.replace(/ /g,"");
-  if (!letters) return "";
-  const consonants = letters[0] + letters.slice(1).replace(/[AEIOU]/g,"");
-  return (consonants.length>=3 ? consonants : letters).slice(0,3);
-}
 
-// Peta id Sub Gudang -> kode 3 huruf yang DIJAMIN unik dalam satu Gudang. Kalau dua Sub
-// Gudang menghasilkan singkatan sama (mis. dua nama beda tapi konsonannya kebetulan sama),
-// yang berikutnya diberi akhiran angka (TRB, TR2, TR3, ...) supaya setiap Sub Gudang punya
-// kode masing-masing. Kode manual (sg.kode) kalau diisi dihormati & tetap dijaga uniknya.
-function subGudangKodeMap(subs) {
-  const used = new Set();
-  const map = {};
-  subs.forEach(sg => {
-    if (sg.kode?.trim()) { const k = sg.kode.trim().toUpperCase().slice(0,3); map[sg.id] = k; used.add(k); }
-  });
-  subs.forEach(sg => {
-    if (map[sg.id]) return;
-    const base = subGudangAbbr(sg.nama) || "SGD";
-    let kode = base, n = 1;
-    while (used.has(kode)) { n++; kode = (base.slice(0,2) + n).slice(0,3); }
-    used.add(kode); map[sg.id] = kode;
-  });
-  return map;
-}
 
-function getLokasiPetaInfo(lok, gdg, subGudangList) {
-  if (!lok) return null;
-  if (lok.subGudangId && lok.subMapX != null) {
-    const sg = subGudangList.find(s => s.id === lok.subGudangId);
-    if (sg?.denahImageData) return { denahImageData: sg.denahImageData, x: lok.subMapX, y: lok.subMapY, subGudang: sg };
-  }
-  if (gdg?.denahImageData && lok.mapX != null) {
-    return { denahImageData: gdg.denahImageData, x: lok.mapX, y: lok.mapY, subGudang: null };
-  }
-  return null;
-}
-async function loadMasterTable(table) {
-  if (!supabase) return null;
-  const { data, error } = await supabase.from(table).select("*");
-  if (error) { console.error(`loadMasterTable(${table})`, error); return null; }
-  return data.map(row => ({ ...row.data, id: row.id }));
-}
-// extraCols(item) => kolom tambahan per baris (FK/status) di luar id & data, opsional
-async function syncMasterTable(table, list, extraCols) {
-  if (!supabase) return false;
-  const rows = list.map(item => ({
-    id: item.id,
-    data: item,
-    created_at: item.createdAt ?? Date.now(),
-    ...(extraCols ? extraCols(item) : {}),
-  }));
-  if (rows.length) {
-    const { error } = await supabase.from(table).upsert(rows, { onConflict: "id" });
-    if (error) { console.error(`syncMasterTable upsert(${table})`, error); return false; }
-  }
-  // PENGAMANAN KRITIS (2026-07-07): kalau `list` yang dikirim KOSONG, JANGAN lanjut ke
-  // reconciliation-delete di bawah. Ditemukan lewat bug nyata: state React (mis. opnameList)
-  // sempat kosong karena race/stale closure saat submit, ke-pass sebagai [] ke sini — hasilnya
-  // SEMUA baris tabel (termasuk sesi Stock Opname 217 item yang sudah lengkap) ikut terhapus,
-  // padahal user tidak pernah minta hapus apa pun. Data yang state-nya benar-benar kosong akan
-  // gagal keluar dari cabang ini, tapi itu jauh lebih aman daripada menghapus data produksi
-  // karena state belum sempat ter-load. Hapus satu sesi tetap aman (deleteOpname dkk.
-  // menghasilkan list yang masih berisi N-1 item, bukan kosong, kecuali baris terakhir — kasus
-  // itu sengaja dibiarkan tidak terhapus dari Supabase, harus dihapus manual kalau memang perlu).
-  if (list.length === 0) return true;
-  const { data: existing, error: selErr } = await supabase.from(table).select("id");
-  if (selErr) { console.error(`syncMasterTable select(${table})`, selErr); return false; }
-  const currentIds = new Set(list.map(i => i.id));
-  const toDelete = (existing || []).filter(r => !currentIds.has(r.id)).map(r => r.id);
-  if (toDelete.length) {
-    const { error: delErr } = await supabase.from(table).delete().in("id", toDelete);
-    if (delErr) { console.error(`syncMasterTable delete(${table})`, delErr); return false; }
-  }
-  return true;
-}
-// Seed Supabase sekali dari DEFAULT_* kalau tabelnya masih kosong (instalasi pertama kali)
-async function seedMasterTableIfEmpty(table, defaults, extraCols) {
-  if (!supabase || !defaults?.length) return defaults || [];
-  const existing = await loadMasterTable(table);
-  if (existing === null) return defaults; // Supabase tidak terkonfigurasi/error — fallback lokal
-  if (existing.length > 0) return existing;
-  await syncMasterTable(table, defaults, extraCols);
-  return defaults;
-}
 
-// Upsert APPEND-ONLY (tidak pernah delete baris lain) — dipakai untuk domain
-// audit-log seperti Health Index Material Cadang (imports/runs/health_results/
-// ai_insights/apply_audit) yang tumbuh terus, bukan "daftar aktif" seperti
-// katalog/stocks. localStorage/CLOUD tetap sumber utama UI (dibaca saat load),
-// Supabase di sini murni backup/audit-trail — jadi tidak perlu delete-sync
-// simetris seperti syncMasterTable, cukup upsert baris baru saja.
-async function syncMaterialCadangRows(table, rows, mapFn) {
-  if (!supabase || !rows?.length) return false;
-  const mapped = rows.map(mapFn);
-  const { error } = await supabase.from(table).upsert(mapped, { onConflict: "id" });
-  if (error) { console.error(`syncMaterialCadangRows upsert(${table})`, error); return false; }
-  return true;
-}
+
+
+
+
+
+
+
 
 // ─── DEFAULT DATA ────────────────────────────────────────────────────
 // User & password TIDAK lagi disimpan di source code (lihat Supabase Auth +
@@ -390,24 +161,9 @@ async function syncMaterialCadangRows(table, rows, mapFn) {
 
 // ─── MASTER GUDANG (bangunan gudang, parent dari Blok/Lokasi) ──────────
 const MATURITY_LEVELS = { 1:"Basic", 2:"Developing", 3:"Defined", 4:"Managed", 5:"Excellent" };
-const SURABAYA_REF_LAT = -7.2575, SURABAYA_REF_LNG = 112.7521; // titik tengah Surabaya, dipakai sbg referensi decode Plus Code pendek (offline, tanpa API)
 
-// Cari & decode Google Maps Plus Code (cth "MPJG+4JX, Ketintang, Gayungan, Surabaya, East Java 60231")
-// dari teks alamat bebas → {lat,lng}. Plus Code pendek di-recover memakai titik tengah Surabaya
-// sebagai referensi (akurat selama lokasinya memang di area Surabaya). Tidak butuh internet/API key.
-function extractLatLngFromAddress(text) {
-  if (!text) return null;
-  const m = (text.match(/[23456789CFGHJMPQRVWX]{2,8}\+[23456789CFGHJMPQRVWX]{2,3}/i) || [])[0];
-  if (!m) return null;
-  try {
-    const code = m.toUpperCase();
-    const full = olcIsFull(code) ? code : olcRecoverNearest(code, SURABAYA_REF_LAT, SURABAYA_REF_LNG);
-    const area = olcDecode(full);
-    return { lat: Math.round(area.latitudeCenter*1e6)/1e6, lng: Math.round(area.longitudeCenter*1e6)/1e6 };
-  } catch (e) {
-    return null;
-  }
-}
+
+
 
 
 
@@ -683,25 +439,7 @@ function Sparkline({ data, color="#3b82f6", h=36, w=100 }) {
   return <svg width={w} height={h}><polyline fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" points={pts}/></svg>;
 }
 
-// ─── FORECAST ────────────────────────────────────────────────────────
-function computeForecast(stockId, txns, stock) {
-  const outTxns = txns.filter(t=>t.stockItems?.some(si=>si.stockId===stockId) && t.docType==="TUG9" && t.status==="APPROVED");
-  if (!outTxns.length) return { dailyAvg:0, daysLeft:999, suggestBuy:0, trend:[], confidence:"low" };
-  const DAY=86400000, nowT=Date.now();
-  const daily = {};
-  outTxns.forEach(t=>{
-    const item = t.stockItems.find(si=>si.stockId===stockId);
-    const d = Math.floor(t.createdAt/DAY);
-    daily[d] = (daily[d]||0) + (item?.qty||0);
-  });
-  const vals = Object.values(daily);
-  const dailyAvg = vals.reduce((a,b)=>a+b,0)/vals.length;
-  const daysLeft = dailyAvg>0 ? Math.floor(stock.qty/dailyAvg) : 999;
-  const suggestBuy = Math.max(0, Math.ceil(dailyAvg*30)-stock.qty);
-  const trend = Array.from({length:7},(_,i)=>{ const d=Math.floor((nowT-(6-i)*DAY)/DAY); return daily[d]||0; });
-  const confidence = vals.length>=7?"high":vals.length>=3?"medium":"low";
-  return { dailyAvg:dailyAvg.toFixed(2), daysLeft, suggestBuy, trend, confidence };
-}
+
 
 
 
