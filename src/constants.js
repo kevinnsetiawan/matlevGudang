@@ -8,3 +8,6 @@ export const APP_VERSION = "v3.0.0";
 // Label tampilan status kapasitas gudang (kode data internal KRITIS/WASPADA/AMAN
 // tetap dipakai untuk perbandingan & warna, hanya teks yang ditampilkan ke user berubah)
 export const KAPASITAS_LABEL = { KRITIS: "Penuh", WASPADA: "Terbatas", AMAN: "Cukup" };
+
+// Bulan romawi untuk nomor dokumen TUG (dipindah dari App.jsx Fase 3a).
+export const ROMAN = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
