@@ -18,6 +18,12 @@ import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAd
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
+import { ScanPublicView } from "./src/components/ScanPublicView.jsx";
+import { KPISaldoCards } from "./src/components/KPISaldoCards.jsx";
+import { PendingWidget } from "./src/components/PendingWidget.jsx";
+import { RencanaWidget } from "./src/components/RencanaWidget.jsx";
+import { CollapsibleSection } from "./src/components/CollapsibleSection.jsx";
+import { ExecOverview } from "./src/components/ExecOverview.jsx";
 import { GudangCoordConfigPanel } from "./src/components/GudangCoordConfigPanel.jsx";
 import { SearchableSelect } from "./src/components/SearchableSelect.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
@@ -8140,130 +8146,7 @@ async function syncFotoMaterialToSupabase(stocks, katalogList) {
   return { uploadCount };
 }
 
-// ─── PUBLIC SCAN VIEW (HP scan QR → riwayat TUG-2, tanpa login) ──────────
-// Dibuka lewat URL "?scan=<katalogId>". Ambil data langsung dari Supabase
-// (anon key, read-only) — TIDAK butuh login/state aplikasi, supaya siapa pun
-// yang scan QR fisik di rak bisa langsung lihat riwayat material itu dari HP.
-function ScanPublicView({ katalogId }) {
-  const [state, setState] = useState({ loading:true, error:"", katalog:null, qty:0, history:[] });
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      if (!SUPABASE_URL || !SUPABASE_KEY) {
-        setState({ loading:false, error:"Supabase belum dikonfigurasi.", katalog:null, qty:0, history:[] });
-        return;
-      }
-      const headers = { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` };
-      try {
-        const [katRes, histRes, stockRes] = await Promise.all([
-          fetch(`${SUPABASE_URL}/rest/v1/katalog?id=eq.${encodeURIComponent(katalogId)}&select=*`, { headers }),
-          fetch(`${SUPABASE_URL}/rest/v1/tug15_history?katalog_id=eq.${encodeURIComponent(katalogId)}&select=*&order=tanggal.asc,id.asc`, { headers }),
-          fetch(`${SUPABASE_URL}/rest/v1/stock_current?katalog_id=eq.${encodeURIComponent(katalogId)}&select=qty`, { headers }),
-        ]);
-        if (!katRes.ok || !histRes.ok || !stockRes.ok) throw new Error("Gagal ambil data dari server.");
-        const [katArr, histArr, stockArr] = await Promise.all([katRes.json(), histRes.json(), stockRes.json()]);
-        if (cancelled) return;
-        if (katArr.length === 0) {
-          setState({ loading:false, error:"Material dengan kode ini tidak ditemukan.", katalog:null, qty:0, history:[] });
-          return;
-        }
-        // Hitung Sisa MUNDUR dari qty stok nyata saat ini (stock_current, ground
-        // truth), sama seperti buildKartuGantungHistory di web — bukan dijumlah
-        // maju dari 0, supaya baris terbaru selalu pas dengan qty sebenarnya.
-        const currentQty = stockArr[0]?.qty || 0;
-        const historyWithSisa = new Array(histArr.length); // histArr sudah urut tanggal.asc,id.asc
-        let running = currentQty;
-        for (let i = histArr.length - 1; i >= 0; i--) {
-          const h = histArr[i];
-          historyWithSisa[i] = { ...h, sisa: running };
-          running -= (h.jenis_transaksi === "MASUK" ? h.qty : -h.qty);
-        }
-        const katRow = katArr[0];
-        const katFlat = { ...(katRow.data||{}), id: katRow.id };
-        setState({ loading:false, error:"", katalog:katFlat, qty:currentQty, history:historyWithSisa });
-
-        // Log scan ke stock_scan_log — fire-and-forget, tidak menunggu/menghalangi
-        // tampilan (kalau gagal, cukup diam, jangan ganggu pengalaman user yang
-        // cuma mau lihat stok). Mendukung banyak orang scan barcode berbeda-beda
-        // secara bersamaan di gudang (2026-07-03) — device_id membedakan tiap HP
-        // karena halaman ini sengaja tanpa login.
-        try {
-          let deviceId = localStorage.getItem("warnoto_scan_device_id");
-          if (!deviceId) {
-            deviceId = "DEV-" + Math.random().toString(36).slice(2, 10).toUpperCase();
-            localStorage.setItem("warnoto_scan_device_id", deviceId);
-          }
-          fetch(`${SUPABASE_URL}/rest/v1/stock_scan_log`, {
-            method: "POST",
-            headers: { ...headers, "Content-Type": "application/json" },
-            body: JSON.stringify([{ katalog_id: katalogId, device_id: deviceId }]),
-          }).catch(() => {});
-        } catch {}
-      } catch (err) {
-        if (!cancelled) setState({ loading:false, error:err.message, katalog:null, qty:0, history:[] });
-      }
-    }
-    load();
-    return () => { cancelled = true; };
-  }, [katalogId]);
-
-  const wrap = { minHeight:"100vh", background:"#f1f5f9", fontFamily:"'Inter',system-ui,sans-serif", padding:16 };
-  const card = { background:"white", borderRadius:14, padding:18, boxShadow:"0 4px 16px rgba(0,0,0,0.08)", maxWidth:560, margin:"0 auto" };
-
-  if (state.loading) return <div style={wrap}><div style={card}>⏳ Memuat riwayat...</div></div>;
-  if (state.error) return <div style={wrap}><div style={card}><b style={{color:"#dc2626"}}>⚠️ {state.error}</b></div></div>;
-
-  const { katalog, qty, history } = state;
-  return (
-    <div style={wrap}>
-      <div style={card}>
-        <div style={{fontSize:11,color:"#6b7280",fontWeight:700,letterSpacing:.5}}>PT PLN (PERSERO) UPT SURABAYA — WARNOTO</div>
-        <h2 style={{fontSize:17,fontWeight:800,margin:"4px 0 2px"}}>🏷️ {katalog.name}</h2>
-        <div style={{fontSize:12,color:"#6b7280",marginBottom:14}}>No. Katalog: {katalog.katalog||"-"} • Satuan: {katalog.satuan||"-"} • {katalog.jenisBarang||"-"}</div>
-        {katalog.fotoKeseluruhanUrl && (
-          <img src={katalog.fotoKeseluruhanUrl} alt="Foto Material Keseluruhan" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:10,marginBottom:14,border:"1px solid #e5e7eb"}}/>
-        )}
-        <div style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:10,padding:"10px 14px",marginBottom:16,textAlign:"center"}}>
-          <div style={{fontSize:11,color:"#047857",fontWeight:700}}>QTY STOK SAAT INI</div>
-          <div style={{fontSize:26,fontWeight:800,color:"#047857"}}>{fmtNum(qty)}</div>
-        </div>
-        <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8}}>📋 Riwayat Mutasi (TUG-2)</div>
-        {history.length===0 && <div style={{fontSize:12,color:"#9ca3af",textAlign:"center",padding:14}}>Belum ada riwayat mutasi untuk material ini.</div>}
-        {history.length>0 && (
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:10.5}}>
-              <thead>
-                <tr style={{background:C.sidebar,color:"white"}}>
-                  <th style={{padding:"5px 6px",textAlign:"left"}}>TGL</th>
-                  <th style={{padding:"5px 6px",textAlign:"left"}}>NO. BON</th>
-                  <th style={{padding:"5px 6px",textAlign:"center"}}>MASUK</th>
-                  <th style={{padding:"5px 6px",textAlign:"center"}}>KELUAR</th>
-                  <th style={{padding:"5px 6px",textAlign:"center"}}>SISA</th>
-                  <th style={{padding:"5px 6px",textAlign:"left"}}>RAK</th>
-                  <th style={{padding:"5px 6px",textAlign:"left"}}>CATATAN</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h,i)=>(
-                  <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                    <td style={{padding:"4px 6px"}}>{fmtDateOnly(h.tanggal)}</td>
-                    <td style={{padding:"4px 6px"}}>{h.no_bon||"-"}</td>
-                    <td style={{padding:"4px 6px",textAlign:"center",color:"#16a34a",fontWeight:700}}>{h.jenis_transaksi==="MASUK"?fmtNum(h.qty):""}</td>
-                    <td style={{padding:"4px 6px",textAlign:"center",color:"#dc2626",fontWeight:700}}>{h.jenis_transaksi==="KELUAR"?fmtNum(h.qty):""}</td>
-                    <td style={{padding:"4px 6px",textAlign:"center",fontWeight:700}}>{fmtNum(h.sisa)}</td>
-                    <td style={{padding:"4px 6px"}}>{h.lokasi_kode||"-"}</td>
-                    <td style={{padding:"4px 6px",color:"#6b7280"}}>{h.catatan||"-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function buildTUG15HTML(rows, filter, katalogList) {
   const { dateFrom, dateTo } = filter;
@@ -8344,96 +8227,11 @@ function buildTUG15HTML(rows, filter, katalogList) {
 // ─── DASHBOARD ANALITIK SECTION (3 Widget) ───────────────────────────────
 // ─── SHARED DASHBOARD BUILDING BLOCKS ────────────────────────────────────
 
-function KPISaldoCards({ stocks, C, sty }) {
-  const nilaiCadang         = stocks.filter(s=>s.jenisBarang==="Cadang").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-  const nilaiPersediaan     = stocks.filter(s=>s.jenisBarang==="Persediaan").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-  const nilaiPersediaanBursa= stocks.filter(s=>s.jenisBarang==="Persediaan Bursa").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-  const nilaiPreMemory      = stocks.filter(s=>s.jenisBarang==="Pre Memory").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
 
-  const cards = [
-    { label:"Saldo Material Cadang",          nilai:nilaiCadang,          count:stocks.filter(s=>s.jenisBarang==="Cadang").length,          color:"#dc2626", bg:"#fff5f5", icon:"🔴" },
-    { label:"Saldo Material Persediaan",       nilai:nilaiPersediaan,      count:stocks.filter(s=>s.jenisBarang==="Persediaan").length,       color:"#16a34a", bg:"#f0fdf4", icon:"🟢" },
-    { label:"Saldo Persediaan Bursa",          nilai:nilaiPersediaanBursa, count:stocks.filter(s=>s.jenisBarang==="Persediaan Bursa").length, color:"#ea580c", bg:"#fff7ed", icon:"🟠" },
-    { label:"Saldo Pre Memory",                nilai:nilaiPreMemory,       count:stocks.filter(s=>s.jenisBarang==="Pre Memory").length,       color:"#1d4ed8", bg:"#eff6ff", icon:"🔵" },
-  ];
 
-  return (
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:20}}>
-      {cards.map((c,i)=>(
-        <div key={i} style={{...sty.card,borderLeft:`4px solid ${c.color}`,background:c.bg,padding:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:9,color:C.muted,fontWeight:700,textTransform:"uppercase",marginBottom:3,lineHeight:1.3}}>{c.label}</div>
-              <div style={{fontSize:16,fontWeight:900,color:c.color}}>{fmtRp(c.nilai)}</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{c.count} item aktif</div>
-            </div>
-            <div style={{fontSize:20,marginLeft:6,flexShrink:0}}>{c.icon}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
-function PendingWidget({ myPendingApprovals, C, sty, setTab }) {
-  if (myPendingApprovals.length===0) return null;
-  return (
-    <div style={{...sty.card,borderLeft:`4px solid #f59e0b`,marginBottom:16}}>
-      <h3 style={{fontSize:13,fontWeight:700,color:"#92400e",marginBottom:10}}>⏳ Butuh Tindakan ({myPendingApprovals.length})</h3>
-      {myPendingApprovals.slice(0,4).map(t=>{
-        const docNo = t.docNumbers?.[t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":t.docType==="TUG10"?"tug10":t.docType==="TUG5"?"tug5":t.docType==="TUG7"?"tug7":"tug3"]||t.id;
-        const label = t.docType==="TUG5"?t.keteranganUmum||"Permintaan Material":t.docType==="TUG7"?`TUG-7 → ${t.unitPenerima||"UPT"}`:t.namaPekerjaan||"-";
-        return (
-          <div key={t.id} style={{padding:"7px 0",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={{fontSize:12,fontWeight:600}}>{label}</div>
-              <div style={{fontSize:10,color:"#0098da"}}>{t.docType.replace("TUG","TUG-")} • {docNo}</div>
-            </div>
-            <button style={sty.btn("primary","sm")} onClick={()=>setTab("approval")}>Review</button>
-          </div>
-        );
-      })}
-      {myPendingApprovals.length>4 && <div style={{fontSize:11,color:C.muted,marginTop:6,textAlign:"center"}}>+{myPendingApprovals.length-4} lainnya</div>}
-    </div>
-  );
-}
 
-function RencanaWidget({ rencanaKedatanganList, C, sty, setTab }) {
-  const today = Date.now();
-  const plus30 = today + 30*24*60*60*1000;
-  const upcoming = rencanaKedatanganList
-    .flatMap(r=>(r.items||[]).map(item=>({...item, noKontrak:r.noKontrak, supplier:r.supplier, tanggalSerahTerima:r.tanggalSerahTerima})))
-    .filter(item=>{const d=item.tanggalSerahTerima?new Date(item.tanggalSerahTerima).getTime():0; return d<=plus30;})
-    .sort((a,b)=>new Date(a.tanggalSerahTerima)-new Date(b.tanggalSerahTerima));
-  return (
-    <div style={{...sty.card,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <h3 style={{fontSize:13,fontWeight:700}}>📅 Rencana Kedatangan (30 Hari)</h3>
-        <button style={sty.btn("ghost","sm")} onClick={()=>setTab("rencana")}>Lihat Semua</button>
-      </div>
-      {upcoming.length===0 && (
-        <div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:12}}>
-          Tidak ada rencana kedatangan barang dalam 30 hari ke depan.
-        </div>
-      )}
-      {upcoming.slice(0,5).map((item,i)=>{
-        const isLate = item.tanggalSerahTerima && new Date(item.tanggalSerahTerima).getTime()<today;
-        return (
-          <div key={i} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:600}}>{item.namaBarang}</div>
-              <div style={{fontSize:10,color:C.muted}}>{item.supplier} • {item.jumlah} {item.satuan}</div>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:11,fontWeight:700,color:isLate?"#dc2626":"#16a34a"}}>{item.tanggalSerahTerima||"-"}</div>
-              {isLate && <div style={{fontSize:9,color:"#dc2626",fontWeight:700}}>⚠️ Terlambat</div>}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+
 
 // Ringkasan 1 transaksi untuk widget "Transaksi Terbaru" di Dashboard: No TUG,
 // pekerjaan, tanggal, lokasi terkait, dan pihak (penerima/supplier) — beda
@@ -8672,106 +8470,9 @@ function AttbDashboardSummary({ attbList = [], bongkaranPool = [], C, sty, setTa
   );
 }
 
-// Sub-section Dashboard yang bisa dibuka/tutup (klik judul). Status buka/tutup
-// disimpan per-user di localStorage supaya konsisten antar kunjungan.
-function CollapsibleSection({ id, title, icon, defaultOpen = true, C, children }) {
-  const storeKey = "warnoto_dash_open_" + id;
-  const [open, setOpen] = useState(() => {
-    try { const v = localStorage.getItem(storeKey); return v === null ? defaultOpen : v === "1"; } catch { return defaultOpen; }
-  });
-  const toggle = () => setOpen(o => { const n = !o; try { localStorage.setItem(storeKey, n ? "1" : "0"); } catch { /* ignore */ } return n; });
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <button onClick={toggle} style={{ width:"100%", display:"flex", alignItems:"center", gap:8, background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, padding:"8px 2px", cursor:"pointer", textAlign:"left" }}>
-        <span style={{ fontSize:11, color:C.muted, width:14, flexShrink:0 }}>{open ? "▼" : "▶"}</span>
-        <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{icon} {title}</span>
-        {!open && <span style={{ fontSize:10, color:C.muted, marginLeft:"auto" }}>klik untuk buka</span>}
-      </button>
-      {open && <div style={{ marginTop: 10 }}>{children}</div>}
-    </div>
-  );
-}
 
-// Ringkasan eksekutif Dashboard (tab "Ringkasan") — status + 4 KPI + panel "Butuh Perhatian".
-// Prinsip manage-by-exception: sorot yang bermasalah/menunggu keputusan; detail via tab lain.
-function ExecOverview({ totalVal, kritisMaterials=[], forecastSoon=[], approvalCount, stockCountPendingCount, attbActionCount, akurasi, maturity, setTab, setOpnameSubTab, C, sty, isMobile }) {
-  const [openIdx, setOpenIdx] = useState(null);
-  const kritisCount = (kritisMaterials||[]).length;
-  const attention = [
-    approvalCount>0 && { icon:"✅", text:`${approvalCount} dokumen menunggu approval Anda`, go:()=>setTab("approval") },
-    stockCountPendingCount>0 && { icon:"📊", text:`${stockCountPendingCount} temuan Stock Count menunggu keputusan`, go:()=>{ setTab("opname"); setOpnameSubTab && setOpnameSubTab("stockCount"); } },
-    kritisCount>0 && { icon:"🔴", text:`${kritisCount} material stok kritis sekarang (≤ minimum)`,
-      items:(kritisMaterials||[]).slice(0,8).map(m=>`${m.name} — total ${fmtNum(m.qty)} ${m.unit||""} (min ${fmtNum(m.minQty)})`),
-      more:Math.max(0,kritisCount-8), goLabel:"Buka Data Stok", go:()=>setTab("stock") },
-    forecastSoon.length>0 && { icon:"📈", text:`${forecastSoon.length} material diprediksi habis ≤ 30 hari (forecast)`,
-      items:forecastSoon.slice(0,8).map(r=>`${r.nama} — ~${r.estimasiHari} hari lagi (sisa ${fmtNum(r.totalQty)} ${r.satuan||""})`),
-      more:Math.max(0,forecastSoon.length-8), goLabel:"Buka Forecast Stok", go:()=>setTab("forecastStok") },
-    attbActionCount>0 && { icon:"🗂️", text:`${attbActionCount} aset ATTB butuh tindak lanjut`, go:()=>setTab("attb") },
-  ].filter(Boolean);
-  const statusLabel = attention.length===0 ? "SEHAT" : "PERLU PERHATIAN";
-  const kpis = [
-    { icon:"💰", label:"Nilai Inventory", val:fmtRp(totalVal), color:C.green },
-    { icon:"🔴", label:"Material Kritis", val:kritisCount, color:kritisCount>0?C.red:C.green },
-    { icon:"🎯", label:"Akurasi SAP vs Fisik", val:akurasi!=null?akurasi+"%":"—", color:akurasi==null?C.muted:akurasi>=90?C.green:akurasi>=70?C.yellow:C.red },
-    { icon:"🏆", label:"Maturity Gudang", val:maturity?("Lv "+maturity.level):"—", color:C.accent },
-  ];
-  return (
-    <div>
-      <div style={{background:`linear-gradient(135deg,${C.sidebar},${C.accent})`,borderRadius:14,padding:isMobile?"16px 18px":"18px 24px",color:"white",marginBottom:16,boxShadow:"0 4px 16px rgba(11,37,89,0.25)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-          <div>
-            <div style={{fontSize:12,opacity:0.85,marginBottom:2}}>Status Gudang · {WAREHOUSE}</div>
-            <div style={{fontSize:isMobile?20:24,fontWeight:800,letterSpacing:.3}}>{statusLabel}</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:12,opacity:0.85,marginBottom:2}}>Butuh perhatian Anda</div>
-            <div style={{fontSize:isMobile?20:24,fontWeight:800}}>{attention.length} hal</div>
-          </div>
-        </div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:16}}>
-        {kpis.map(k=>(
-          <div key={k.label} style={{...sty.card,padding:16}}>
-            <div style={{fontSize:22,marginBottom:6}}>{k.icon}</div>
-            <div style={{fontSize:isMobile?18:20,fontWeight:800,color:k.color,lineHeight:1.1}}>{k.val}</div>
-            <div style={{fontSize:11,color:C.muted,marginTop:4}}>{k.label}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{...sty.card}}>
-        <div style={{fontWeight:800,fontSize:15,marginBottom:12}}>📌 Butuh Perhatian Anda</div>
-        {attention.length===0 ? (
-          <div style={{fontSize:13,color:C.green,fontWeight:600,padding:"8px 0"}}>✅ Semua aman — tidak ada yang menunggu keputusan Anda saat ini.</div>
-        ) : (
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {attention.map((a,i)=>{
-              const hasDetail = !!a.items && a.items.length>0;
-              const isOpen = openIdx===i;
-              return (
-              <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",background:C.bg}}>
-                <button onClick={()=> hasDetail ? setOpenIdx(isOpen?null:i) : a.go()} style={{display:"flex",alignItems:"center",gap:12,width:"100%",textAlign:"left",background:"transparent",border:"none",padding:isMobile?"12px 14px":"11px 14px",minHeight:isMobile?44:undefined,cursor:"pointer"}}>
-                  <span style={{fontSize:18,flexShrink:0}}>{a.icon}</span>
-                  <span style={{flex:1,fontSize:13,fontWeight:600,color:C.text}}>{a.text}</span>
-                  <span style={{fontSize:13,color:C.accent,fontWeight:700,flexShrink:0}}>{hasDetail?(isOpen?"▲":"▼"):"→"}</span>
-                </button>
-                {hasDetail && isOpen && (
-                  <div style={{padding:"0 14px 12px 44px"}}>
-                    {a.items.map((t,j)=>(
-                      <div key={j} style={{fontSize:12,color:C.text,padding:"5px 0",borderTop:`1px solid ${C.border}`}}>• {t}</div>
-                    ))}
-                    {a.more>0 && <div style={{fontSize:11,color:C.muted,padding:"6px 0 2px"}}>+{a.more} material lainnya…</div>}
-                    <button onClick={a.go} style={{...sty.btn("primary","sm"),marginTop:10}}>{a.goLabel} →</button>
-                  </div>
-                )}
-              </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+
+
 
 function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
