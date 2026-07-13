@@ -518,27 +518,6 @@ create policy "Authenticated read wh_cap_imports" on warehouse_capacity_imports 
 create policy "Authenticated write wh_cap_imports" on warehouse_capacity_imports for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- ────────────────────────────────────────────────────────────
--- 12. WA_ALLOWED_USERS — whitelist nomor WA yang boleh tanya ke AI Agent.
---     Dikelola Admin lewat panel WA Agent di App.jsx.
--- ────────────────────────────────────────────────────────────
-create table if not exists wa_allowed_users (
-  id bigint generated always as identity primary key,
-  phone_number text not null unique,    -- format internasional tanpa "+" cth "628123456789"
-  display_name text,
-  notes text,
-  added_by text,                        -- username admin yang menambahkan
-  added_at timestamptz default now(),
-  is_active boolean not null default true
-);
-
-alter table wa_allowed_users enable row level security;
--- Read: Edge Function memakai service_role (tidak kena RLS), App.jsx perlu baca untuk tampilkan daftar
-drop policy if exists "Authenticated read wa_allowed_users" on wa_allowed_users;
-drop policy if exists "Authenticated write wa_allowed_users" on wa_allowed_users;
-create policy "Authenticated read wa_allowed_users" on wa_allowed_users for select using (auth.role() = 'authenticated');
-create policy "Authenticated write wa_allowed_users" on wa_allowed_users for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
-
--- ────────────────────────────────────────────────────────────
 -- 13. WARNOTO_STATE — snapshot state gudang untuk AI Agent.
 --     Di-update tiap saveToCloud berhasil. Edge Function membaca baris
 --     terbaru (order by updated_at desc limit 1) sebagai konteks.
@@ -560,34 +539,10 @@ create policy "Public read warnoto_state" on warnoto_state for select using (tru
 create policy "Public insert warnoto_state" on warnoto_state for insert with check (true);
 
 -- ────────────────────────────────────────────────────────────
--- 14. WA_AGENT_LOGS — audit log setiap pesan masuk ke AI Agent WA.
---     Menyimpan metadata + ringkasan jawaban (bukan teks penuh untuk hemat space).
--- ────────────────────────────────────────────────────────────
-create table if not exists wa_agent_logs (
-  id bigint generated always as identity primary key,
-  phone_number text not null,
-  display_name text,
-  message_in text not null,             -- pesan asli dari pengirim
-  intent text,                          -- "help" | "menu" | "status_sinkron" | "rag_query" | dst
-  answer_summary text,                  -- ringkasan jawaban yang dikirim (maks ~500 char)
-  rag_chunks_used integer default 0,
-  is_whitelisted boolean not null default false,
-  response_ms integer,                  -- latency total dalam milidetik
-  error_message text,                   -- isi error jika gagal (null = sukses)
-  created_at timestamptz default now()
-);
-create index if not exists idx_wa_logs_phone on wa_agent_logs(phone_number);
-create index if not exists idx_wa_logs_created on wa_agent_logs(created_at desc);
-
-alter table wa_agent_logs enable row level security;
--- Edge Function menulis dengan service_role (tidak kena RLS).
--- App.jsx (App Panel Admin) baca untuk tampilkan log — require authenticated.
-drop policy if exists "Authenticated read wa_agent_logs" on wa_agent_logs;
-create policy "Authenticated read wa_agent_logs" on wa_agent_logs for select using (auth.role() = 'authenticated');
-
--- ────────────────────────────────────────────────────────────
 -- 15. WA_SYNC_STATUS — status terakhir sinkronisasi RAG/state dari App.jsx.
---     1 baris per sync_type (upsert by sync_type).
+--     Dipakai bersama oleh nightly_sync.mjs (tulis) & telegram-webhook (baca).
+--     Nama "wa_" dipertahankan (legacy) — WA Bot sudah dihapus, tabel ini
+--     tetap dipakai bot Telegram. 1 baris per sync_type (upsert by sync_type).
 -- ────────────────────────────────────────────────────────────
 create table if not exists wa_sync_status (
   sync_type text primary key,           -- "rag_knowledge_base" | "warnoto_state"
@@ -606,14 +561,9 @@ create policy "Public read wa_sync_status" on wa_sync_status for select using (t
 create policy "Public write wa_sync_status" on wa_sync_status for all using (true) with check (true);
 
 -- ────────────────────────────────────────────────────────────
--- 16. TELEGRAM BOT — alternatif WA Bot (dipilih user setelah WA kena restriksi
---     "Business account is restricted from messaging users in this country"
---     akibat Business Verification Meta belum selesai). Setup Telegram jauh
---     lebih ringan: tidak ada App Review, tidak ada verifikasi bisnis, tidak
---     ada pembatasan negara. Struktur tabel & logic Edge Function sengaja
---     dibuat paralel dengan wa_allowed_users/wa_agent_logs supaya mudah
---     dibandingkan/dipelihara bersamaan (WA bisa diaktifkan lagi nanti kalau
---     verifikasi PLN sudah selesai, tanpa saling mengganggu).
+-- 16. TELEGRAM BOT — channel AI Agent utama (satu-satunya). WA Bot sudah
+--     dihapus 2026-07-13 (terblokir Business Verification Meta, tidak dipakai).
+--     Setup Telegram ringan: tanpa App Review/verifikasi bisnis/pembatasan negara.
 -- ────────────────────────────────────────────────────────────
 create table if not exists tg_allowed_users (
   id bigint generated always as identity primary key,

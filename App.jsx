@@ -2993,6 +2993,7 @@ export default function PLNWarehouse() {
   const [approvalHapusStokPage, setApprovalHapusStokPage] = useState(1);
   const [approvalAlatBeratPage, setApprovalAlatBeratPage] = useState(1);
   const [approvalOpnamePage, setApprovalOpnamePage] = useState(1);
+  const [approvalStockCountPage, setApprovalStockCountPage] = useState(1);
   const [approvalHistoryPage, setApprovalHistoryPage] = useState(1);
   useEffect(() => {
     setApprovalStokPage(1); setApprovalStokGudangPage(1); setApprovalEditStokPage(1);
@@ -6317,7 +6318,7 @@ export default function PLNWarehouse() {
       const { error } = await supabase.from("warnoto_state").insert({ state_data, version: "v1" });
       if (error) throw error;
     } catch (err) {
-      if (!silent) showToast("Gagal sinkron State Gudang (untuk bot WA/Telegram): " + err.message, "error");
+      if (!silent) showToast("Gagal sinkron State Gudang (untuk bot Telegram): " + err.message, "error");
       else console.error("Auto-sync warnoto_state gagal:", err.message);
     }
   }
@@ -6754,7 +6755,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"stock",icon:"📦",label:"Data Stok"},
     {id:"master",icon:"🗂️",label:"Master Data"},
     {id:"transaction",icon:"🔄",label:"TUG"},
-    ...(hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN") ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0) + (hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (hasRole(currentUser, "ADMIN","TL") ? ultgPengajuanUntukAdopt.length : 0) + (hasRole(currentUser, "TL") ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0)}] : []),
+    ...(hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN") ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0) + (hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (hasRole(currentUser, "ADMIN","TL") ? ultgPengajuanUntukAdopt.length : 0) + (hasRole(currentUser, "TL") ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0) + (hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0)}] : []),
     {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
     {id:"attb",icon:"🗂️",label:"ATTB",badge:attbPendingCount+attbBelumLanjutCount},
     {id:"opname",icon:"📋",label:"Stock Opname & Count",badge:stockCountPendingCount},
@@ -8351,12 +8352,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               const alatBeratCount = hasRole(currentUser, "ASMAN") ? heavyEquipmentPendingCount : 0;
               const opnameCount = hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length
                 : hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0;
-              const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount+opnameCount;
+              const stockCountCount = hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0;
+              const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount+opnameCount+stockCountCount;
               const chips = [
                 {id:"ALL", label:"Semua", count:total},
                 {id:"TUG", label:"TUG", count:tugCount},
                 {id:"ALAT_BERAT", label:"Alat Berat", count:alatBeratCount},
                 {id:"OPNAME", label:"Stock Opname", count:opnameCount},
+                {id:"STOCK_COUNT", label:"Stock Count", count:stockCountCount},
                 {id:"STOK", label:"Pemindahan/Edit/Hapus Stok", count:stokCount},
                 {id:"LOKASI", label:"Lokasi/Blok", count:lokasiCount},
                 {id:"KAPASITAS", label:"Kapasitas Gudang", count:capCount},
@@ -8417,6 +8420,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               openDraftTug9={openDraftTug9}
               heavyEquipmentPendingCount={hasRole(currentUser, "ASMAN") ? heavyEquipmentPendingCount : 0}
               opnamePendingCount={hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0}
+              stockCountPendingCount={hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0}
               approvalTypeFilter={approvalTypeFilter}
               approvalPageSize={approvalPageSize}
             />
@@ -8602,6 +8606,36 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               );
             })()}
 
+            {/* ── BAGIAN: Stock Count — temuan selisih per-item, di-approve ASMAN (dulu cuma
+                muncul di menu Stock Opname & Count sendiri, tidak pernah tampil di halaman
+                Approval terpusat ini — gap visibilitas sama seperti Stock Opname). ── */}
+            {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOCK_COUNT") && hasRole(currentUser, "ASMAN") &&
+              stockCountList.some(s=>s.items.some(i=>i.approval==="PENDING")) && (()=>{
+              const list = stockCountList.flatMap(s=>s.items.filter(i=>i.approval==="PENDING").map(i=>({session:s, item:i})));
+              const paged = list.slice((approvalStockCountPage-1)*approvalPageSize, approvalStockCountPage*approvalPageSize);
+              return (
+                <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
+                  <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📊 Stock Count ({list.length})</div>
+                  {paged.map(({session,item})=>(
+                    <div key={`${session.id}_${item.id}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700}}>{item.nama}</div>
+                        <div style={{fontSize:11,color:C.muted}}>No. Katalog {item.katalogKode} • SAP {fmtNum(item.qtySap)} vs Aplikasi {item.katalogId?fmtNum(item.qtyApp):"Tidak terdaftar"} {item.satuan} • Selisih {item.selisih>0?"+":""}{fmtNum(item.selisih)} ({item.selisihPct}%) • {fmtDate(session.uploadedAt)}</div>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button style={sty.btn("primary","sm")} onClick={()=>approveStockCountItem(session.id, item.id, "")}>✓ Setuju</button>
+                        <button style={sty.btn("danger","sm")} onClick={()=>{
+                          const reason = window.prompt("Alasan penolakan temuan Stock Count ini?");
+                          if (reason) rejectStockCountItem(session.id, item.id, reason);
+                        }}>✕ Tolak</button>
+                      </div>
+                    </div>
+                  ))}
+                  {renderApprovalPager(approvalStockCountPage, setApprovalStockCountPage, list.length)}
+                </div>
+              );
+            })()}
+
             {/* ── BAGIAN: Riwayat Approval (gabungan semua jenis, terbaru di atas) ── */}
             {(()=>{
               const histTUG = txns.filter(t=>t.status==="APPROVED"||t.status==="REJECTED").map(t=>({
@@ -8612,8 +8646,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               }));
               const combinedAll = [...approvalHistoryList, ...histTUG].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
               const combined = combinedAll.slice((approvalHistoryPage-1)*approvalPageSize, approvalHistoryPage*approvalPageSize);
-              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname"};
-              const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","OPNAME","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];
+              const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname", STOCK_COUNT:"📊 Stock Count"};
+              const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","OPNAME","STOCK_COUNT","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];
               const groupsByType = typeOrder
                 .map(type=>({ type, items: combined.filter(h=>h.type===type) }))
                 .filter(g=>g.items.length>0);
@@ -11726,13 +11760,11 @@ function AIFaqPanel({ sty, C, onSaved }) {
   async function loadData() {
     setLoading(true);
     try {
-      const [{data: waLogs}, {data: tgLogs}, {data: faq}] = await Promise.all([
-        supabase.from("wa_agent_logs").select("*").eq("intent","rag_query").order("created_at",{ascending:false}).limit(100),
+      const [{data: tgLogs}, {data: faq}] = await Promise.all([
         supabase.from("tg_agent_logs").select("*").eq("intent","rag_query").order("created_at",{ascending:false}).limit(100),
         supabase.from("ai_faq_curated").select("*").eq("is_active",true).order("created_at",{ascending:false}),
       ]);
       const combined = [
-        ...(waLogs||[]).map(l=>({...l, _table:"wa_agent_logs", _channel:"WA"})),
         ...(tgLogs||[]).map(l=>({...l, _table:"tg_agent_logs", _channel:"Telegram"})),
       ];
       const bad = combined.filter(l=>
@@ -11778,7 +11810,7 @@ function AIFaqPanel({ sty, C, onSaved }) {
   return (
     <div style={{...sty.card, marginBottom:16}}>
       <div style={{fontWeight:800,fontSize:14,marginBottom:4}}>🧠 Kelola FAQ Bot</div>
-      <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Pertanyaan nyata dari bot WA/Telegram yang dijawab kurang baik — tulis jawaban resmi supaya besok bot langsung tahu.</p>
+      <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Pertanyaan nyata dari bot Telegram yang dijawab kurang baik — tulis jawaban resmi supaya besok bot langsung tahu.</p>
 
       {loading ? <div style={{fontSize:12,color:C.muted}}>Memuat...</div> : (
         <>
@@ -11939,7 +11971,7 @@ function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
           <div style={{textAlign:"right"}}>
             <div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
               <button style={{...sty.btn("ghost","sm"),opacity:ragSyncing?0.6:1}} disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot(); await syncRagChunks(); await syncWarnotoState();}}>
-                {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG + Bot WA/Telegram)"}
+                {ragSyncing?"Menyinkron...":"🔄 Sync Knowledge Base (RAG + Bot Telegram)"}
               </button>
               <button style={sty.btn(showFaqPanel?"primary":"ghost","sm")} onClick={()=>setShowFaqPanel(v=>!v)}>
                 🧠 Kelola FAQ Bot
@@ -18768,7 +18800,7 @@ function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalogList, 
   );
 }
 
-function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, opnamePendingCount=0, approvalTypeFilter="ALL", approvalPageSize=10 }) {
+function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, opnamePendingCount=0, stockCountPendingCount=0, approvalTypeFilter="ALL", approvalPageSize=10 }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Form, setTug7Form] = useState({});
@@ -18873,7 +18905,7 @@ function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty,
 
   return (
     <div>
-      {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 && pendingStockCount===0 && !(heavyEquipmentPendingCount>0) && !(opnamePendingCount>0) ? (
+      {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 && pendingStockCount===0 && !(heavyEquipmentPendingCount>0) && !(opnamePendingCount>0) && !(stockCountPendingCount>0) ? (
         <div style={{...sty.card,textAlign:"center",padding:40}}>
           <div style={{fontSize:48,marginBottom:12}}>✅</div>
           <div style={{fontSize:16,fontWeight:700}}>Semua sudah diproses</div>
