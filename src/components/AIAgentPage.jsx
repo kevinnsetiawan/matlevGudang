@@ -26,7 +26,7 @@ export function AIAgentPage({ enrichedStocks, katalogList, stocks, txns,
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🤖 AI Agent</h1>
+          <h1 style={sty.pageTitle}>🤖 AI Agent</h1>
           <p style={{color:C.muted,fontSize:13}}>Powered by Claude AI • Data real-time {WAREHOUSE} • Untuk prediksi stok/forecast, lihat menu "📈 Forecast Stok"</p>
         </div>
         {hasRole(currentUser, "ADMIN") && (

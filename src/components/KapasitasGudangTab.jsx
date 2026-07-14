@@ -50,7 +50,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangLi
   return (
     <div>
       <div style={{marginBottom:16}}>
-        <h1 style={{fontSize:22,fontWeight:900,marginBottom:4}}>📐 Monitoring Kapasitas Gudang</h1>
+        <h1 style={{...sty.pageTitle,marginBottom:4}}>📐 Monitoring Kapasitas Gudang</h1>
         <p style={{color:C.muted,fontSize:13}}>Laporan utilization luas gudang berbasis m2 — UIT JBM</p>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>

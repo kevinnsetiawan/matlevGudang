@@ -35,7 +35,7 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>🗺️ Peta Utilisasi Gudang</h1>
+          <h1 style={sty.pageTitle}>🗺️ Peta Utilisasi Gudang</h1>
           <p style={{color:C.muted,fontSize:13}}>Visualisasi lokasi blok dan material di denah gudang — data kapasitas m² dari import Excel. Untuk atur titik koordinat blok di denah, buka Master Data → Master Gudang.</p>
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>

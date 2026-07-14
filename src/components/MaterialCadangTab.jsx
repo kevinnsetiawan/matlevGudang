@@ -356,7 +356,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   return (
     <div>
       <div style={{marginBottom:16}}>
-        <h1 style={{fontSize:22,fontWeight:900,marginBottom:4}}>🔩 Material Cadang</h1>
+        <h1 style={{...sty.pageTitle,marginBottom:4}}>🔩 Material Cadang</h1>
         <p style={{color:C.muted,fontSize:13}}>Analisis ABC, inventory policy, dan rekomendasi jumlah ideal material cadang</p>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>

@@ -287,7 +287,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <div>
             <button style={{...sty.btn("ghost","sm"),marginBottom:6}} onClick={()=>{setActiveTab("list");setActiveOpname(null);}}>← Kembali ke Daftar</button>
-            <h1 style={{fontSize:20,fontWeight:900}}>Stock Opname — {activeOpname.jenisAlur}</h1>
+            <h1 style={sty.pageTitle}>Stock Opname — {activeOpname.jenisAlur}</h1>
             <p style={{color:C.muted,fontSize:12}}>Semester {activeOpname.semester} • {activeOpname.kategori}</p>
           </div>
           {isReadOnly && activeOpname.status==="SELESAI" && (
@@ -740,7 +740,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>📋 Stock Opname</h1>
+          <h1 style={sty.pageTitle}>📋 Stock Opname</h1>
           <p style={{color:C.muted,fontSize:13}}>Dilakukan 1× per semester — bandingkan data sistem vs lapangan & SAP</p>
         </div>
         {hasRole(currentUser, "ADMIN","TL") && (

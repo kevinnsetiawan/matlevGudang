@@ -49,7 +49,7 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:900}}>Stock Count</h1>
+          <h1 style={sty.pageTitle}>Stock Count</h1>
           <p style={{color:C.muted,fontSize:13}}>Banding qty SAP vs Aplikasi untuk material ber-status SAP — temuan selisih perlu approval Asman.</p>
         </div>
         {hasRole(currentUser, "ADMIN") && !draftItems && (

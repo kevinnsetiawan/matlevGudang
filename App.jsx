@@ -3928,25 +3928,38 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   );
 
   if (!currentUser) return (
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
-      <div style={{background:"white",borderRadius:20,padding:40,width:400,boxShadow:"0 25px 60px rgba(0,0,0,0.35)"}}>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{width:88,height:88,background:"white",borderRadius:18,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px",boxShadow:"0 8px 24px rgba(0,0,0,0.10)",border:`1px solid ${C.border}`,padding:14}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
-          <div style={{fontSize:28,fontWeight:800,color:C.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
-          <div style={{fontSize:10.5,color:C.muted,fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"8px 0 3px"}}>{COMPANY}</div>
-          <div style={{fontSize:12.5,color:C.muted}}>{UPT} · {WAREHOUSE}</div>
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#001a57 0%,#003087 50%,#0052cc 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
+      <div style={{background:"white",borderRadius:20,overflow:"hidden",display:"flex",width:isMobile?"100%":720,maxWidth:isMobile?400:720,boxShadow:"0 25px 60px rgba(0,0,0,0.35)"}}>
+        {/* KIRI — panel branding (desktop only) */}
+        <div style={{display:isMobile?"none":"flex",flexDirection:"column",justifyContent:"center",width:300,flexShrink:0,padding:40,background:"linear-gradient(160deg,#123a7a,#0b2559)",color:"white"}}>
+          <div style={{width:76,height:76,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:22,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
+          <div style={{fontSize:34,fontWeight:900,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.75)",fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"14px 0 6px"}}>{COMPANY}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.5}}>{UPT} · {WAREHOUSE}</div>
         </div>
-        <div style={{marginBottom:16}}>
-          <label style={sty.label}>Username</label>
-          <input style={sty.input} placeholder="Masukkan username..." value={loginForm.username} onChange={e=>setLoginForm(f=>({...f,username:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()} autoFocus/>
+        {/* KANAN — form login */}
+        <div style={{flex:1,padding:isMobile?32:40,minWidth:0}}>
+          {isMobile && (
+            <div style={{textAlign:"center",marginBottom:24}}>
+              <div style={{width:72,height:72,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",boxShadow:"0 8px 24px rgba(0,0,0,0.10)",border:`1px solid ${C.border}`,padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
+              <div style={{fontSize:26,fontWeight:900,color:C.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:6}}>{UPT} · {WAREHOUSE}</div>
+            </div>
+          )}
+          <div style={{fontSize:20,fontWeight:800,color:C.text,marginBottom:4}}>Selamat Datang</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:24}}>Masuk untuk melanjutkan ke sistem.</div>
+          <div style={{marginBottom:16}}>
+            <label style={sty.label}>Username</label>
+            <input style={sty.input} placeholder="Masukkan username..." value={loginForm.username} onChange={e=>setLoginForm(f=>({...f,username:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()} autoFocus/>
+          </div>
+          <div style={{marginBottom:8}}>
+            <label style={sty.label}>Password</label>
+            <input style={sty.input} type="password" placeholder="Masukkan password..." value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+          </div>
+          {loginErr && <div style={{color:C.red,fontSize:12,marginBottom:12,padding:"8px 12px",background:"#fee2e2",borderRadius:8}}>{loginErr}</div>}
+          <button style={{...sty.btn("primary"),width:"100%",padding:"12px",fontSize:15,marginTop:8,opacity:loginBusy?0.6:1,cursor:loginBusy?"default":"pointer"}} onClick={handleLogin} disabled={loginBusy}>{loginBusy?"Memeriksa...":"Masuk ke Sistem"}</button>
+          <div style={{marginTop:16,fontSize:11,color:C.muted,textAlign:"center"}}>Lupa password? Hubungi Admin untuk reset manual.</div>
         </div>
-        <div style={{marginBottom:8}}>
-          <label style={sty.label}>Password</label>
-          <input style={sty.input} type="password" placeholder="Masukkan password..." value={loginForm.password} onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-        </div>
-        {loginErr && <div style={{color:C.red,fontSize:12,marginBottom:12,padding:"8px 12px",background:"#fee2e2",borderRadius:8}}>{loginErr}</div>}
-        <button style={{...sty.btn("primary"),width:"100%",padding:"12px",fontSize:15,marginTop:8,opacity:loginBusy?0.6:1,cursor:loginBusy?"default":"pointer"}} onClick={handleLogin} disabled={loginBusy}>{loginBusy?"Memeriksa...":"Masuk ke Sistem"}</button>
-        <div style={{marginTop:16,fontSize:11,color:C.muted,textAlign:"center"}}>Lupa password? Hubungi Admin untuk reset manual.</div>
       </div>
     </div>
   );
@@ -3988,6 +4001,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
     {id:"ai",icon:"🤖",label:"AI Agent"},
   ];
+
+  // Style tombol nav sidebar (dedup 4 blok identik). Active: gradient tipis + bar aksen kiri.
+  const navBtnStyle = (active) => ({display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:active?"linear-gradient(90deg,rgba(96,165,250,0.22),rgba(255,255,255,0.06))":"transparent",color:active?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:active?700:400,marginBottom:2,textAlign:"left",boxShadow:active?"inset 3px 0 0 #60a5fa":"none"});
 
   return (
     <div style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
@@ -4033,7 +4049,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="transaction">
                   <button
-                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:isActive?"rgba(255,255,255,0.15)":"transparent",color:isActive?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:isActive?700:400,marginBottom:2,textAlign:"left",boxShadow:isActive?"inset 3px 0 0 #60a5fa":"none"}}
+                    style={navBtnStyle(isActive)}
                     onClick={()=>setTugExpanded(e=>!e)}
                   >
                     <span>{n.icon}</span>
@@ -4072,7 +4088,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="master">
                   <button
-                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:isActive?"rgba(255,255,255,0.15)":"transparent",color:isActive?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:isActive?700:400,marginBottom:2,textAlign:"left",boxShadow:isActive?"inset 3px 0 0 #60a5fa":"none"}}
+                    style={navBtnStyle(isActive)}
                     onClick={()=>setMasterExpanded(e=>!e)}
                   >
                     <span>{n.icon}</span>
@@ -4111,7 +4127,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="opname">
                   <button
-                    style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:isActive?"rgba(255,255,255,0.15)":"transparent",color:isActive?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:isActive?700:400,marginBottom:2,textAlign:"left",boxShadow:isActive?"inset 3px 0 0 #60a5fa":"none"}}
+                    style={navBtnStyle(isActive)}
                     onClick={()=>setOpnameExpanded(e=>!e)}
                   >
                     <span>{n.icon}</span>
@@ -4143,7 +4159,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             }
             // Regular nav item
             return (
-              <button key={n.id} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:tab===n.id?"rgba(255,255,255,0.15)":"transparent",color:tab===n.id?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:tab===n.id?700:400,marginBottom:2,textAlign:"left",boxShadow:tab===n.id?"inset 3px 0 0 #60a5fa":"none"}} onClick={()=>{setTab(n.id); if(n.id!=="transaction") setTugExpanded(false); if(n.id!=="master") setMasterExpanded(false); if(n.id!=="opname") setOpnameExpanded(false); setMobileMenuOpen(false);}}>
+              <button key={n.id} style={navBtnStyle(tab===n.id)} onClick={()=>{setTab(n.id); if(n.id!=="transaction") setTugExpanded(false); if(n.id!=="master") setMasterExpanded(false); if(n.id!=="opname") setOpnameExpanded(false); setMobileMenuOpen(false);}}>
                 <span>{n.icon}</span> {n.label}
                 {n.badge>0 && <span style={{marginLeft:"auto",background:"#dc2626",color:"white",borderRadius:20,padding:"1px 7px",fontSize:10,fontWeight:800}}>{n.badge}</span>}
               </button>
@@ -4411,7 +4427,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div>
-                <h1 style={{fontSize:22,fontWeight:900}}>Data Stok Gudang</h1>
+                <h1 style={sty.pageTitle}>Data Stok Gudang</h1>
                 <p style={{color:C.muted,fontSize:13}}>{filteredStocks.length} baris stok (barang x lokasi)
                   {stocks.filter(s=>!s.lokasiId).length>0 && <span style={{color:"#f59e0b",fontWeight:700,marginLeft:8}}>• ⚠️ {stocks.filter(s=>!s.lokasiId).length} material belum ada lokasi</span>}
                 </p>
@@ -4690,7 +4706,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div>
-                <h1 style={{fontSize:22,fontWeight:900}}>
+                <h1 style={sty.pageTitle}>
                   {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi (UIT / UPT / ULTG)":stockSubTab==="akun"?"👤 Kelola Akun (User)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
                 </h1>
                 <p style={{color:C.muted,fontSize:13}}>
@@ -5390,7 +5406,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
               <div>
-                <h1 style={{fontSize:22,fontWeight:900,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <h1 style={{...sty.pageTitle,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                   {(TUG_UI[tugSubTab]||{}).title || tugSubTab}
                   <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.border,borderRadius:6,padding:"2px 8px"}}>{(TUG_UI[tugSubTab]||{}).code || tugSubTab}</span>
                 </h1>
@@ -5589,7 +5605,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               ].filter(c=>c.id==="ALL"||c.count>0);
               return (
                 <div style={{marginBottom:12}}>
-                  <h1 style={{fontSize:22,fontWeight:900}}>Approval</h1>
+                  <h1 style={sty.pageTitle}>Approval</h1>
                   <p style={{color:C.muted,fontSize:13,marginBottom:total>0?10:0}}>{total} item menunggu persetujuan atau tindakan kamu ({ROLES[currentUser.role]})</p>
                   {/* Filter jenis approval + pageSize — tepat di bawah subtitle, langsung
                       nyambung ke list di bawahnya (bukan 1 list panjang campur aduk semua jenis). */}
@@ -5970,7 +5986,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {stockModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{stockModal==="edit"?"Edit Data Stok":"Tambah Data Stok Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{stockModal==="edit"?"Edit Data Stok":"Tambah Data Stok Baru"}</span><button onClick={()=>setStockModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Barang (dari Master Katalog)</label>
@@ -6036,7 +6052,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {katalogModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:460,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{katalogModal==="edit"?"Edit Master Katalog":"Tambah Katalog Barang Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{katalogModal==="edit"?"Edit Master Katalog":"Tambah Katalog Barang Baru"}</span><button onClick={()=>setKatalogModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             {/* MARA Referensi Search */}
             <div style={{marginBottom:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:10,padding:12}}>
               <div style={{fontSize:12,fontWeight:800,color:"#0369a1",marginBottom:8}}>🔍 Cari Referensi MARA</div>
@@ -6151,7 +6167,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {lokasiModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:420,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{lokasiModal==="edit"?"Edit Master Lokasi":"Tambah Lokasi Gudang Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{lokasiModal==="edit"?"Edit Master Lokasi":"Tambah Lokasi Gudang Baru"}</span><button onClick={()=>setLokasiModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             {gudangList.length===0 ? (
               <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"10px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Belum ada Master Gudang. Tambahkan Gudang dulu di menu "Master Data" → "Master Gudang" sebelum bisa mengisi Blok — data harus berjenjang: Gudang dulu, baru Blok.</div>
             ) : (
@@ -6232,7 +6248,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {satpamModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:400,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{satpamModal==="edit"?"Edit Satpam":"Tambah Satpam Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{satpamModal==="edit"?"Edit Satpam":"Tambah Satpam Baru"}</span><button onClick={()=>setSatpamModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Nama Satpam</label>
               <input style={sty.input} value={satpamForm.name||""} onChange={e=>setSatpamForm(sf=>({...sf,name:e.target.value}))} placeholder="cth: Robby Demas Riady"/>
@@ -6253,7 +6269,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {timMutuModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:420,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Edit {timMutuForm.label}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>Edit {timMutuForm.label}</span><button onClick={()=>setTimMutuModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>Paket tim ini tetap (tidak bisa diganti namanya) — hanya anggotanya yang bisa diedit.</p>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Ketua</label>
@@ -6690,7 +6706,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {uitModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:440,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{uitModal==="edit"?"Edit UIT":"Tambah UIT Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{uitModal==="edit"?"Edit UIT":"Tambah UIT Baru"}</span><button onClick={()=>setUitModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode UIT</label><input style={sty.input} value={uitForm.kode||""} onChange={e=>setUitForm(f=>({...f,kode:e.target.value}))} placeholder="cth: UIT-JBM"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama Lengkap UIT</label><input style={sty.input} value={uitForm.nama||""} onChange={e=>setUitForm(f=>({...f,nama:e.target.value}))} placeholder="cth: PT PLN (PERSERO) UNIT INDUK TRANSMISI JAWA BAGIAN TIMUR DAN BALI"/></div>
             <div style={{marginBottom:16}}><label style={sty.label}>Alamat</label><input style={sty.input} value={uitForm.alamat||""} onChange={e=>setUitForm(f=>({...f,alamat:e.target.value}))}/></div>
@@ -6703,7 +6719,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {uptModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:440,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{uptModal==="edit"?"Edit UPT":"Tambah UPT Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{uptModal==="edit"?"Edit UPT":"Tambah UPT Baru"}</span><button onClick={()=>setUptModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode UPT</label><input style={sty.input} value={uptForm.kode||""} onChange={e=>setUptForm(f=>({...f,kode:e.target.value}))} placeholder="cth: UPT-MLG"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama UPT</label><input style={sty.input} value={uptForm.nama||""} onChange={e=>setUptForm(f=>({...f,nama:e.target.value}))} placeholder="cth: UPT Malang"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Alamat</label><input style={sty.input} value={uptForm.alamat||""} onChange={e=>setUptForm(f=>({...f,alamat:e.target.value}))}/></div>
@@ -6723,7 +6739,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {ultgModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:440,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{ultgModal==="edit"?"Edit ULTG":"Tambah ULTG Baru"}</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{ultgModal==="edit"?"Edit ULTG":"Tambah ULTG Baru"}</span><button onClick={()=>setUltgModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Kode ULTG</label><input style={sty.input} value={ultgForm.kode||""} onChange={e=>setUltgForm(f=>({...f,kode:e.target.value}))} placeholder="cth: ULTG-SBU"/></div>
             <div style={{marginBottom:12}}><label style={sty.label}>Nama ULTG</label><input style={sty.input} value={ultgForm.nama||""} onChange={e=>setUltgForm(f=>({...f,nama:e.target.value}))} placeholder="cth: ULTG Surabaya Utara"/></div>
             <div style={{marginBottom:16}}>
@@ -6754,7 +6770,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </>
             ) : (
               <>
-                <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>{akunModal==="edit"?"Edit Akun":"Daftarkan Akun Baru"}</h3>
+                <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{akunModal==="edit"?"Edit Akun":"Daftarkan Akun Baru"}</span><button onClick={()=>setAkunModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
                 <div style={{marginBottom:12}}>
                   <label style={sty.label}>Username</label>
                   {akunModal==="edit" ? (
@@ -6851,7 +6867,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {gantiPasswordModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{...sty.card,width:400,maxWidth:"100%"}}>
-            <h3 style={{fontSize:18,fontWeight:800,marginBottom:20}}>🔑 Ganti Password</h3>
+            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>🔑 Ganti Password</span><button onClick={()=>setGantiPasswordModal(false)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{marginBottom:12}}>
               <label style={sty.label}>Password Lama</label>
               <input type="password" style={sty.input} value={gantiPasswordForm.oldPassword||""} onChange={e=>setGantiPasswordForm(f=>({...f,oldPassword:e.target.value}))}/>

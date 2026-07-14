@@ -189,7 +189,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
 
       {forecastView==="forecast" && <div>
       <div style={{marginBottom:16}}>
-        <h1 style={{fontSize:22,fontWeight:900}}>📈 Forecast Stok</h1>
+        <h1 style={sty.pageTitle}>📈 Forecast Stok</h1>
         <p style={{color:C.muted,fontSize:13}}>Perbandingan 2 metode: heuristik pemakaian historis vs ML Prophet • {WAREHOUSE}</p>
       </div>
       <div style={{background:"#eff6ff",border:`1px solid #bfdbfe`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#1d4ed8"}}>

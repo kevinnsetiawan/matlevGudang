@@ -196,7 +196,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
   return (
     <div>
       {/* Header */}
-      <h1 style={{fontSize:20,fontWeight:900,marginBottom:12}}>🚜 Alat Berat & Peminjaman UPT</h1>
+      <h1 style={{...sty.pageTitle,marginBottom:12}}>🚜 Alat Berat & Peminjaman UPT</h1>
 
       {/* Blok khusus Overdue — sekarang discope ke UPT yang sedang di-scope (dulu tidak difilter
           UPT sama sekali, jadi overdue milik UPT lain ikut nongol & bisa "Ditandai Kembali" oleh

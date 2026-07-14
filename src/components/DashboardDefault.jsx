@@ -32,7 +32,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
   return (
     <div>
       <div style={{marginBottom:16}}>
-        <h1 style={{fontSize:22,fontWeight:900}}>Dashboard Gudang</h1>
+        <h1 style={sty.pageTitle}>Dashboard Gudang</h1>
         <p style={{color:C.muted,fontSize:13}}>{WAREHOUSE} • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14,marginBottom:20}}>

@@ -224,7 +224,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
 
   return (
     <div>
-      <h1 style={{fontSize:20,fontWeight:900,marginBottom:12}}>🗂️ ATTB — Penghapusan Aset Material</h1>
+      <h1 style={{...sty.pageTitle,marginBottom:12}}>🗂️ ATTB — Penghapusan Aset Material</h1>
 
       {isMSB ? (
         <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}}>
