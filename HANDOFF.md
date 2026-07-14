@@ -1,6 +1,6 @@
 # HANDOFF — WARNOTO
 
-**Vendor aktif terakhir:** Codex | **Update:** 2026-07-14 23:56
+**Vendor aktif terakhir:** Codex | **Update:** 2026-07-15 00:09
 
 ## Tujuan / benang merah
 WARNOTO adalah aplikasi gudang PLN (React, Vite 4, Supabase). Fokus: penyempurnaan UI bertahap dan migrasi Non-SAP UPT Surabaya secara review-first, bukan redesign besar.
@@ -13,9 +13,9 @@ WARNOTO adalah aplikasi gudang PLN (React, Vite 4, Supabase). Fokus: penyempurna
 - Alur bisnis review-first; jangan membuat aksi turunan atau auto-approve tanpa persetujuan.
 
 ## Status sekarang
-- **Selesai:** UI shell responsif; dashboard/modul operasional/TUG dipoles. Logo compact disimetriskan. Pak War dipadatkan menjadi 4 prompt tanpa scroll awal berlebih. Font Kapasitas memakai Segoe UI corporate; root cause data kosong diperbaiki dengan menunggu autentikasi sebelum membaca tabel RLS, plus empty state pending-vs-belum-import. Build produksi lulus.
+- **Selesai:** UI shell responsif; dashboard/modul operasional/TUG dipoles. Forecast Stok diubah menjadi ringkasan, filter, tabel risiko, dan detail analisis yang mudah dipindai. Pak War disatukan dalam satu ruang percakapan dengan 4 prompt ringkas. Logo compact memakai rasio vertikal logo PLN asli. Build produksi lulus.
 - **Sedang dikerjakan:** migrasi Non-SAP UPT Surabaya sudah diaudit: 40 baris (34 kuat, 5 lemah, 1 tanpa kandidat); belum ada sesi opname atau write ke Supabase.
-- **Langkah berikutnya:** user reload/login lalu review logo compact, tinggi awal Pak War, dan isi Kapasitas Gudang; bila tetap kosong, cek pesan pending import. Setelah feedback lanjut migrasi Non-SAP review-first.
+- **Langkah berikutnya:** user reload lalu review Forecast Stok, Pak War, dan logo sidebar compact; lanjutkan penyesuaian dari feedback. Setelah itu lanjut migrasi Non-SAP review-first.
 - **Blocker:** browser agent dibatasi untuk localhost; dev lokal aktif di `http://127.0.0.1:3001/index.html`.
 
 ## Perintah verifikasi

@@ -12,107 +12,76 @@ export function AIAgentPage({
 }) {
   const [showFaqPanel, setShowFaqPanel] = useState(false);
   const [showTgPanel, setShowTgPanel] = useState(false);
-
+  const isWelcome = chatHistory.length<=1;
   const suggested = [
-    {category:"Kondisi stok",title:"Prioritas hari ini",question:"Analisa kondisi stok sekarang dan material yang perlu perhatian"},
-    {category:"Approval",title:"Dokumen tertunda",question:"Ada berapa TUG yang masih pending approval?"},
-    {category:"Stok kritis",title:"Material hampir habis",question:"Material apa yang stoknya hampir habis?"},
-    {category:"Forecast",title:"Proyeksi kebutuhan",question:"Forecast kebutuhan material 3 bulan ke depan"},
+    {title:"Prioritas stok hari ini",question:"Analisa kondisi stok sekarang dan material yang perlu perhatian"},
+    {title:"Dokumen yang tertunda",question:"Ada berapa TUG yang masih pending approval?"},
+    {title:"Material hampir habis",question:"Material apa yang stoknya hampir habis?"},
+    {title:"Proyeksi tiga bulan",question:"Forecast kebutuhan material 3 bulan ke depan"},
   ];
 
-  const handleKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+  function handleKeyDown(event) {
+    if (event.key==="Enter" && !event.shiftKey) {
       event.preventDefault();
       if (!chatLoading && chatInput.trim()) sendChat();
     }
-  };
+  }
 
   return (
     <div className="ai-agent-page">
-      <div className="ai-agent-toolbar">
-        <div className="ai-agent-toolbar__copy">
-          <span>Asisten operasional gudang</span>
-          <strong>Pak War</strong>
-          <small>Teman kerja digital untuk membaca data real-time {WAREHOUSE}, merangkum kondisi, dan membantu menentukan prioritas.</small>
-        </div>
-        {hasRole(currentUser, "ADMIN") && (
-          <div className="ai-agent-admin">
-            <div className="ai-agent-admin__actions">
-              <button disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot();await syncRagChunks();await syncWarnotoState();}}>
-                {ragSyncing ? "Menyinkron..." : "Sinkronkan knowledge base"}
-              </button>
-              <button className={showFaqPanel?"is-active":""} onClick={()=>setShowFaqPanel(v=>!v)}>Kelola FAQ</button>
-              <button className={showTgPanel?"is-active":""} onClick={()=>setShowTgPanel(v=>!v)}>User Telegram</button>
-            </div>
-            {ragLastSync && <small>Sinkron terakhir {fmtDate(ragLastSync)}</small>}
+      <section className={`ai-conversation${isWelcome?" is-welcome":""}`} aria-label="Percakapan dengan Pak War">
+        <header className="ai-conversation__header">
+          <div className="ai-conversation__identity">
+            <div className="ai-conversation__avatar" aria-hidden="true">PW</div>
+            <div><span>Asisten operasional WARNOTO</span><strong>Pak War</strong><small>Terhubung dengan data {WAREHOUSE}</small></div>
           </div>
-        )}
-      </div>
+          {hasRole(currentUser,"ADMIN") && <div className="ai-conversation__admin">
+            <button disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot();await syncRagChunks();await syncWarnotoState();}}>{ragSyncing?"Menyinkron...":"Sinkron data"}</button>
+            <button className={showFaqPanel?"is-active":""} onClick={()=>setShowFaqPanel(value=>!value)}>FAQ</button>
+            <button className={showTgPanel?"is-active":""} onClick={()=>setShowTgPanel(value=>!value)}>Telegram</button>
+            {ragLastSync && <span>Sync {fmtDate(ragLastSync)}</span>}
+          </div>}
+        </header>
 
-      {showFaqPanel && hasRole(currentUser, "ADMIN") && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
-      {showTgPanel && hasRole(currentUser, "ADMIN") && <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>}
+        {(showFaqPanel||showTgPanel) && <div className="ai-conversation__config">
+          {showFaqPanel && hasRole(currentUser,"ADMIN") && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
+          {showTgPanel && hasRole(currentUser,"ADMIN") && <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>}
+        </div>}
 
-      <section className={`ai-chat-shell${chatHistory.length<=1?" is-welcome":""}`} aria-label="Percakapan dengan Pak War">
-        {chatHistory.length<=1 && (
-          <div className="ai-welcome">
-            <div className="ai-welcome__intro">
-              <div className="ai-welcome__avatar" aria-hidden="true">PW</div>
+        {isWelcome ? (
+          <div className="ai-start">
+            <div className="ai-start__intro">
+              <span>Mulai percakapan</span>
+              <h2>Apa yang perlu diperiksa hari ini?</h2>
+              <p>Pak War membantu merangkum stok, transaksi, approval, dan forecast. Pilih pertanyaan cepat atau tulis pertanyaan sendiri.</p>
+              <div className="ai-start__status"><i></i><span>Siap membaca data gudang terbaru</span></div>
+            </div>
+            <div className="ai-quick-prompts">
+              <span>Pertanyaan cepat</span>
               <div>
-                <span>PAK WAR · ASISTEN WARNOTO</span>
-                <h2>Apa yang ingin Anda ketahui dari gudang hari ini?</h2>
-                <p>Pilih pertanyaan yang sering digunakan atau tulis kebutuhan Anda pada kolom percakapan.</p>
-              </div>
-            </div>
-            <div className="ai-suggestions">
-              <div className="ai-suggestions__heading">
-                <strong>Pertanyaan yang sering ditanyakan</strong>
-                <span>Klik satu kartu untuk langsung menanyakan kalimat yang sama kepada Pak War</span>
-              </div>
-              <div className="ai-suggestions__grid">
-                {suggested.map((item,index)=>(
-                  <button key={index} onClick={()=>sendChat(item.question)}>
-                    <span className="ai-prompt-card__category">{item.category}</span>
-                    <strong>{item.title}</strong>
-                    <small>{item.question}</small>
-                    <b aria-hidden="true">Tanyakan →</b>
-                  </button>
-                ))}
+                {suggested.map((item,index)=><button key={index} onClick={()=>sendChat(item.question)}>
+                  <span>{item.title}</span><small>{item.question}</small><b aria-hidden="true">→</b>
+                </button>)}
               </div>
             </div>
           </div>
+        ) : (
+          <div className="ai-chat-history">
+            {chatHistory.map((message,index)=><div key={index} className={`ai-message is-${message.role}`}>
+              <div className="ai-message__avatar" aria-hidden="true">{message.role==="user"?"U":"PW"}</div>
+              <div className="ai-message__content"><span>{message.role==="user"?"Anda":"Pak War"}</span><p>{message.text}</p></div>
+            </div>)}
+            {chatLoading && <div className="ai-message is-ai is-loading"><div className="ai-message__avatar" aria-hidden="true">PW</div><div className="ai-message__content"><span>Pak War</span><p>Sedang membaca dan menganalisis data gudang...</p></div></div>}
+            <div ref={chatEndRef}/>
+          </div>
         )}
 
-        <div className="ai-chat-history">
-          {chatHistory.map((message,index)=>(
-            <div key={index} className={`ai-message is-${message.role}`}>
-              <div className="ai-message__avatar" aria-hidden="true">{message.role==="user"?"U":"PW"}</div>
-              <div className="ai-message__content">
-                <span>{message.role==="user"?"Anda":"Pak War"}</span>
-                <p>{message.text}</p>
-              </div>
-            </div>
-          ))}
-          {chatLoading && (
-            <div className="ai-message is-ai is-loading">
-              <div className="ai-message__avatar" aria-hidden="true">PW</div>
-              <div className="ai-message__content"><span>Pak War</span><p>Sedang membaca dan menganalisis data gudang...</p></div>
-            </div>
-          )}
-          <div ref={chatEndRef}/>
+        <div className="ai-composer">
+          {!isWelcome && <button className="ai-composer__reset" title="Mulai percakapan baru" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data gudang ${WAREHOUSE}?`}])}>Percakapan baru</button>}
+          <textarea rows={1} placeholder="Tulis pertanyaan untuk Pak War..." value={chatInput} onChange={event=>setChatInput(event.target.value)} onKeyDown={handleKeyDown}/>
+          <button className="ai-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>Kirim</button>
         </div>
-
-        <div className="ai-chat-composer">
-          <button className="ai-chat-composer__clear" title="Bersihkan riwayat chat" aria-label="Bersihkan riwayat chat" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data gudang ${WAREHOUSE}?`}])}>Hapus chat</button>
-          <textarea
-            rows={1}
-            placeholder="Tanya Pak War tentang stok, transaksi, approval, atau operasional gudang..."
-            value={chatInput}
-            onChange={event=>setChatInput(event.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-          <button className="ai-chat-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>Kirim</button>
-        </div>
-        <div className="ai-chat-hint">Enter untuk kirim · Shift + Enter untuk baris baru</div>
+        <div className="ai-composer__hint">Enter untuk kirim · Shift + Enter untuk baris baru</div>
       </section>
     </div>
   );
