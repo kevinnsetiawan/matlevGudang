@@ -15,11 +15,9 @@ export function AIAgentPage({
 
   const suggested = [
     {category:"Kondisi stok",title:"Prioritas hari ini",question:"Analisa kondisi stok sekarang dan material yang perlu perhatian"},
-    {category:"Pemakaian",title:"Material paling aktif",question:"Material apa yang paling sering dipakai 3 bulan terakhir?"},
     {category:"Approval",title:"Dokumen tertunda",question:"Ada berapa TUG yang masih pending approval?"},
     {category:"Stok kritis",title:"Material hampir habis",question:"Material apa yang stoknya hampir habis?"},
     {category:"Forecast",title:"Proyeksi kebutuhan",question:"Forecast kebutuhan material 3 bulan ke depan"},
-    {category:"Penerimaan",title:"Kedatangan terakhir",question:"Kapan terakhir kita terima material dari rencana kedatangan?"},
   ];
 
   const handleKeyDown = (event) => {
@@ -54,7 +52,7 @@ export function AIAgentPage({
       {showFaqPanel && hasRole(currentUser, "ADMIN") && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
       {showTgPanel && hasRole(currentUser, "ADMIN") && <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>}
 
-      <section className="ai-chat-shell" aria-label="Percakapan dengan Pak War">
+      <section className={`ai-chat-shell${chatHistory.length<=1?" is-welcome":""}`} aria-label="Percakapan dengan Pak War">
         {chatHistory.length<=1 && (
           <div className="ai-welcome">
             <div className="ai-welcome__intro">

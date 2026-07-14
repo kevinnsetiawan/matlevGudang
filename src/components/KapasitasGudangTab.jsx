@@ -5,13 +5,14 @@ import { fmtNum } from "../lib/ragShared.mjs";
 import { hasRole } from "../lib/roles.js";
 import { PetaGudangTab } from "./PetaGudangTab.jsx";
 
-export function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangList, lokasiList, stocks, currentUser, sty, C, setTab, setStockSubTab }) {
+export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, sty, C, setTab, setStockSubTab }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
 
   const canEdit = hasRole(currentUser, "ADMIN","TL");
+  const pendingImports = gudangCapacityImports.filter(item=>item.status==="PENDING_ASMAN").length;
 
   // Daftar UPT unik dari data (string label, bukan Master UPT)
   const uptLabelList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
@@ -68,7 +69,12 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangLi
             <div style={{...sty.card,textAlign:"center",padding:40,color:C.muted}}>
               <div style={{fontSize:40,marginBottom:12}}>📐</div>
               <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Data kapasitas gudang belum tersedia</div>
-              <div style={{fontSize:13,marginBottom:20}}>Import file KAPASITAS GUDANG UIT JBM.xlsx di menu Master Data → Master Gudang</div>
+              <div style={{fontSize:13,marginBottom:8}}>
+                {pendingImports>0
+                  ? `${pendingImports} file import masih menunggu approval Asman. Data akan tampil setelah import disetujui.`
+                  : "Belum ada record kapasitas live. Import file KAPASITAS GUDANG UIT JBM.xlsx melalui Master Data → Master Gudang."}
+              </div>
+              <div style={{fontSize:11,marginBottom:20,color:C.muted}}>Sumber halaman ini adalah data import yang sudah berstatus disetujui, bukan file draft.</div>
               {canEdit && <button style={sty.btn("primary")} onClick={()=>{setTab("master");setStockSubTab("gudang");}}>📥 Buka Master Gudang untuk Import</button>}
             </div>
           ) : (

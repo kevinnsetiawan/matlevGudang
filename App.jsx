@@ -427,6 +427,10 @@ export default function PLNWarehouse() {
   const lastSyncErrorToastRef = useRef(0);
 
   useEffect(() => {
+    // Tabel master memakai RLS authenticated. Tunggu sesi/profil selesai dipulihkan;
+    // kalau dipanggil saat mount sebagai anon, Supabase mengembalikan daftar kosong
+    // dan data remote (termasuk warehouse_capacity) tidak pernah dimuat ulang.
+    if (authLoading || !currentUser) return;
     async function loadCloud() {
       setLoading(true);
       const cs = await CLOUD.get("pln_stocks_v4");
@@ -612,7 +616,7 @@ export default function PLNWarehouse() {
       setLoading(false);
     }
     loadCloud();
-  }, []);
+  }, [authLoading, currentUser?.id]);
 
   // saveToCloud now takes an overrides object. Any field not passed falls back
   // to the latest React state via stateRef (always up to date, avoids stale
@@ -4461,6 +4465,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="kapasitasGudang" && (
           <KapasitasGudangTab
             gudangCapacityList={gudangCapacityList}
+            gudangCapacityImports={gudangCapacityImports}
             gudangList={gudangList}
             subGudangList={subGudangList}
             lokasiList={lokasiList}
