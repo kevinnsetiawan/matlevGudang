@@ -6892,9 +6892,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {txnModal && txnForm && txnForm.docType==="TUG5" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
           <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-5 — Daftar Permintaan Barang</h3>
-              <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-5/...</span>
+            <div style={sty.modalHeader}>
+              <span style={{fontWeight:800,fontSize:15}}>Formulir TUG-5 — Daftar Permintaan Barang</span>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"white",background:"rgba(255,255,255,0.18)",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap"}}>No: {docSeq}.TUG-5/...</span>
+                <button onClick={()=>setTxnModal(false)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button>
+              </div>
             </div>
             {txnForm.sourceType==="ULTG" ? (
               <>
@@ -7034,9 +7037,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {txnModal && txnForm && (txnForm.docType==="TUG9" || txnForm.docType==="TUG8") && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
           <div style={{...sty.card,width:680,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <h3 style={{fontSize:18,fontWeight:800}}>Formulir {txnForm.docType.replace("TUG","TUG-")} — {txnForm.docType==="TUG9"?"Bon Pemakaian":"Pemakaian Unit Lain"}</h3>
-              <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.{txnForm.docType.replace("TUG","TUG-")}/...</span>
+            <div style={sty.modalHeader}>
+              <span style={{fontWeight:800,fontSize:15}}>Formulir {txnForm.docType.replace("TUG","TUG-")} — {txnForm.docType==="TUG9"?"Bon Pemakaian":"Pemakaian Unit Lain"}</span>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"white",background:"rgba(255,255,255,0.18)",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap"}}>No: {docSeq}.{txnForm.docType.replace("TUG","TUG-")}/...</span>
+                <button onClick={()=>setTxnModal(false)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button>
+              </div>
             </div>
             <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Transaksi akan PENDING sampai disetujui TL Logistik / Asman.</div>
 
@@ -7160,9 +7166,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {txnModal && txnForm && txnForm.docType==="TUG10" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
           <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-10 — Bon Pengembalian</h3>
-              <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-10/...</span>
+            <div style={sty.modalHeader}>
+              <span style={{fontWeight:800,fontSize:15}}>Formulir TUG-10 — Bon Pengembalian</span>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"white",background:"rgba(255,255,255,0.18)",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap"}}>No: {docSeq}.TUG-10/...</span>
+                <button onClick={()=>{setTxnModal(false);setEditingDraftTxnId(null);}} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button>
+              </div>
             </div>
             <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Transaksi akan PENDING sampai disetujui TL Logistik / Asman. Stok akan BERTAMBAH saat disetujui.</div>
 
@@ -7283,9 +7292,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {txnModal && txnForm && txnForm.docType==="TUG3" && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
           <div style={{...sty.card,width:700,maxWidth:"100%",maxHeight:"92vh",overflowY:"auto"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <h3 style={{fontSize:18,fontWeight:800}}>Formulir TUG-3 Karantina — Bon Penerimaan</h3>
-              <span style={{fontSize:11,color:"#0098da",fontWeight:700}}>No: {docSeq}.TUG-3/...</span>
+            <div style={sty.modalHeader}>
+              <span style={{fontWeight:800,fontSize:15}}>Formulir TUG-3 Karantina — Bon Penerimaan</span>
+              <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,color:"white",background:"rgba(255,255,255,0.18)",borderRadius:6,padding:"3px 9px",whiteSpace:"nowrap"}}>No: {docSeq}.TUG-3/...</span>
+                <button onClick={()=>setTxnModal(false)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button>
+              </div>
             </div>
             <div style={{background:"#dbeafe",border:`1px solid #93c5fd`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#1e40af",marginBottom:16}}>ℹ️ Setelah diajukan: TL Logistik approve → lanjut isi TUG-4 → Manager approve → lengkapi lampiran → Asman approve → stok masuk gudang.</div>
 
