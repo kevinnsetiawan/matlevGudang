@@ -1,6 +1,8 @@
 # WARNOTO — CLAUDE.md project
 
-**Benang merah lintas-vendor ada di `HANDOFF.md` — WAJIB baca di awal sesi, perbarui setelah tiap tahap signifikan.**
+**Benang merah lintas-vendor ada di `HANDOFF.md` — WAJIB baca di awal sesi dan lanjutkan dari "Langkah berikutnya".**
+
+`HANDOFF.md` harus ringkas dan diperbarui hanya saat status material berubah. Riwayat hanya untuk pergantian vendor/shift, maksimal 2 entri terakhir; saat menambah entri ketiga, hapus yang tertua. Jangan membuat log per sub-langkah.
 
 ## Tujuan project
 Aplikasi manajemen gudang PLN (React + Vite 4 + Supabase, deploy Vercel).

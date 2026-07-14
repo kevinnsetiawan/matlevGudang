@@ -42,21 +42,22 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangList, subGudangLi
    .sort((a,b)=>b.util-a.util);
 
   const TABS = [
-    {id:"dashboard",label:"📊 Dashboard"},
-    {id:"data",label:"📋 Data Kapasitas"},
-    {id:"peta",label:"🗺️ Peta Utilisasi Gudang"},
+    {id:"dashboard",label:"Ringkasan Kapasitas",caption:"KPI dan tingkat utilisasi"},
+    {id:"data",label:"Data Kapasitas Gudang",caption:"Daftar luas dan pemakaian"},
+    {id:"peta",label:"Peta Utilisasi",caption:"Sebaran kapasitas gudang"},
   ];
 
   return (
-    <div>
-      <div style={{marginBottom:16}}>
-        <h1 style={{...sty.pageTitle,marginBottom:4}}>📐 Monitoring Kapasitas Gudang</h1>
-        <p style={{color:C.muted,fontSize:13}}>Laporan utilization luas gudang berbasis m2 — UIT JBM</p>
+    <div className="workspace-page capacity-page">
+      <div className="capacity-context">
+        <div><span>Warehouse capacity</span><strong>Data Kapasitas Gudang</strong></div>
+        <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+      <div className="capacity-tabs" role="tablist" aria-label="Tampilan kapasitas gudang">
         {TABS.map(t=>(
-          <button key={t.id} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${subTab===t.id?C.accent:C.border}`,background:subTab===t.id?C.accent:"white",color:subTab===t.id?"white":C.muted,fontWeight:700,fontSize:12,cursor:"pointer"}}
-            onClick={()=>setSubTab(t.id)}>{t.label}</button>
+          <button key={t.id} className={subTab===t.id?"is-active":""} onClick={()=>setSubTab(t.id)} role="tab" aria-selected={subTab===t.id}>
+            <strong>{t.label}</strong><span>{t.caption}</span>
+          </button>
         ))}
       </div>
 

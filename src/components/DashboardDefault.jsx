@@ -30,19 +30,22 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
   ];
 
   return (
-    <div>
-      <div style={{marginBottom:16}}>
-        <h1 style={sty.pageTitle}>Dashboard Gudang</h1>
-        <p style={{color:C.muted,fontSize:13}}>{WAREHOUSE} • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
+    <div className="dashboard-overview">
+      <div className="dashboard-overview__context">
+        <span>Overview operasional</span>
+        <strong>{WAREHOUSE}</strong>
+        <small>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</small>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14,marginBottom:20}}>
+      <div className="dashboard-overview__kpis">
         {kpiCards.map((s,i)=>(
-          <div key={i} style={{...sty.card,borderLeft:`4px solid ${s.color}`,cursor:"pointer"}} onClick={()=>setDashModal(s.key)} title="Klik untuk lihat ringkasan">
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <div><div style={{fontSize:20,fontWeight:900,color:s.color}}>{s.val}</div><div style={{fontSize:12,fontWeight:700,marginTop:2}}>{s.label}</div><div style={{fontSize:10,color:C.muted}}>{s.sub}</div></div>
-              <div style={{fontSize:26}}>{s.icon}</div>
+          <button key={i} className="dashboard-overview-kpi" style={{"--dashboard-kpi-color":s.color}} onClick={()=>setDashModal(s.key)} title="Klik untuk lihat ringkasan">
+            <div className="dashboard-overview-kpi__copy">
+              <span>{s.label}</span>
+              <strong>{s.val}</strong>
+              <small>{s.sub}</small>
             </div>
-          </div>
+            <div className="dashboard-overview-kpi__icon">{s.icon}</div>
+          </button>
         ))}
       </div>
       <KPISaldoCards stocks={stocks} C={C} sty={sty}/>
@@ -66,7 +69,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
         const gapVal = cadang.reduce((s,r)=>s+r.gapQty*(r.harga||0),0);
         const topGap = [...cadang].filter(r=>r.gapQty>0).sort((a,b)=>b.gapQty*b.harga-a.gapQty*a.harga).slice(0,3);
         return (
-          <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid #7c3aed`}}>
+          <div className="dashboard-overview__analysis" style={{...sty.card}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
               <div style={{fontWeight:800,fontSize:13,color:"#7c3aed"}}>🔩 Material Cadang — Ringkasan Analisis</div>
               <button style={{...sty.btn("ghost","sm"),fontSize:11}} onClick={()=>setTab("forecastStok")}>Lihat detail →</button>
@@ -92,7 +95,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
         );
       })()}
       <CollapsibleSection id="aktivitas" title="Aktivitas Terbaru & Rencana Kedatangan" icon="🗂️" C={C}>
-      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16,marginBottom:0}}>
+      <div className="dashboard-overview__activity">
         <div>
           <PendingWidget myPendingApprovals={myPendingApprovals} C={C} sty={sty} setTab={setTab}/>
           <div style={sty.card}>

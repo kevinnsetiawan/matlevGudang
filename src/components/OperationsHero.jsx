@@ -2,15 +2,8 @@
 // konsisten tanpa menduplikasi blok visual besar di masing-masing komponen.
 export function OperationsHero({ eyebrow, title, description, scope, metrics, controls }) {
   return (
-    <section className="operations-hero">
-      <div className="operations-hero__top">
-        <div className="operations-hero__copy">
-          <div className="operations-hero__eyebrow"><span></span>{eyebrow}</div>
-          <h1>{title}</h1>
-          <p>{description}</p>
-        </div>
-        {controls && <div className="operations-hero__controls">{controls}</div>}
-      </div>
+    <section className="operations-hero operations-hero--summary-only" aria-label={`${eyebrow}: ${title}`}>
+      {controls && <div className="operations-hero__controls">{controls}</div>}
       <div className="operations-hero__footer">
         <div className="operations-hero__metrics">
           {metrics.map(metric=>(

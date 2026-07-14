@@ -1,6 +1,12 @@
 # WARNOTO — panduan untuk Codex (Vendor B)
 
-Ikuti kontrak dua-vendor di `~/.codex/AGENTS.md`: **baca `HANDOFF.md` dulu**, lanjutkan dari "Langkah berikutnya", perbarui HANDOFF.md setelah tiap tahap.
+Ikuti kontrak dua-vendor di `~/.codex/AGENTS.md`: **baca `HANDOFF.md` dulu** dan lanjutkan dari "Langkah berikutnya".
+
+## Aturan HANDOFF ringkas (override khusus project ini)
+- `HANDOFF.md` hanya berisi benang merah: tujuan, keputusan yang masih mengikat, status singkat, langkah berikutnya, blocker, dan perintah verifikasi.
+- Perbarui hanya bila status/keputusan/blocker/langkah berikutnya berubah secara material; jangan mencatat setiap sub-langkah.
+- Riwayat hanya ditambah saat pergantian vendor/shift. Simpan maksimal **2 entri shift terakhir**; sebelum menambah entri ketiga, hapus entri tertua.
+- Satu entri riwayat maksimal satu baris ringkas. Aturan ini menggantikan ketentuan log append-only/detail pada kontrak global untuk project WARNOTO.
 
 ## Fakta project yang mengikat
 - Aplikasi gudang PLN (React + Vite 4 + Supabase). Entry: `App.jsx` (masih besar) + komponen hasil split di `src/`.

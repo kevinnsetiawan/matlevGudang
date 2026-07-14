@@ -20,7 +20,6 @@ export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganLis
       <div style={{marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <h1 style={sty.pageTitle}>Dashboard Operasional — Asman Konstruksi</h1>
             <p style={{color:C.muted,fontSize:13}}>UPT Surabaya • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
           </div>
           <span style={{padding:"4px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8",fontSize:11,fontWeight:700}}>UPT Surabaya</span>

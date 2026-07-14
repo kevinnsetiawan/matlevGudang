@@ -740,7 +740,6 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={sty.pageTitle}>📋 Stock Opname</h1>
           <p style={{color:C.muted,fontSize:13}}>Dilakukan 1× per semester — bandingkan data sistem vs lapangan & SAP</p>
         </div>
         {hasRole(currentUser, "ADMIN","TL") && (

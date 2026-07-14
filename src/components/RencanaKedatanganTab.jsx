@@ -48,7 +48,6 @@ export function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, st
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
-          <h1 style={sty.pageTitle}>📅 Rencana Kedatangan Barang</h1>
           <p style={{color:C.muted,fontSize:13}}>Input dari surat rencana pengiriman material vendor — AI ekstrak otomatis</p>
         </div>
         {canEdit && <button style={sty.btn("primary")} onClick={newForm}>+ Input Rencana Baru</button>}

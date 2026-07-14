@@ -30,6 +30,7 @@ import { AttbDashboardSummary } from "./src/components/AttbDashboardSummary.jsx"
 import { DashboardDefault } from "./src/components/DashboardDefault.jsx";
 import { DashboardAsman } from "./src/components/DashboardAsman.jsx";
 import { DashboardManager } from "./src/components/DashboardManager.jsx";
+import { DashboardMaturityBanner } from "./src/components/DashboardMaturityBanner.jsx";
 import { StockCountTab } from "./src/components/StockCountTab.jsx";
 import { RencanaKedatanganTab } from "./src/components/RencanaKedatanganTab.jsx";
 import { KapasitasGudangTab } from "./src/components/KapasitasGudangTab.jsx";
@@ -48,6 +49,7 @@ import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
 import { SidebarNavItem } from "./src/components/SidebarNavItem.jsx";
+import { SidebarIcon } from "./src/components/SidebarIcon.jsx";
 import { GudangCoordConfigPanel } from "./src/components/GudangCoordConfigPanel.jsx";
 import { SearchableSelect } from "./src/components/SearchableSelect.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
@@ -215,7 +217,7 @@ export default function PLNWarehouse() {
   const [lastSaved, setLastSaved] = useState(null);
 
   const [tab, setTab] = useState("dashboard");
-  const [dashTab, setDashTab] = useState("ringkasan"); // sub-tab Dashboard: ringkasan | peta | kinerja | detail
+  const [dashTab, setDashTab] = useState("ringkasan"); // ringkasan terpadu | overview gudang
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
   const [stockPage, setStockPage] = useState(1);
@@ -305,12 +307,39 @@ export default function PLNWarehouse() {
   const [opnameSubTab, setOpnameSubTab] = useState("opname"); // "opname" | "stockCount"
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth <= 768);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // drawer sidebar di HP
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth <= 1120);
+  const compactViewportRef = useRef(typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth <= 1120);
   const [stockGudangFilter, setStockGudangFilter] = useState({}); // UI-only: stockId -> gudangId terpilih, untuk menyaring opsi dropdown Blok
   useEffect(() => {
-    function onResize() { setIsMobile(window.innerWidth <= 768); }
+    function onResize() {
+      const nextMobile = window.innerWidth <= 768;
+      const nextCompact = !nextMobile && window.innerWidth <= 1120;
+      setIsMobile(nextMobile);
+      if (nextCompact !== compactViewportRef.current) {
+        setSidebarCollapsed(nextCompact);
+        compactViewportRef.current = nextCompact;
+      }
+      if (!nextMobile) setMobileMenuOpen(false);
+    }
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+  useEffect(() => {
+    if (!accountMenuOpen) return undefined;
+    function closeAccountMenu(event) {
+      if (event.key === "Escape" || (event.type === "mousedown" && !accountMenuRef.current?.contains(event.target))) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", closeAccountMenu);
+    document.addEventListener("keydown", closeAccountMenu);
+    return () => {
+      document.removeEventListener("mousedown", closeAccountMenu);
+      document.removeEventListener("keydown", closeAccountMenu);
+    };
+  }, [accountMenuOpen]);
 
   // Auto-sync ke Supabase setiap kali ada transaksi TUG yang berubah (approve/reject/dll),
   // supaya tidak perlu klik tombol "Sync ke Supabase" manual. Di-debounce 2.5 detik supaya
@@ -382,7 +411,7 @@ export default function PLNWarehouse() {
   const [txnForm, setTxnForm] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Selamat datang di Sistem TUG Digital ${WAREHOUSE}! ⚡\n\nSaya siap membantu analisa stok, forecast kebutuhan material, dan rekomendasi pengadaan.\n\nTanya apa saja!` }]);
+  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang ${WAREHOUSE}.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [ragSyncing, setRagSyncing] = useState(false);
@@ -715,7 +744,7 @@ export default function PLNWarehouse() {
 
   // Peta Wilayah Gudang UPT Surabaya — render/refresh marker Leaflet tiap kali Dashboard dibuka atau data gudang berubah
   useEffect(() => {
-    if (tab !== "dashboard" || dashTab !== "peta" || !petaWilayahDivRef.current || typeof window.L === "undefined") return;
+    if (tab !== "dashboard" || dashTab !== "ringkasan" || !petaWilayahDivRef.current || typeof window.L === "undefined") return;
     // Tab Dashboard di-unmount/mount ulang tiap pindah tab, jadi <div> peta selalu jadi node DOM baru —
     // kalau instance map lama masih nempel ke container lama (sudah lepas dari DOM), buang & buat ulang.
     if (petaWilayahMapRef.current && petaWilayahMapRef.current.getContainer() !== petaWilayahDivRef.current) {
@@ -3677,7 +3706,7 @@ export default function PLNWarehouse() {
       ragContextText = `(Pencarian Knowledge Base gagal: ${e.message})`;
     }
 
-    const systemPrompt = `Kamu adalah AI Agent sistem manajemen gudang PLN bernama WARNOTO untuk ${WAREHOUSE}.
+    const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk ${WAREHOUSE}.
 
 INSTRUKSI FORMAT JAWABAN:
 Selalu jawab dalam format terstruktur berikut (gunakan emoji dan baris baru):
@@ -3977,34 +4006,52 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
   const isUltgRole = hasRole(currentUser, ...ULTG_ROLES);
   const navItems = isPengadaan ? [
-    {id:"dashboard",icon:"📊",label:"Dashboard"},
-    {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
+    {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
+    {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
   ] : isUltgRole ? [
-    {id:"dashboard",icon:"📊",label:"Dashboard"},
-    {id:"stock",icon:"📦",label:"Data Stok"},
-    {id:"transaction",icon:"🔄",label:"TUG"},
-    {id:"approval",icon:"✅",label:"Approval",badge: hasRole(currentUser, "MGR_ULTG") ? myPendingApprovals.length : 0},
-    {id:"heavyEquipment",icon:"🚜",label:"Alat Berat"},
-    {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
-    {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
-    {id:"ai",icon:"🤖",label:"AI Agent"},
+    {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
+    {id:"stock",icon:<SidebarIcon name="stock"/>,label:"Data Stok"},
+    {id:"kapasitasGudang",icon:<SidebarIcon name="capacity"/>,label:"Kapasitas Gudang"},
+    {id:"transaction",icon:<SidebarIcon name="transaction"/>,label:"TUG"},
+    {id:"approval",icon:<SidebarIcon name="approval"/>,label:"Approval",badge: hasRole(currentUser, "MGR_ULTG") ? myPendingApprovals.length : 0},
+    {id:"heavyEquipment",icon:<SidebarIcon name="equipment"/>,label:"Alat Berat"},
+    {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
+    {id:"forecastStok",icon:<SidebarIcon name="forecast"/>,label:"Forecast Stok"},
+    {id:"ai",icon:<SidebarIcon name="ai"/>,label:"Pak War"},
   ] : [
-    {id:"dashboard",icon:"📊",label:"Dashboard"},
-    {id:"stock",icon:"📦",label:"Data Stok"},
-    {id:"master",icon:"🗂️",label:"Master Data"},
-    {id:"transaction",icon:"🔄",label:"TUG"},
-    ...(hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN") ? [{id:"approval",icon:"✅",label:"Approval",badge:myPendingApprovals.length + (hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0) + (hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (hasRole(currentUser, "ADMIN","TL") ? ultgPengajuanUntukAdopt.length : 0) + (hasRole(currentUser, "TL") ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0) + (hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0)}] : []),
-    {id:"heavyEquipment",icon:"🚜",label:"Alat Berat",badge:(hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
-    {id:"attb",icon:"🗂️",label:"ATTB",badge:attbPendingCount+attbBelumLanjutCount},
-    {id:"opname",icon:"📋",label:"Stock Opname & Count",badge:stockCountPendingCount},
-    {id:"rencana",icon:"📅",label:"Rencana Kedatangan"},
-    {id:"kapasitasGudang",icon:"📐",label:"Kapasitas Gudang"},
-    {id:"forecastStok",icon:"📈",label:"Forecast Stok"},
-    {id:"ai",icon:"🤖",label:"AI Agent"},
+    {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
+    {id:"stock",icon:<SidebarIcon name="stock"/>,label:"Data Stok"},
+    {id:"kapasitasGudang",icon:<SidebarIcon name="capacity"/>,label:"Kapasitas Gudang"},
+    {id:"master",icon:<SidebarIcon name="master"/>,label:"Master Data"},
+    {id:"transaction",icon:<SidebarIcon name="transaction"/>,label:"TUG"},
+    ...(hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN") ? [{id:"approval",icon:<SidebarIcon name="approval"/>,label:"Approval",badge:myPendingApprovals.length + (hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0) + (hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0) + (hasRole(currentUser, "ADMIN","TL") ? ultgPengajuanUntukAdopt.length : 0) + (hasRole(currentUser, "TL") ? stocks.filter(s=>(s.lokasiMovePending&&s.lokasiMoveApprover==="TL")||s.editPending||s.deletePending).length : 0) + (hasRole(currentUser, "ASMAN") ? stocks.filter(s=>s.lokasiMovePending&&s.lokasiMoveApprover==="ASMAN").length : 0) + (hasRole(currentUser, "ASMAN") ? opnameList.filter(o=>o.status==="PENDING_ASMAN").length : 0) + (hasRole(currentUser, "MANAGER") ? opnameList.filter(o=>o.status==="PENDING_MANAGER").length : 0) + (hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0)}] : []),
+    {id:"heavyEquipment",icon:<SidebarIcon name="equipment"/>,label:"Alat Berat",badge:(hasRole(currentUser, "ASMAN")?heavyEquipmentPendingCount:0)+heavyEquipmentOverdueCount},
+    {id:"attb",icon:<SidebarIcon name="attb"/>,label:"ATTB",badge:attbPendingCount+attbBelumLanjutCount},
+    {id:"opname",icon:<SidebarIcon name="opname"/>,label:"Stock Opname & Count",badge:stockCountPendingCount},
+    {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
+    {id:"forecastStok",icon:<SidebarIcon name="forecast"/>,label:"Forecast Stok"},
+    {id:"ai",icon:<SidebarIcon name="ai"/>,label:"Pak War"},
   ];
 
+  const sidebarCompact = !isMobile && sidebarCollapsed;
+  const masterPageTitle = stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi":stockSubTab==="akun"?"Kelola Akun":stockSubTab==="migrasi"?"Migrasi Data SAP / Non-SAP":"Master Gudang";
+  const pageMeta = {
+    dashboard: {eyebrow:"Operations Overview",title:hasRole(currentUser,"MANAGER")?"Dashboard Eksekutif":hasRole(currentUser,"ASMAN")?"Dashboard Operasional":"Dashboard Gudang"},
+    stock: {eyebrow:"Inventory Control",title:"Data Stok Gudang"},
+    master: {eyebrow:"Master Data",title:masterPageTitle},
+    transaction: {eyebrow:(TUG_UI[tugSubTab]||{}).code||"TUG",title:(TUG_UI[tugSubTab]||{}).title||"Transaksi TUG"},
+    approval: {eyebrow:"Decision Center",title:"Approval"},
+    heavyEquipment: {eyebrow:"Fleet Operations",title:"Alat Berat & Peminjaman"},
+    attb: {eyebrow:"Asset Disposal Governance",title:"ATTB — Penghapusan Aset"},
+    opname: {eyebrow:"Inventory Assurance",title:opnameSubTab==="stockCount"?"Stock Count":"Stock Opname"},
+    rencana: {eyebrow:"Inbound Planning",title:"Rencana Kedatangan Barang"},
+    kapasitasGudang: {eyebrow:"Warehouse Utilization",title:"Monitoring Kapasitas Gudang"},
+    forecastStok: {eyebrow:"Inventory Forecast",title:"Forecast Stok"},
+    ai: {eyebrow:"Decision Support",title:"Pak War — Asisten Gudang"},
+  }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
+
   return (
-    <div style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
+    <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
       {/* Di HP: toast dipusatkan & dibatasi lebar (bukan nempel kanan tanpa batas
           lebar) supaya pesan panjang tidak terpotong/keluar layar. */}
       {toast && (
@@ -4017,29 +4064,41 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
       {/* Overlay gelap di belakang drawer sidebar saat dibuka di HP — tap di luar drawer untuk menutup */}
       {isMobile && mobileMenuOpen && (
-        <div onClick={()=>setMobileMenuOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1400}}/>
+        <div className="app-sidebar-overlay" onClick={()=>setMobileMenuOpen(false)}/>
       )}
 
       {/* SIDEBAR — di desktop tetap menempel di kiri; di HP jadi drawer yang slide-in dari kiri,
           disembunyikan (translateX(-100%)) sampai tombol ☰ ditekan. */}
-      <div style={{
-        width:240, background:C.sidebar, display:"flex", flexDirection:"column", flexShrink:0,
+      <aside className={`app-sidebar${sidebarCompact?" is-collapsed":""}${isMobile?" is-mobile":""}${mobileMenuOpen?" is-open":""}`} style={{
+        width:isMobile?"min(86vw, 286px)":sidebarCompact?76:260, background:C.sidebar, display:"flex", flexDirection:"column", flexShrink:0,
         ...(isMobile ? {
           position:"fixed", top:0, left:0, bottom:0, zIndex:1500,
           transform:mobileMenuOpen ? "translateX(0)" : "translateX(-100%)",
-          transition:"transform 0.25s ease", boxShadow:"4px 0 16px rgba(0,0,0,0.3)",
+          boxShadow:"8px 0 32px rgba(0,0,0,0.28)",
         } : {}),
-      }}>
-        <div style={{padding:"14px 16px",borderBottom:"1px solid rgba(255,255,255,0.12)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:11}}>
-            <div style={{width:38,height:38,background:"white",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:5,boxShadow:"0 2px 8px rgba(0,0,0,0.22)"}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
-            <div style={{minWidth:0,lineHeight:1.15}}>
+      }} aria-label="Navigasi utama">
+        <div className="app-sidebar__header" style={{padding:sidebarCompact?"14px 12px":"14px",borderBottom:"1px solid rgba(255,255,255,0.12)"}}>
+          {sidebarCompact ? (
+            <button className="app-sidebar__brand-button" onClick={()=>setSidebarCollapsed(false)} title="Buka sidebar" aria-label="Buka sidebar">
+              <img src={PLN_LOGO_DATA_URI} alt="Logo PLN"/>
+            </button>
+          ) : (
+          <div style={{display:"flex",alignItems:"center",gap:11,minWidth:0}}>
+            <div className="app-sidebar__brand-mark" style={{width:38,height:38,background:"white",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:5,boxShadow:"0 2px 8px rgba(0,0,0,0.22)"}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
+            <div style={{minWidth:0,lineHeight:1.15,flex:1}}>
               <div style={{color:"white",fontWeight:800,fontSize:17,letterSpacing:".5px"}}>WARNOTO</div>
               <div style={{color:"rgba(255,255,255,0.6)",fontSize:10,letterSpacing:".5px",textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{UPT}</div>
             </div>
+            <button
+              className="app-sidebar__toggle"
+              onClick={()=>isMobile?setMobileMenuOpen(false):setSidebarCollapsed(v=>!v)}
+              title={isMobile?"Tutup menu":"Tutup sidebar"}
+              aria-label={isMobile?"Tutup menu":"Tutup sidebar"}
+            ><SidebarIcon name={isMobile?"close":"collapse"} size={17}/></button>
           </div>
+          )}
         </div>
-        <div style={{flex:1,padding:"12px 8px",overflowY:"auto"}}>
+        <div className="app-sidebar__nav" style={{flex:1,padding:sidebarCompact?"12px 10px":"12px 9px",overflowY:"auto",overflowX:"hidden"}}>
           {navItems.map(n => {
             if (n.id === "transaction") {
               // TUG item: accordion parent — click expands, sub-items navigate
@@ -4049,21 +4108,23 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   <button
                     className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
                     style={{minHeight:isMobile?44:undefined}}
-                    onClick={()=>setTugExpanded(e=>!e)}
+                    onClick={()=>{ if(sidebarCompact) { setSidebarCollapsed(false); setTugExpanded(true); } else setTugExpanded(e=>!e); }}
+                    title={sidebarCompact?n.label:undefined}
+                    aria-label={n.label}
                   >
                     <span className="sidebar-nav-item__icon">{n.icon}</span>
-                    <span className="sidebar-nav-item__label">{n.label}</span>
-                    <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:tugExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
+                    {!sidebarCompact && <span className="sidebar-nav-item__label">{n.label}</span>}
+                    {!sidebarCompact && <span className="sidebar-nav-item__chevron" style={{transform:tugExpanded?"rotate(90deg)":"rotate(0deg)"}}><SidebarIcon name="chevron" size={14}/></span>}
                   </button>
-                  {tugExpanded && (
-                    <div style={{marginBottom:4}}>
+                  {tugExpanded && !sidebarCompact && (
+                    <div className="sidebar-subnav" style={{marginBottom:4}}>
                       {(isUltgRole ? [
-                        {id:"permintaan",icon:"📋",label:"Minta Barang",defaultSub:"TUG5"},
+                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Minta Barang",defaultSub:"TUG5"},
                       ] : [
-                        {id:"penerimaan",icon:"📥",label:"Barang Masuk",defaultSub:"TUG3"},
-                        {id:"pengeluaran",icon:"📤",label:"Barang Keluar",defaultSub:"TUG9"},
-                        {id:"permintaan",icon:"📋",label:"Minta Barang",defaultSub:"TUG5"},
-                        {id:"laporan",icon:"📊",label:"Laporan",defaultSub:"TUG15"},
+                        {id:"penerimaan",icon:<SidebarIcon name="inbound" size={16}/>,label:"Barang Masuk",defaultSub:"TUG3"},
+                        {id:"pengeluaran",icon:<SidebarIcon name="outbound" size={16}/>,label:"Barang Keluar",defaultSub:"TUG9"},
+                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Minta Barang",defaultSub:"TUG5"},
+                        {id:"laporan",icon:<SidebarIcon name="report" size={16}/>,label:"Laporan",defaultSub:"TUG15"},
                       ]).map(sub=>{
                         const subActive = isActive && tugGroup===sub.id;
                         return (
@@ -4089,21 +4150,23 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   <button
                     className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
                     style={{minHeight:isMobile?44:undefined}}
-                    onClick={()=>setMasterExpanded(e=>!e)}
+                    onClick={()=>{ if(sidebarCompact) { setSidebarCollapsed(false); setMasterExpanded(true); } else setMasterExpanded(e=>!e); }}
+                    title={sidebarCompact?n.label:undefined}
+                    aria-label={n.label}
                   >
                     <span className="sidebar-nav-item__icon">{n.icon}</span>
-                    <span className="sidebar-nav-item__label">{n.label}</span>
-                    <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:masterExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
+                    {!sidebarCompact && <span className="sidebar-nav-item__label">{n.label}</span>}
+                    {!sidebarCompact && <span className="sidebar-nav-item__chevron" style={{transform:masterExpanded?"rotate(90deg)":"rotate(0deg)"}}><SidebarIcon name="chevron" size={14}/></span>}
                   </button>
-                  {masterExpanded && (
-                    <div style={{marginBottom:4}}>
+                  {masterExpanded && !sidebarCompact && (
+                    <div className="sidebar-subnav" style={{marginBottom:4}}>
                       {[
-                        {id:"katalog",icon:"📑",label:"Master Katalog"},
-                        {id:"satpam",icon:"🛡️",label:"Satpam"},
-                        {id:"timmutu",icon:"👥",label:"Tim Mutu"},
-                        {id:"organisasi",icon:"🏢",label:"Struktur Organisasi"},
-                        {id:"gudang",icon:"🏭",label:"Master Gudang"},
-        ...(hasRole(currentUser, "ADMIN") ? [{id:"akun",icon:"👤",label:"Kelola Akun"},{id:"migrasi",icon:"🔄",label:"Migrasi Data"}] : []),
+                        {id:"katalog",icon:<SidebarIcon name="catalog" size={16}/>,label:"Master Katalog"},
+                        {id:"satpam",icon:<SidebarIcon name="shield" size={16}/>,label:"Satpam"},
+                        {id:"timmutu",icon:<SidebarIcon name="users" size={16}/>,label:"Tim Mutu"},
+                        {id:"organisasi",icon:<SidebarIcon name="organization" size={16}/>,label:"Struktur Organisasi"},
+                        {id:"gudang",icon:<SidebarIcon name="warehouse" size={16}/>,label:"Master Gudang"},
+        ...(hasRole(currentUser, "ADMIN") ? [{id:"akun",icon:<SidebarIcon name="user" size={16}/>,label:"Kelola Akun"},{id:"migrasi",icon:<SidebarIcon name="migrate" size={16}/>,label:"Migrasi Data"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (
@@ -4129,18 +4192,20 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   <button
                     className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
                     style={{minHeight:isMobile?44:undefined}}
-                    onClick={()=>setOpnameExpanded(e=>!e)}
+                    onClick={()=>{ if(sidebarCompact) { setSidebarCollapsed(false); setOpnameExpanded(true); } else setOpnameExpanded(e=>!e); }}
+                    title={sidebarCompact?n.label:undefined}
+                    aria-label={n.label}
                   >
                     <span className="sidebar-nav-item__icon">{n.icon}</span>
-                    <span className="sidebar-nav-item__label">{n.label}</span>
-                    {n.badge>0 && <span className="sidebar-nav-item__badge">{n.badge}</span>}
-                    <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:opnameExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
+                    {!sidebarCompact && <span className="sidebar-nav-item__label">{n.label}</span>}
+                    {n.badge>0 && <span className={`sidebar-nav-item__badge${sidebarCompact?" is-compact":""}`}>{n.badge}</span>}
+                    {!sidebarCompact && <span className="sidebar-nav-item__chevron" style={{transform:opnameExpanded?"rotate(90deg)":"rotate(0deg)"}}><SidebarIcon name="chevron" size={14}/></span>}
                   </button>
-                  {opnameExpanded && (
-                    <div style={{marginBottom:4}}>
+                  {opnameExpanded && !sidebarCompact && (
+                    <div className="sidebar-subnav" style={{marginBottom:4}}>
                       {[
-                        {id:"opname",icon:"📋",label:"Stock Opname"},
-                        {id:"stockCount",icon:"📊",label:"Stock Count",badge:stockCountPendingCount},
+                        {id:"opname",icon:<SidebarIcon name="opname" size={16}/>,label:"Stock Opname"},
+                        {id:"stockCount",icon:<SidebarIcon name="report" size={16}/>,label:"Stock Count",badge:stockCountPendingCount},
                       ].map(sub=>{
                         const subActive = isActive && opnameSubTab===sub.id;
                         return (
@@ -4164,43 +4229,80 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 item={n}
                 active={tab===n.id}
                 isMobile={isMobile}
+                collapsed={sidebarCompact}
                 onClick={()=>{setTab(n.id); if(n.id!=="transaction") setTugExpanded(false); if(n.id!=="master") setMasterExpanded(false); if(n.id!=="opname") setOpnameExpanded(false); setMobileMenuOpen(false);}}
               />
             );
           })}
         </div>
-        <div style={{padding:"8px 16px",borderTop:"1px solid rgba(255,255,255,0.1)",fontSize:10,color:"rgba(255,255,255,0.45)"}}>
-          {cloudSaving ? "☁️ Menyimpan..." : lastSaved ? `☁️ Tersimpan` : "☁️ Cloud Storage Aktif"}
+        <div className="app-sidebar__cloud" style={{padding:sidebarCompact?"10px":"8px 16px",borderTop:"1px solid rgba(255,255,255,0.1)",fontSize:10,color:"rgba(255,255,255,0.58)"}} title={sidebarCompact?(cloudSaving?"Menyimpan...":lastSaved?"Tersimpan":"Cloud Storage Aktif"):undefined}>
+          <SidebarIcon name="cloud" size={16}/>
+          {!sidebarCompact && <span>{cloudSaving ? "Menyimpan..." : lastSaved ? "Tersimpan" : "Cloud Storage Aktif"}</span>}
         </div>
 
-        <div style={{padding:"12px 16px",borderTop:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,background:"rgba(255,255,255,0.2)",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"white",fontSize:13,flexShrink:0}}>{currentUser.avatar}</div>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{color:"white",fontWeight:600,fontSize:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{currentUser.name}</div>
-            <div style={{color:"rgba(255,255,255,0.5)",fontSize:10}}>{ROLES[currentUser.role]}</div>
-          </div>
-          <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:14}} onClick={openGantiPassword} title="Ganti Password">🔑</button>
-          <button style={{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:16}} onClick={handleLogout} title="Logout">⬅</button>
-        </div>
-      </div>
+      </aside>
 
       {/* MAIN */}
-      <div style={{flex:1,overflowY:"auto",padding:isMobile?16:24, width:isMobile?"100%":"auto", minWidth:0}}>
-        {isMobile && (
-          <button
-            onClick={()=>setMobileMenuOpen(true)}
-            style={{display:"flex",alignItems:"center",gap:8,background:C.sidebar,color:"white",border:"none",borderRadius:8,padding:"10px 14px",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:16,minHeight:44}}
-          >☰ Menu</button>
-        )}
+      <main className="app-main" style={{flex:1,overflowY:"auto",width:isMobile?"100%":"auto",minWidth:0}}>
+          <header className="app-workspace-bar">
+            {isMobile && (
+            <button
+              className="app-workspace-bar__menu"
+              onClick={()=>setMobileMenuOpen(true)}
+              aria-label="Buka menu"
+            ><SidebarIcon name="menu" size={20}/></button>
+            )}
+            <div className="app-workspace-bar__title">
+              <span>{pageMeta.eyebrow}</span>
+              <strong>{pageMeta.title}</strong>
+            </div>
+            <div className="app-account" ref={accountMenuRef}>
+              <button className="app-account__trigger" onClick={()=>setAccountMenuOpen(open=>!open)} aria-expanded={accountMenuOpen} aria-haspopup="menu">
+                <span className="app-account__avatar">{currentUser.avatar || currentUser.name?.slice(0,2).toUpperCase()}</span>
+                <span className="app-account__identity">
+                  <small>{UPT}</small>
+                  <strong>{currentUser.name || "Fajar Sutomo"}</strong>
+                </span>
+                <span className={`app-account__chevron${accountMenuOpen?" is-open":""}`}><SidebarIcon name="chevron" size={14}/></span>
+              </button>
+              {accountMenuOpen && (
+                <div className="app-account__menu" role="menu">
+                  <div className="app-account__profile">
+                    <span className="app-account__avatar is-large">{currentUser.avatar || currentUser.name?.slice(0,2).toUpperCase()}</span>
+                    <div><strong>{currentUser.name || "Fajar Sutomo"}</strong><span>{ROLES[currentUser.role]}</span></div>
+                  </div>
+                  <div className="app-account__unit">{UPT}</div>
+                  <button role="menuitem" onClick={()=>{setAccountMenuOpen(false);openGantiPassword();}}><SidebarIcon name="key" size={17}/><span>Ganti Password</span></button>
+                  <button role="menuitem" className="is-danger" onClick={()=>{setAccountMenuOpen(false);handleLogout();}}><SidebarIcon name="logout" size={17}/><span>Logout</span></button>
+                </div>
+              )}
+            </div>
+          </header>
+
+        <div className="app-content" style={{padding:isMobile?16:"clamp(18px, 2vw, 30px)"}}>
 
         {/* DASHBOARD */}
+        {tab==="dashboard" && (
+          <div className="dashboard-command">
+            <DashboardMaturityBanner
+              maturity={maturityAssessments[0]||null}
+              levelLabel={maturityAssessments[0]?MATURITY_LEVELS[maturityAssessments[0].level]:""}
+              warehouse={WAREHOUSE}
+              canAssess={hasRole(currentUser,"ADMIN")}
+              formatDate={fmtDate}
+              onAssess={()=>{const latest=maturityAssessments[0];setMaturityForm({level:latest?.level||3,catatan:"",tanggalAsesmen:Date.now()});setMaturityModal(true);}}
+            />
+            <div className="dashboard-mode-switch" role="tablist" aria-label="Tampilan dashboard">
+              {[{id:"ringkasan",label:"Ringkasan & Kinerja",caption:"KPI, peta, dan prioritas"},{id:"detail",label:"Overview Gudang",caption:"Stok dan aktivitas operasional"}].map(item=>(
+                <button key={item.id} className={dashTab===item.id?"is-active":""} onClick={()=>setDashTab(item.id)} role="tab" aria-selected={dashTab===item.id}>
+                  <strong>{item.label}</strong><span>{item.caption}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {tab==="dashboard" && hasRole(currentUser, "MANAGER") && (
           <>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
-            {[{id:"ringkasan",label:"📊 Ringkasan"},{id:"detail",label:"📦 Detail & Analitik"}].map(t=>(
-              <button key={t.id} onClick={()=>setDashTab(t.id)} style={{padding:isMobile?"9px 14px":"8px 16px",minHeight:isMobile?44:undefined,borderRadius:9,border:`1px solid ${dashTab===t.id?C.accent:C.border}`,background:dashTab===t.id?C.accent:C.surface,color:dashTab===t.id?"white":C.muted,fontWeight:700,fontSize:isMobile?13:12.5,cursor:"pointer",boxShadow:dashTab===t.id?"0 2px 8px rgba(29,78,216,0.25)":"none"}}>{t.label}</button>
-            ))}
-          </div>
           {dashTab==="ringkasan" ? (
             <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
           ) : (
@@ -4220,11 +4322,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
         {tab==="dashboard" && hasRole(currentUser, "ASMAN") && !hasRole(currentUser, "MANAGER") && (
           <>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
-            {[{id:"ringkasan",label:"📊 Ringkasan"},{id:"detail",label:"📦 Detail & Analitik"}].map(t=>(
-              <button key={t.id} onClick={()=>setDashTab(t.id)} style={{padding:isMobile?"9px 14px":"8px 16px",minHeight:isMobile?44:undefined,borderRadius:9,border:`1px solid ${dashTab===t.id?C.accent:C.border}`,background:dashTab===t.id?C.accent:C.surface,color:dashTab===t.id?"white":C.muted,fontWeight:700,fontSize:isMobile?13:12.5,cursor:"pointer",boxShadow:dashTab===t.id?"0 2px 8px rgba(29,78,216,0.25)":"none"}}>{t.label}</button>
-            ))}
-          </div>
           {dashTab==="ringkasan" ? (
             <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
           ) : (
@@ -4244,97 +4341,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
         {tab==="dashboard" && !hasRole(currentUser, "MANAGER","ASMAN") && (
           <>
-          {/* ── TAB BAR DASHBOARD (satu section per klik, tidak menumpuk) ── */}
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
-            {[{id:"ringkasan",label:"📊 Ringkasan"},{id:"peta",label:"🗺️ Peta"},{id:"kinerja",label:"🎯 Kinerja"},{id:"detail",label:"📦 Detail Stok"}].map(t=>(
-              <button key={t.id} onClick={()=>setDashTab(t.id)} style={{padding:isMobile?"9px 14px":"8px 16px",minHeight:isMobile?44:undefined,borderRadius:9,border:`1px solid ${dashTab===t.id?C.accent:C.border}`,background:dashTab===t.id?C.accent:C.surface,color:dashTab===t.id?"white":C.muted,fontWeight:700,fontSize:isMobile?13:12.5,cursor:"pointer",boxShadow:dashTab===t.id?"0 2px 8px rgba(29,78,216,0.25)":"none"}}>{t.label}</button>
-            ))}
-          </div>
-
           {dashTab==="ringkasan" && (
             <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
           )}
-
-          {dashTab==="peta" && (<>
-          {/* ── PETA WILAYAH GUDANG UPT SURABAYA ── */}
-          <div style={{...sty.card}}>
-            <div style={{fontWeight:800,fontSize:15,marginBottom:4}}>🗺️ Peta Wilayah Gudang UPT Surabaya</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
-              {gudangList.filter(g=>g.lat!=null&&g.lng!=null).length} dari {gudangList.length} gudang sudah punya koordinat GPS. Klik pin untuk lihat ringkasan.
-            </div>
-            <div ref={petaWilayahDivRef} style={{width:"100%",height:320,borderRadius:10,border:`1px solid ${C.border}`,background:"#eef2f7"}}/>
-            {gudangList.filter(g=>g.lat==null||g.lng==null).length>0 && hasRole(currentUser, "ADMIN") && (
-              <div style={{fontSize:11,color:"#92400e",marginTop:8}}>⚠️ Ada gudang belum punya koordinat GPS — isi di Master Data → Master Gudang → Edit.</div>
-            )}
-          </div>
-          </>)}
-
-          {dashTab==="kinerja" && (<>
-          {/* ── STOCK COUNT (SAP vs Aplikasi) — ringkasan sesi terakhir ── */}
-          {(()=>{
-            const latest = stockCountList[0];
-            return (
-              <div style={{...sty.card,marginTop:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                  <div style={{fontWeight:800,fontSize:15}}>📊 Stock Count (SAP vs Aplikasi)</div>
-                  <button style={sty.btn("ghost","sm")} onClick={()=>{setTab("opname"); setOpnameSubTab("stockCount");}}>Lihat detail →</button>
-                </div>
-                {!latest ? (
-                  <div style={{fontSize:12,color:C.muted}}>Belum pernah ada sesi Stock Count. Jalankan di menu "Stock Count" → upload CSV SAP.</div>
-                ) : (
-                  <>
-                    <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:6}}>
-                      <span style={{fontSize:30,fontWeight:900,color:latest.summary.akuratPct>=90?C.green:latest.summary.akuratPct>=70?C.yellow:C.red}}>{latest.summary.akuratPct}%</span>
-                      <span style={{fontSize:12,color:C.muted}}>{latest.summary.akuratCount} dari {latest.summary.totalItem} item akurat (toleransi ≤5%) — sesi {fmtDate(latest.uploadedAt)}</span>
-                    </div>
-                    {latest.items.some(i=>i.approval==="PENDING") && (
-                      <div style={{fontSize:12,fontWeight:700,color:"#92400e",background:"#fef3c7",borderRadius:8,padding:"6px 10px"}}>
-                        ⏳ {latest.items.filter(i=>i.approval==="PENDING").length} temuan menunggu approval Asman
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* ── MATURITY LEVEL GUDANG UPT SURABAYA ── */}
-          {(()=>{
-            const latest = maturityAssessments[0];
-            return (
-              <div style={{...sty.card,marginTop:16}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <div style={{fontWeight:800,fontSize:15}}>🏆 Maturity Level Gudang UPT Surabaya</div>
-                  {hasRole(currentUser, "ADMIN") && <button style={sty.btn("primary","sm")} onClick={()=>{setMaturityForm({level:latest?.level||3,catatan:"",tanggalAsesmen:Date.now()}); setMaturityModal(true);}}>+ Asesmen Baru</button>}
-                </div>
-                {!latest ? (
-                  <div style={{fontSize:12,color:C.muted}}>Belum ada data asesmen maturity level.</div>
-                ) : (
-                  <>
-                    <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:4}}>
-                      <span style={{fontSize:30,fontWeight:900,color:C.accent}}>Level {latest.level}</span>
-                      <span style={{fontSize:14,fontWeight:700,color:C.muted}}>{MATURITY_LEVELS[latest.level]}</span>
-                    </div>
-                    <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Asesmen: {fmtDate(latest.tanggalAsesmen)} {latest.catatan && `— "${latest.catatan}"`}</div>
-                    {maturityAssessments.length>1 && (
-                      <details>
-                        <summary style={{fontSize:12,color:"#0098da",cursor:"pointer"}}>Lihat Riwayat ({maturityAssessments.length-1} sebelumnya)</summary>
-                        <div style={{marginTop:8}}>
-                          {maturityAssessments.slice(1).map(m=>(
-                            <div key={m.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.border}`,fontSize:12}}>
-                              <span>Level {m.level} ({MATURITY_LEVELS[m.level]}) {m.catatan && `— "${m.catatan}"`}</span>
-                              <span style={{color:C.muted}}>{fmtDate(m.tanggalAsesmen)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })()}
-          </>)}
 
           {dashTab==="detail" && (
           <DashboardDefault
@@ -4351,6 +4360,57 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           />
           )}
         </>
+        )}
+
+        {tab==="dashboard" && dashTab==="ringkasan" && (
+          <div className="dashboard-insight-grid">
+            <section className="dashboard-insight-card dashboard-map-card">
+              <div className="dashboard-insight-card__header">
+                <div>
+                  <strong>Peta Wilayah Gudang UPT Surabaya</strong>
+                  <span>{gudangList.filter(g=>g.lat!=null&&g.lng!=null).length} dari {gudangList.length} gudang memiliki koordinat GPS</span>
+                </div>
+                <span className="dashboard-insight-card__badge">Peta operasional</span>
+              </div>
+              <div ref={petaWilayahDivRef} className="dashboard-map-canvas"/>
+              {gudangList.filter(g=>g.lat==null||g.lng==null).length>0 && hasRole(currentUser, "ADMIN") && (
+                <div className="dashboard-insight-card__notice">Ada gudang yang belum memiliki koordinat GPS. Lengkapi melalui Master Data.</div>
+              )}
+            </section>
+
+            {(()=>{
+              const latest = stockCountList[0];
+              return (
+                <section className="dashboard-insight-card dashboard-performance-card">
+                  <div className="dashboard-insight-card__header">
+                    <div>
+                      <strong>Kinerja Stock Count</strong>
+                      <span>Perbandingan SAP dan stok aplikasi</span>
+                    </div>
+                    <button className="dashboard-text-action" onClick={()=>{setTab("opname");setOpnameSubTab("stockCount");}}>Lihat detail</button>
+                  </div>
+                  {!latest ? (
+                    <div className="dashboard-performance-empty">Belum ada sesi Stock Count. Jalankan unggah CSV SAP dari menu Stock Count.</div>
+                  ) : (
+                    <>
+                      <div className="dashboard-performance-score">
+                        <strong style={{color:latest.summary.akuratPct>=90?C.green:latest.summary.akuratPct>=70?C.yellow:C.red}}>{latest.summary.akuratPct}%</strong>
+                        <span>Akurasi sesi terakhir</span>
+                      </div>
+                      <div className="dashboard-performance-meta">
+                        <div><strong>{latest.summary.akuratCount}</strong><span>Item akurat</span></div>
+                        <div><strong>{latest.summary.totalItem}</strong><span>Total item</span></div>
+                        <div><strong>{fmtDate(latest.uploadedAt)}</strong><span>Tanggal sesi</span></div>
+                      </div>
+                      {latest.items.some(i=>i.approval==="PENDING") && (
+                        <div className="dashboard-insight-card__notice">{latest.items.filter(i=>i.approval==="PENDING").length} temuan menunggu approval Asman.</div>
+                      )}
+                    </>
+                  )}
+                </section>
+              );
+            })()}
+          </div>
         )}
 
                 {/* STOCK OPNAME & STOCK COUNT (digabung 1 menu, dipilih lewat sub-tab sidebar) */}
@@ -4427,16 +4487,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* STOCK */}
         {/* DATA STOK — view of operational stock (read-focused, with admin edit) */}
         {tab==="stock" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div>
-                <h1 style={sty.pageTitle}>Data Stok Gudang</h1>
-                <p style={{color:C.muted,fontSize:13}}>{filteredStocks.length} baris stok (barang x lokasi)
-                  {stocks.filter(s=>!s.lokasiId).length>0 && <span style={{color:"#f59e0b",fontWeight:700,marginLeft:8}}>• ⚠️ {stocks.filter(s=>!s.lokasiId).length} material belum ada lokasi</span>}
-                </p>
-              </div>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+          <div className="workspace-page stock-page">
+            <div className="workspace-filter-panel">
               <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
                 <div style={{position:"relative",flex:1}}>
                   <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama, kode, no. katalog, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
@@ -4456,6 +4508,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
                 <option value="ALL">Semua Jenis</option>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}
               </select>
+              <div className="workspace-context-row">
+                <span><strong>{filteredStocks.length}</strong> baris stok</span>
+                <span>Barang × lokasi</span>
+                {stocks.filter(s=>!s.lokasiId).length>0 && <span className="is-warning">{stocks.filter(s=>!s.lokasiId).length} material belum memiliki lokasi</span>}
+              </div>
               {photoSearchResults && (
                 <div style={{...sty.card,padding:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -4656,18 +4713,19 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:10,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
                         </td>
                         <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
-                          <div style={{display:"flex",gap:4,justifyContent:"center"}}>
+                          <div className="table-actions">
                             {hasRole(currentUser, "ADMIN") && (
                               <>
-                                <button title="Edit" disabled={st.deletePending} style={{...sty.btn("ghost","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>openEditStock(st)}>✏️</button>
-                                <button title="Hapus" disabled={st.deletePending} style={{...sty.btn("danger","sm"),padding:"6px 8px",opacity:st.deletePending?0.4:1}} onClick={()=>deleteStock(st.id)}>🗑️</button>
+                                <button className="table-action-button" title="Edit data stok" disabled={st.deletePending} onClick={()=>openEditStock(st)}>Edit</button>
+                                <button className="table-action-button is-danger" title="Hapus data stok" disabled={st.deletePending} onClick={()=>deleteStock(st.id)}>Hapus</button>
                               </>
                             )}
-                            <button title="Kartu Gantung TUG-2" style={{...sty.btn("ghost","sm"),padding:"6px 8px",borderColor:"#e0f2fe",color:"#0369a1"}}
-                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}>🏷️</button>
+                            <button className="table-action-button is-icon" title="Kartu Gantung TUG-2"
+                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}>🏷</button>
                             <button
+                              className="table-action-button is-icon"
                               title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data → Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
-                              style={{...sty.btn("ghost","sm"),padding:"6px 8px",borderColor:canLihatPeta?"#fca5a5":C.border,color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
+                              style={{color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
                               onClick={()=>{
                                 if (canLihatPeta) { setPetaMiniDetail({stock:st, lokasi:lok, gudang:gdg, petaInfo}); return; }
                                 if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
@@ -4706,21 +4764,20 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
         {/* MASTER DATA — Master Katalog, Master Lokasi, Satpam (identity/reference data) */}
         {tab==="master" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div>
-                <h1 style={sty.pageTitle}>
-                  {stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi (UIT / UPT / ULTG)":stockSubTab==="akun"?"👤 Kelola Akun (User)":stockSubTab==="migrasi"?"🔄 Migrasi Data SAP/Non-SAP":"Master Gudang"}
-                </h1>
-                <p style={{color:C.muted,fontSize:13}}>
+          <div className="workspace-page master-page">
+            <div className="workspace-page-toolbar">
+              <div className="workspace-context-row">
+                <span>
                   {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
-                </p>
+                </span>
               </div>
-              {hasRole(currentUser, "ADMIN") && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
-              {hasRole(currentUser, "ADMIN") && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
-              {hasRole(currentUser, "ADMIN") && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
-              {hasRole(currentUser, "ADMIN") && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
-              {hasRole(currentUser, "ADMIN") && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
+              <div className="workspace-page-toolbar__actions">
+                {hasRole(currentUser, "ADMIN") && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
+                {hasRole(currentUser, "ADMIN") && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
+                {hasRole(currentUser, "ADMIN") && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
+                {hasRole(currentUser, "ADMIN") && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
+                {hasRole(currentUser, "ADMIN") && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
+              </div>
             </div>
             {stockSubTab==="gudang" && (
               <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
@@ -5406,23 +5463,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           </div>
         )}
         {tab==="transaction" && (
-          <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div>
-                <h1 style={{...sty.pageTitle,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  {(TUG_UI[tugSubTab]||{}).title || tugSubTab}
-                  <span style={{fontSize:11,fontWeight:700,color:C.muted,background:C.border,borderRadius:6,padding:"2px 8px"}}>{(TUG_UI[tugSubTab]||{}).code || tugSubTab}</span>
-                </h1>
-                <p style={{color:C.muted,fontSize:13}}>{(TUG_UI[tugSubTab]||{}).desc || ""}</p>
+          <div className="workspace-page tug-page">
+            <div className="tug-command-bar">
+              <div className="tug-command-bar__copy">
+                <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
+                <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
+                <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
               </div>
-              {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button style={sty.btn("primary")} onClick={()=>openNewTxn(tugSubTab)}>➕ {(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>}
+              {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>}
             </div>
 
-            <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontSize:12,fontWeight:800,color:C.accent}}>{(TUG_GROUP_UI[tugGroup]||{}).icon} {(TUG_GROUP_UI[tugGroup]||{}).label}</span>
-              <span style={{fontSize:11,color:C.muted}}>— {(TUG_GROUP_UI[tugGroup]||{}).hint}</span>
-            </div>
-            <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+            <div className="tug-process-tabs" role="tablist" aria-label="Pilih proses TUG">
               {(tugGroup==="penerimaan" ? ["TUG3","TUG10"]
                 : tugGroup==="pengeluaran" ? ["TUG9","TUG8"]
                 : tugGroup==="laporan" ? ["TUG15"]
@@ -5430,27 +5481,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               ).map(id=>{
                 const u = TUG_UI[id]||{}; const on = tugSubTab===id;
                 return (
-                <button key={id} onClick={()=>setTugSubTab(id)} title={u.code} style={{
-                  display:"flex", alignItems:"center", gap:12, textAlign:"left", cursor:"pointer",
-                  padding:isMobile?"12px 14px":"12px 16px", borderRadius:14, minHeight:60,
-                  width:isMobile?"100%":260,
-                  border:`2px solid ${on?C.accent:C.border}`,
-                  background:on?C.accent:C.surface, color:on?"white":C.text,
-                  boxShadow:on?"0 4px 14px rgba(29,78,216,0.30)":"0 1px 3px rgba(15,23,42,0.06)",
-                  transition:"all .15s",
-                }}>
-                  <span style={{fontSize:22, width:42, height:42, flexShrink:0, borderRadius:11, display:"flex", alignItems:"center", justifyContent:"center", background:on?"rgba(255,255,255,0.22)":C.bg}}>{TUG_ICON[id]||"📄"}</span>
-                  <span style={{display:"flex", flexDirection:"column", lineHeight:1.2}}>
-                    <span style={{fontSize:14,fontWeight:800}}>{u.chip||id}</span>
-                    <span style={{fontSize:10,fontWeight:600,opacity:on?.85:.6,marginTop:1}}>{u.code||id}</span>
-                  </span>
+                <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
+                  <span>{u.code||id}</span>
+                  <strong>{u.chip||id}</strong>
                 </button>
                 );
               })}
             </div>
-            <div style={{display:"flex",gap:8,marginBottom:14}}>
+            <div className="tug-status-filter">
+              <span>Status dokumen</span>
               {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
-                <button key={s} style={{padding:"6px 14px",borderRadius:20,border:`1px solid ${filterStatus===s?C.accent:C.border}`,background:filterStatus===s?C.accent:"white",color:filterStatus===s?"white":C.muted,fontSize:12,cursor:"pointer",fontWeight:filterStatus===s?700:400}} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s}</button>
+                <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
               ))}
             </div>
 
@@ -5608,18 +5649,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               ].filter(c=>c.id==="ALL"||c.count>0);
               return (
                 <div style={{marginBottom:16}}>
-                  <div className="approval-hero">
-                    <div className="approval-hero__copy">
-                      <div className="approval-eyebrow"><span></span> Decision Center</div>
-                      <h1>Approval</h1>
-                      <p>Tinjau dan putuskan seluruh pengajuan operasional dalam satu ruang kerja.</p>
-                    </div>
-                    <div className="approval-hero__summary">
+                    <div className="approval-hero__summary approval-summary-strip">
                       <div><strong>{total}</strong><span>Menunggu tindakan</span></div>
                       <div><strong>{Math.max(0,chips.length-1)}</strong><span>Kategori aktif</span></div>
                       <div className="approval-role-chip"><span>Wewenang</span><strong>{ROLES[currentUser.role]}</strong></div>
                     </div>
-                  </div>
                   {/* Filter jenis approval + pageSize — tepat di bawah subtitle, langsung
                       nyambung ke list di bawahnya (bukan 1 list panjang campur aduk semua jenis). */}
                   {total>0 && (
@@ -5996,7 +6030,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           />
         )}
 
-      </div>
+        </div>
+      </main>
 
       {/* STOCK MODAL (Data Stok = junction of Katalog x Lokasi) */}
       {stockModal && (
