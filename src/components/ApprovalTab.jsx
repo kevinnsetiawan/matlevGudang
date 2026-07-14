@@ -110,11 +110,12 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
   }
 
   return (
-    <div>
+    <div className="approval-queue">
       {pendingTxns.length===0 && pendingCapacityImports.length===0 && pendingLokasiChanges.length===0 && pendingStockCount===0 && !(heavyEquipmentPendingCount>0) && !(opnamePendingCount>0) && !(stockCountPendingCount>0) ? (
-        <div style={{...sty.card,textAlign:"center",padding:40}}>
-          <div style={{fontSize:48,marginBottom:12}}>✅</div>
-          <div style={{fontSize:16,fontWeight:700}}>Semua sudah diproses</div>
+        <div className="approval-empty" style={{...sty.card,textAlign:"center",padding:40}}>
+          <div className="approval-empty__icon">✓</div>
+          <div style={{fontSize:16,fontWeight:800}}>Semua pengajuan sudah diproses</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:5}}>Tidak ada keputusan yang menunggu tindakan Anda.</div>
         </div>
       ) : !showTug ? null : <>
       {approvalTypeFilter==="ALL" && pendingTxns.length>0 && sectionHeading("📄","Transaksi TUG")}
@@ -125,7 +126,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
         const isTUG10 = t.docType==="TUG10";
         const stageColor = isTUG7Draft||isTUG8Draft?"#7c3aed":C.yellow;
         return (
-          <div key={t.id} style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${stageColor}`}}>
+          <div key={t.id} className="approval-card" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${stageColor}`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
               <div>
                 <div style={{fontSize:11,color:stageColor,fontWeight:800,textTransform:"uppercase"}}>{t.docType.replace("TUG","TUG-")} — {stageLabelOf(t)}</div>
@@ -215,7 +216,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
       {/* Approval Import Kapasitas Gudang — TL/Asman saja */}
       {approvalTypeFilter==="ALL" && showCap && canApproveCap && pendingCapacityImports.length>0 && sectionHeading("📐","Kapasitas Gudang")}
       {showCap && canApproveCap && pagedCapacityImports.map(imp=>(
-        <div key={imp.id} style={{...sty.card,marginBottom:12,borderLeft:"4px solid #f59e0b"}}>
+        <div key={imp.id} className="approval-card" style={{...sty.card,marginBottom:12,borderLeft:"4px solid #f59e0b"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
             <div>
               <div style={{fontSize:11,color:"#92400e",fontWeight:800,textTransform:"uppercase"}}>Kapasitas Gudang — Menunggu Approval</div>
@@ -275,7 +276,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
         const pemohon = users.find(u=>u.id===l.requestedBy);
         const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[l.pendingAction]||l.pendingAction;
         return (
-          <div key={l.id} style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.yellow}`}}>
+          <div key={l.id} className="approval-card" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.yellow}`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
               <div>
                 <div style={{fontSize:11,color:"#92400e",fontWeight:800,textTransform:"uppercase"}}>Perubahan Lokasi/Blok</div>

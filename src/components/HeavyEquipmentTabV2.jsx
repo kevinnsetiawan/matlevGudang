@@ -4,6 +4,7 @@ import { UIT, UPT } from "../constants.js";
 import { hasRole } from "../lib/roles.js";
 import { downloadHeavyEquipmentLoanHTML } from "../lib/docBuilders.js";
 import { canApproveHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanJobName, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanRuntimeStatus, getHeavyEquipmentLoanStartDate, isPendingHeavyEquipmentLoan, normalizeHeavyEquipmentLoanStatus } from "../lib/heavyEquipment.js";
+import { OperationsHero } from "./OperationsHero.jsx";
 
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, saveEdit, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
@@ -192,18 +193,43 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
     {id:"PERLU_SERVICE", label:"Perlu Servis", color:"#f59e0b", count:equipmentList.filter(e=>(!effectiveUptFilter||e.upt===effectiveUptFilter)&&e.statusAlat==="PERLU_SERVICE").length},
     {id:"RUSAK",    label:"Rusak",          color:C.red,      count:equipmentList.filter(e=>(!effectiveUptFilter||e.upt===effectiveUptFilter)&&e.statusAlat==="RUSAK").length},
   ].filter(g=>g.id==="ALL"||g.count>0);
+  const scopedEquipment = equipmentList.filter(e=>!effectiveUptFilter||e.upt===effectiveUptFilter);
+  const scopedMaintenance = scopedEquipment.filter(e=>["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
+  const scopedAvailable = scopedEquipment.filter(e=>!activeLoanForEquipment(e.id) && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
+  const scopedBorrowed = scopedEquipment.filter(e=>activeLoanForEquipment(e.id)?.runtimeStatus==="DIPINJAM").length;
 
   return (
-    <div>
-      {/* Header */}
-      <h1 style={{...sty.pageTitle,marginBottom:12}}>🚜 Alat Berat & Peminjaman UPT</h1>
+    <div className="operations-page heavy-equipment-page">
+      <OperationsHero
+        eyebrow="Fleet Operations"
+        title="Alat Berat & Peminjaman"
+        description="Pantau kesiapan alat, perpindahan antar-UPT, dan keputusan peminjaman dalam satu workspace."
+        scope={isMSB ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
+        metrics={[
+          {label:"Total alat",value:scopedEquipment.length},
+          {label:"Tersedia",value:scopedAvailable},
+          {label:"Dipinjam",value:scopedBorrowed},
+          {label:"Maintenance / KIR",value:scopedMaintenance},
+          {label:"Pending approval",value:pendingCount,alert:pendingCount>0},
+          {label:"Overdue",value:overdueCount,alert:overdueCount>0},
+        ]}
+        controls={isMSB ? (
+          <div>
+            <label>Filter UPT</label>
+            <select value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
+              <option value="">Semua UPT</option>
+              {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+        ) : null}
+      />
 
       {/* Blok khusus Overdue — sekarang discope ke UPT yang sedang di-scope (dulu tidak difilter
           UPT sama sekali, jadi overdue milik UPT lain ikut nongol & bisa "Ditandai Kembali" oleh
           Admin/TL/Asman Surabaya yang tidak ada urusan sama sekali — keluhan user 2026-07-06). */}
       {overdueCount > 0 && (
-        <div style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
-          <div style={{fontWeight:800,fontSize:14,marginBottom:10,color:C.red}}>⚠️ Alat Berat Overdue ({overdueCount})</div>
+        <div className="operations-alert is-danger" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
+          <div style={{fontWeight:800,fontSize:13,marginBottom:10,color:C.red}}>Alat melewati jadwal pengembalian ({overdueCount})</div>
           {scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").map(l=>{
             const eq = equipmentList.find(e=>e.id===l.equipmentId);
             const pemohon = users.find(u=>u.id===l.requestedBy);
@@ -222,58 +248,12 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         </div>
       )}
 
-      {/* Filter UPT — MSB/Manager UIT bebas pilih (mengelola banyak UPT), role lain dikunci ke
-          UPT sendiri (tidak ada dropdown, tidak bisa diubah — permintaan user 2026-07-06). */}
-      {isMSB ? (
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}}>
-          <div style={{minWidth:180}}>
-            <label style={{...sty.label,marginBottom:3}}>Filter UPT</label>
-            <select style={sty.select} value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
-              <option value="">Semua UPT</option>
-              {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
-            </select>
-          </div>
-          <div style={{fontSize:12,color:C.muted,paddingBottom:6}}>
-            {myUptSelected ? <>Alat & peminjaman <b style={{color:C.accent}}>{myUptSelected}</b></> : "Menampilkan semua UPT"}
-          </div>
-        </div>
-      ) : (
-        <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
-          Menampilkan alat & peminjaman <b style={{color:C.accent}}>UPT {myUpt||"Surabaya"}</b>
-        </div>
-      )}
-
-      {/* Ringkasan KPI — dulu cuma muncul di tab "Peminjaman & Histori", sekarang selalu tampil
-          di atas (1 halaman tunggal, tidak ada tab lagi). */}
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:14,padding:"9px 14px",background:"#f8fafc",borderRadius:10,border:`1px solid ${C.border}`,fontSize:12,alignItems:"center"}}>
-        {(()=>{
-          const base = equipmentList.filter(e=>!effectiveUptFilter||e.upt===effectiveUptFilter);
-          const maint = base.filter(e=>["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
-          const avail = base.filter(e=>!activeLoanForEquipment(e.id) && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
-          const pinjam = base.filter(e=>{ const l=activeLoanForEquipment(e.id); return l&&l.runtimeStatus==="DIPINJAM"; }).length;
-          return [
-            {label:"Total Alat",val:base.length,color:C.accent},
-            {label:"Tersedia",val:avail,color:C.green},
-            {label:"Dipinjam",val:pinjam,color:"#c2410c"},
-            {label:"Maintenance/KIR",val:maint,color:maint?"#4b5563":C.muted},
-            {label:"Overdue",val:overdueCount,color:overdueCount?C.red:C.muted},
-            {label:"Pending Approval",val:pendingCount,color:pendingCount?"#92400e":C.muted},
-          ].map(k=>(
-            <div key={k.label} style={{display:"flex",alignItems:"baseline",gap:4}}>
-              <span style={{color:C.muted}}>{k.label}:</span>
-              <span style={{fontWeight:900,fontSize:14,color:k.color}}>{k.val}</span>
-            </div>
-          ));
-        })()}
-      </div>
-
       {/* Overview kondisi — clickable chips, filter grid "Daftar Alat Berat" di bawah */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+      <div className="operations-segments">
         {kondisiGroups.map(g=>{
           const active = kondisiFilter===g.id;
           return (
-            <button key={g.id} onClick={()=>setKondisiFilter(g.id)}
-              style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,border:`2px solid ${active?g.color:C.border}`,background:active?g.color:"white",color:active?"white":g.color,fontWeight:700,fontSize:12,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,0,0,.12)":"none"}}>
+            <button key={g.id} className={active?"is-active":""} onClick={()=>setKondisiFilter(g.id)} style={{"--segment-color":g.color}}>
               <span style={{fontWeight:900,fontSize:14}}>{g.count}</span>
               <span>{g.label}</span>
             </button>
@@ -282,8 +262,8 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
       </div>
 
       {/* ── SECTION: Daftar Alat Berat ── */}
-      <h2 style={{fontSize:14,fontWeight:900,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>🚜 Daftar Alat Berat</h2>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+      <div className="operations-section-heading"><div><span>Fleet Registry</span><h2>Daftar Alat Berat</h2></div><small>{filteredEquipment.length} alat sesuai filter</small></div>
+      <div className="operations-category-filters">
         {EQUIPMENT_CATEGORIES.map(cat=>{
           const active = categoryFilter===cat.id;
           const count = equipmentList.filter(e=>
@@ -292,7 +272,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
             (kondisiFilter==="ALL"||e.statusAlat===kondisiFilter||(kondisiFilter==="DIPINJAM"&&!!activeLoanForEquipment(e.id)))
           ).length;
           return (
-            <button key={cat.id} onClick={()=>setCategoryFilter(cat.id)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 12px",minWidth:64,borderRadius:10,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
+            <button key={cat.id} className={active?"is-active":""} onClick={()=>setCategoryFilter(cat.id)}>
               <span style={{color:active?C.accent:"#9ca3af",display:"flex"}}>{cat.icon}</span>
               <span style={{fontSize:10,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
               <span style={{fontSize:10,fontWeight:700,color:active?C.accent:C.muted}}>{count}</span>
@@ -310,9 +290,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
           const activeLoan = activeLoanForEquipment(eq.id);
           const lastLoan = latestLoanForEquipment(eq.id);
           return (
-            <div key={eq.id} style={{...sty.card,padding:14,display:"flex",flexDirection:"column",gap:10,borderLeft:activeLoan?`4px solid ${loanBorderColor(activeLoan.runtimeStatus)}`:undefined}}>
+            <div key={eq.id} className="operations-card equipment-card" style={{...sty.card,padding:14,display:"flex",flexDirection:"column",gap:10,borderLeft:activeLoan?`4px solid ${loanBorderColor(activeLoan.runtimeStatus)}`:undefined}}>
               <div style={{height:150,borderRadius:10,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {eq.foto ? <img src={eq.foto} alt={eq.nama} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <div style={{fontSize:38,color:"#9ca3af"}}>🚜</div>}
+                {eq.foto ? <img src={eq.foto} alt={eq.nama} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <div className="equipment-placeholder">EQ</div>}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
                 <div><div style={{fontSize:14,fontWeight:900}}>{eq.nama}</div><div style={{fontSize:11,color:C.muted}}>{eq.upt} • {eq.lokasi}</div></div>
@@ -323,22 +303,22 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               {activeLoan && <div style={{background:activeLoan.runtimeStatus==="OVERDUE"?"#fef2f2":"#fff7ed",border:`1px solid ${activeLoan.runtimeStatus==="OVERDUE"?"#fecaca":"#fed7aa"}`,borderRadius:8,padding:10,fontSize:11,lineHeight:1.5}}><div style={{fontWeight:900,color:activeLoan.runtimeStatus==="OVERDUE"?C.red:"#c2410c"}}>{activeLoan.runtimeStatus==="OVERDUE"?"OVERDUE":"Sedang dipinjam"}</div><div>{activeLoan.requesterUpt} • {activeLoan.namaPekerjaan || "-"}</div><div style={{color:C.muted}}>Rencana kembali: {activeLoan.tanggalKembali || "-"}</div></div>}
               {["MAINTENANCE","KIR"].includes(eq.statusAlat) && <div style={{background:"#f3f4f6",border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:11,lineHeight:1.5}}><div style={{fontWeight:900,color:"#4b5563"}}>{eq.statusAlat==="KIR"?"🔵 Sedang KIR":"🔧 Sedang Maintenance"}</div><div style={{color:C.muted}}>Tidak bisa dipinjam UPT lain sampai statusnya berubah.</div></div>}
               {lastLoan && <div style={{fontSize:11,color:C.muted,borderTop:`1px solid ${C.border}`,paddingTop:8}}>Terakhir dipinjam oleh <b>{lastLoan.requesterUpt || "-"}</b> untuk pekerjaan <b>{lastLoan.namaPekerjaan || "-"}</b>.</div>}
-              {canManage && <button style={sty.btn("ghost","sm")} onClick={()=>{setEditingEquipment(eq.id);setEditForm({statusAlat:eq.statusAlat||"LAYAK", foto:eq.foto||null});}}>✏️ Edit Alat</button>}
+              {canManage && <button style={sty.btn("ghost","sm")} onClick={()=>{setEditingEquipment(eq.id);setEditForm({statusAlat:eq.statusAlat||"LAYAK", foto:eq.foto||null});}}>Edit data alat</button>}
             </div>
           );
         })}
       </div>
 
       {/* ── SECTION: Ajukan Peminjaman + Peminjaman & Histori ── */}
-      <h2 style={{fontSize:14,fontWeight:900,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>📜 Peminjaman & Histori</h2>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+      <div className="operations-section-heading"><div><span>Loan Operations</span><h2>Peminjaman & Histori</h2></div><small>{unifiedLoans.length} transaksi</small></div>
+      <div className="operations-category-filters is-compact">
         {EQUIPMENT_CATEGORIES.map(cat=>{
           const active = loanCategoryFilter===cat.id;
           const base = equipmentList.filter(e=>(cat.id==="ALL"||getEquipmentCategory(e)===cat.id));
           const countActive = base.filter(e=>activeLoanForEquipment(e.id)).length;
           const countTotal = base.length;
           return (
-            <button key={cat.id} onClick={()=>setLoanCategoryFilter(cat.id)}
+            <button key={cat.id} className={active?"is-active":""} onClick={()=>setLoanCategoryFilter(cat.id)}
               style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 12px",minWidth:64,borderRadius:10,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
               <span style={{color:active?C.accent:"#9ca3af"}}>{cat.icon}</span>
               <span style={{fontSize:10,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
@@ -354,7 +334,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         {/* Form ajukan (Admin/TL only) — alat yang ditawarkan HARUS di luar UPT sendiri untuk
             role non-MSB (Surabaya selalu peminjam di form ini, lihat borrowableEquipment). */}
         {canManage && (
-          <div style={sty.card}>
+          <div className="operations-form-panel" style={sty.card}>
             <div style={{fontSize:13,fontWeight:900,marginBottom:10}}>Ajukan Peminjaman</div>
             <div style={{marginBottom:8}}>
               <label style={sty.label}>Alat {!isMSB && <span style={{fontWeight:400,color:C.muted}}>(di luar UPT {myUpt||"Surabaya"})</span>}</label>
@@ -394,7 +374,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               const eq=equipmentList.find(e=>e.id===loan.equipmentId);
               const isActive=["PENDING_OWNER_ASMAN","DIPINJAM","OVERDUE"].includes(loan.runtimeStatus);
               return (
-                <div key={loan.id} style={{...sty.card,padding:12,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`,opacity:isActive?1:0.85}}>
+                <div key={loan.id} className="operations-row-card" style={{...sty.card,padding:12,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`,opacity:isActive?1:0.85}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:4}}>
                     <div>
                       <div style={{fontWeight:900,fontSize:13}}>{eq?.nama||loan.equipmentId}</div>
@@ -415,7 +395,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
                     <button style={{...sty.btn("ghost","sm"),marginTop:6}} onClick={()=>completeLoan(loan.id)}>Tandai Kembali</button>
                   )}
                   {["DIPINJAM","OVERDUE","SELESAI"].includes(loan.runtimeStatus) && (
-                    <button style={{...sty.btn("ghost","sm"),marginTop:6,marginLeft:isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&hasRole(currentUser, "ADMIN","TL","ASMAN")?6:0}} onClick={()=>downloadHeavyEquipmentLoanHTML(loan, eq, users, showToast)}>📄 Cetak Dokumen</button>
+                    <button style={{...sty.btn("ghost","sm"),marginTop:6,marginLeft:isActive&&["DIPINJAM","OVERDUE"].includes(loan.runtimeStatus)&&hasRole(currentUser, "ADMIN","TL","ASMAN")?6:0}} onClick={()=>downloadHeavyEquipmentLoanHTML(loan, eq, users, showToast)}>Cetak dokumen</button>
                   )}
                 </div>
               );

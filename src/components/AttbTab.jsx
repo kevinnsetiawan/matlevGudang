@@ -5,6 +5,7 @@ import { hasRole } from "../lib/roles.js";
 import { getLokasiPetaInfo } from "../lib/masterSync.js";
 import { ATTB_CORE_FIELDS, ATTB_FIELDS_BY_JENIS, ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "../lib/attb.js";
 import * as XLSX from "xlsx";
+import { OperationsHero } from "./OperationsHero.jsx";
 
 // AttbTab — pipeline monitoring penghapusan aset material ATTB, lihat docs/ATTB_SPEC.md.
 // Pola konsisten HeavyEquipmentTabV2: chip filter + kartu, scoping UPT via effectiveUptFilter.
@@ -223,51 +224,50 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
   const stageColor = stage => [C.accent,"#7c3aed","#0891b2","#ea580c",C.green][attbStageIndex(stage)] || C.muted;
 
   return (
-    <div>
-      <h1 style={{...sty.pageTitle,marginBottom:12}}>🗂️ ATTB — Penghapusan Aset Material</h1>
-
-      {isMSB ? (
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap",marginBottom:12}}>
-          <div style={{minWidth:180}}>
-            <label style={{...sty.label,marginBottom:3}}>Filter UPT</label>
-            <select style={sty.select} value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
+    <div className="operations-page attb-page">
+      <OperationsHero
+        eyebrow="Asset Disposal Governance"
+        title="ATTB — Penghapusan Aset"
+        description="Kelola pipeline penghapusan aset secara tertib, transparan, dan terukur hingga proses lelang."
+        scope={isMSB ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
+        metrics={[
+          {label:"Total item",value:scopedList.length},
+          {label:"Pending approval",value:pendingApprovalCount,alert:pendingApprovalCount>0},
+          {label:"Belum lanjut",value:belumLanjutCount,alert:belumLanjutCount>0},
+          {label:"Sumber bongkaran",value:bongkaranBelum.length},
+        ]}
+        controls={isMSB ? (
+          <div>
+            <label>Filter UPT</label>
+            <select value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
               <option value="">Semua UPT</option>
               {uptOptions.map(u=><option key={u} value={u}>{u}</option>)}
             </select>
           </div>
-        </div>
-      ) : (
-        <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
-          Menampilkan item ATTB <b style={{color:C.accent}}>UPT {myUpt||"Surabaya"}</b>
-        </div>
-      )}
-
-      <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:14,padding:"9px 14px",background:"#f8fafc",borderRadius:10,border:`1px solid ${C.border}`,fontSize:12,alignItems:"center"}}>
-        <div style={{display:"flex",alignItems:"baseline",gap:4}}><span style={{color:C.muted}}>Total Item:</span><span style={{fontWeight:900,fontSize:14,color:C.accent}}>{scopedList.length}</span></div>
-        <div style={{display:"flex",alignItems:"baseline",gap:4}}><span style={{color:C.muted}}>Pending Approval:</span><span style={{fontWeight:900,fontSize:14,color:pendingApprovalCount?"#92400e":C.muted}}>{pendingApprovalCount}</span></div>
-        <div style={{display:"flex",alignItems:"baseline",gap:4}}><span style={{color:C.muted}}>Belum Lanjut:</span><span style={{fontWeight:900,fontSize:14,color:belumLanjutCount?C.red:C.muted}}>{belumLanjutCount}</span></div>
-      </div>
+        ) : null}
+      />
 
       {/* Pipeline 5 tahap ATTB — kartu berurutan dihubungkan panah (proses maju
           menuju lelang). Klik kartu untuk memfilter tabel per tahap. */}
-      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
-        <button onClick={()=>setStageFilter("ALL")} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,border:`2px solid ${stageFilter==="ALL"?C.accent:C.border}`,background:stageFilter==="ALL"?C.accent:"white",color:stageFilter==="ALL"?"white":C.accent,fontWeight:700,fontSize:12,cursor:"pointer"}}>
+      <div className="operations-section-heading"><div><span>Process Pipeline</span><h2>Tahapan Penghapusan</h2></div><small>Klik tahap untuk memfilter daftar</small></div>
+      <div className="operations-segments">
+        <button className={stageFilter==="ALL"?"is-active":""} onClick={()=>setStageFilter("ALL")} style={{"--segment-color":C.accent}}>
           <span style={{fontWeight:900,fontSize:14}}>{scopedList.length}</span><span>Semua Tahap</span>
         </button>
         {belumLanjutCount>0 && (
-          <button onClick={()=>setBelumLanjutOnly(b=>!b)} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:20,border:`2px solid ${belumLanjutOnly?C.red:"#fecaca"}`,background:belumLanjutOnly?C.red:"#fef2f2",color:belumLanjutOnly?"white":C.red,fontWeight:700,fontSize:12,cursor:"pointer"}}>
-            ⚠️ Belum Lanjut ({belumLanjutCount})
+          <button className={belumLanjutOnly?"is-active":""} onClick={()=>setBelumLanjutOnly(b=>!b)} style={{"--segment-color":C.red}}>
+            Belum Lanjut ({belumLanjutCount})
           </button>
         )}
       </div>
-      <div style={{display:"flex",alignItems:"stretch",flexWrap:"wrap",gap:0,marginBottom:16}}>
+      <div className="attb-pipeline">
         {/* Pra-tahap: Material Bongkaran ATTB (MTU) dari TUG-10 — sumber kandidat sebelum AE.1 */}
         {(()=>{ const active = stageFilter==="SUMBER"; const color="#6b7280"; return (
           <Fragment key="SUMBER">
-            <button onClick={()=>setStageFilter("SUMBER")} title="Material Bongkaran ATTB dari TUG-10"
+            <button className="attb-stage-card is-source" onClick={()=>setStageFilter("SUMBER")} title="Material Bongkaran ATTB dari TUG-10"
               style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 12px",minWidth:120,borderRadius:12,border:`2px dashed ${active?color:"#cbd5e1"}`,background:active?color:"#f8fafc",color:active?"white":C.text,cursor:"pointer",boxShadow:active?`0 2px 10px ${color}55`:"none",transition:"all .15s"}}>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <span style={{fontSize:16}}>🧰</span>
+                <span className="attb-stage-code">SRC</span>
                 <span style={{fontSize:20,fontWeight:900,color:active?"white":color}}>{bongkaranBelum.length}</span>
               </div>
               <span style={{fontSize:11,fontWeight:700,textAlign:"center",lineHeight:1.2,color:active?"white":C.muted}}>Material Bongkaran<br/>(TUG-10)</span>
@@ -281,7 +281,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
           const isLast = i===ATTB_STAGES.length-1;
           return (
             <Fragment key={s.code}>
-              <button onClick={()=>setStageFilter(s.code)} title={`Filter: ${s.label}`}
+              <button className="attb-stage-card" onClick={()=>setStageFilter(s.code)} title={`Filter: ${s.label}`}
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 12px",minWidth:120,borderRadius:12,border:`2px solid ${active?color:C.border}`,background:active?color:"white",color:active?"white":C.text,cursor:"pointer",boxShadow:active?`0 2px 10px ${color}55`:"none",transition:"all .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span style={{width:20,height:20,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,background:active?"rgba(255,255,255,0.25)":color+"22",color:active?"white":color}}>{i+1}</span>
@@ -298,14 +298,14 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
         {/* Tujuan akhir proses */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 2px",color:C.green,fontSize:22,fontWeight:900,alignSelf:"center"}}>→</div>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"10px 14px",minWidth:90,borderRadius:12,border:`2px dashed ${C.green}`,background:"#f0fdf4",alignSelf:"center"}}>
-          <span style={{fontSize:20}}>🔨</span>
+          <span className="attb-stage-code">KI</span>
           <span style={{fontSize:11,fontWeight:800,color:C.green,textAlign:"center",lineHeight:1.2}}>LELANG<br/>oleh KI</span>
         </div>
       </div>
 
       {canManage && stageFilter!=="SUMBER" && (
-        <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-          <button style={sty.btn("ghost")} onClick={()=>{setImportRaw(null);setImportPreview(null);setImportOverwrite(false);setImportIncludeHidden(false);setShowImportPanel(true);}}>📥 Import Excel (Material)</button>
+        <div className="operations-actionbar">
+          <button style={sty.btn("ghost")} onClick={()=>{setImportRaw(null);setImportPreview(null);setImportOverwrite(false);setImportIncludeHidden(false);setShowImportPanel(true);}}>Import Excel Material</button>
         </div>
       )}
 
@@ -358,9 +358,9 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
 
       {stageFilter!=="SUMBER" && <>
       {/* Bar filter data — search bebas + dropdown jenis/status/waktu usulan */}
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+      <div className="operations-filterbar">
         <div style={{position:"relative",flex:1,minWidth:220}}>
-          <input style={{...sty.input,paddingRight:28}} placeholder="🔍 Cari nomor AT/ATTB, deskripsi, merk, bay, lokasi..." value={attbSearch} onChange={e=>setAttbSearch(e.target.value)}/>
+          <input style={{...sty.input,paddingRight:28}} placeholder="Cari nomor AT/ATTB, deskripsi, merk, bay, atau lokasi" value={attbSearch} onChange={e=>setAttbSearch(e.target.value)}/>
           {attbSearch && <button onClick={()=>setAttbSearch("")} title="Hapus pencarian" style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}>✕</button>}
         </div>
         {jenisOptions.length>1 && (
@@ -389,7 +389,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
       {/* Tampilan tabel horizontal, pola sama dengan Data Stok (header biru,
           baris ringkas, border kiri berwarna per tahap). Form Tolak/Belum Lanjut
           muncul sebagai baris expand di bawah baris item terkait. */}
-      <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12}}>
+      <div className="operations-table-card" style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:920}}>
           <thead>
             <tr style={{background:C.sidebar,color:"white"}}>

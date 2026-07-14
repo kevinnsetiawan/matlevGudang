@@ -47,6 +47,7 @@ import { TUG15Tab } from "./src/components/TUG15Tab.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
+import { SidebarNavItem } from "./src/components/SidebarNavItem.jsx";
 import { GudangCoordConfigPanel } from "./src/components/GudangCoordConfigPanel.jsx";
 import { SearchableSelect } from "./src/components/SearchableSelect.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
@@ -4002,9 +4003,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"ai",icon:"🤖",label:"AI Agent"},
   ];
 
-  // Style tombol nav sidebar (dedup 4 blok identik). Active: gradient tipis + bar aksen kiri.
-  const navBtnStyle = (active) => ({display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",minHeight:isMobile?44:undefined,borderRadius:8,border:"none",cursor:"pointer",background:active?"linear-gradient(90deg,rgba(96,165,250,0.22),rgba(255,255,255,0.06))":"transparent",color:active?"white":"rgba(255,255,255,0.65)",fontSize:13,fontWeight:active?700:400,marginBottom:2,textAlign:"left",boxShadow:active?"inset 3px 0 0 #60a5fa":"none"});
-
   return (
     <div style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
       {/* Di HP: toast dipusatkan & dibatasi lebar (bukan nempel kanan tanpa batas
@@ -4049,11 +4047,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="transaction">
                   <button
-                    style={navBtnStyle(isActive)}
+                    className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
+                    style={{minHeight:isMobile?44:undefined}}
                     onClick={()=>setTugExpanded(e=>!e)}
                   >
-                    <span>{n.icon}</span>
-                    <span style={{flex:1}}>{n.label}</span>
+                    <span className="sidebar-nav-item__icon">{n.icon}</span>
+                    <span className="sidebar-nav-item__label">{n.label}</span>
                     <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:tugExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
                   </button>
                   {tugExpanded && (
@@ -4088,11 +4087,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="master">
                   <button
-                    style={navBtnStyle(isActive)}
+                    className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
+                    style={{minHeight:isMobile?44:undefined}}
                     onClick={()=>setMasterExpanded(e=>!e)}
                   >
-                    <span>{n.icon}</span>
-                    <span style={{flex:1}}>{n.label}</span>
+                    <span className="sidebar-nav-item__icon">{n.icon}</span>
+                    <span className="sidebar-nav-item__label">{n.label}</span>
                     <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:masterExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
                   </button>
                   {masterExpanded && (
@@ -4127,12 +4127,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               return (
                 <div key="opname">
                   <button
-                    style={navBtnStyle(isActive)}
+                    className={`sidebar-nav-item sidebar-nav-parent${isActive?" is-active":""}`}
+                    style={{minHeight:isMobile?44:undefined}}
                     onClick={()=>setOpnameExpanded(e=>!e)}
                   >
-                    <span>{n.icon}</span>
-                    <span style={{flex:1}}>{n.label}</span>
-                    {n.badge>0 && <span style={{background:"#dc2626",color:"white",borderRadius:20,padding:"1px 7px",fontSize:10,fontWeight:800,marginRight:4}}>{n.badge}</span>}
+                    <span className="sidebar-nav-item__icon">{n.icon}</span>
+                    <span className="sidebar-nav-item__label">{n.label}</span>
+                    {n.badge>0 && <span className="sidebar-nav-item__badge">{n.badge}</span>}
                     <span style={{fontSize:10,opacity:0.7,transition:"transform 0.2s",transform:opnameExpanded?"rotate(90deg)":"rotate(0deg)"}}>▶</span>
                   </button>
                   {opnameExpanded && (
@@ -4157,12 +4158,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 </div>
               );
             }
-            // Regular nav item
             return (
-              <button key={n.id} style={navBtnStyle(tab===n.id)} onClick={()=>{setTab(n.id); if(n.id!=="transaction") setTugExpanded(false); if(n.id!=="master") setMasterExpanded(false); if(n.id!=="opname") setOpnameExpanded(false); setMobileMenuOpen(false);}}>
-                <span>{n.icon}</span> {n.label}
-                {n.badge>0 && <span style={{marginLeft:"auto",background:"#dc2626",color:"white",borderRadius:20,padding:"1px 7px",fontSize:10,fontWeight:800}}>{n.badge}</span>}
-              </button>
+              <SidebarNavItem
+                key={n.id}
+                item={n}
+                active={tab===n.id}
+                isMobile={isMobile}
+                onClick={()=>{setTab(n.id); if(n.id!=="transaction") setTugExpanded(false); if(n.id!=="master") setMasterExpanded(false); if(n.id!=="opname") setOpnameExpanded(false); setMobileMenuOpen(false);}}
+              />
             );
           })}
         </div>
@@ -5580,7 +5583,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
         {/* APPROVAL — semua notifikasi approval (TUG, Lokasi/Blok, Pemindahan Stok, dkk) dikumpulkan di sini, dipisah per-bagian + riwayat di bawah */}
         {tab==="approval" && hasRole(currentUser, "TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN","MGR_ULTG","ADMIN_ULTG") && (
-          <div>
+          <div className="approval-page">
             {(()=>{
               const tugCount = myPendingApprovals.length;
               const capCount = hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
@@ -5594,39 +5597,52 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               const stockCountCount = hasRole(currentUser, "ASMAN") ? stockCountPendingCount : 0;
               const total = tugCount+capCount+lokasiCount+stokCount+alatBeratCount+opnameCount+stockCountCount;
               const chips = [
-                {id:"ALL", label:"Semua", count:total},
-                {id:"TUG", label:"TUG", count:tugCount},
-                {id:"ALAT_BERAT", label:"Alat Berat", count:alatBeratCount},
-                {id:"OPNAME", label:"Stock Opname", count:opnameCount},
-                {id:"STOCK_COUNT", label:"Stock Count", count:stockCountCount},
-                {id:"STOK", label:"Pemindahan/Edit/Hapus Stok", count:stokCount},
-                {id:"LOKASI", label:"Lokasi/Blok", count:lokasiCount},
-                {id:"KAPASITAS", label:"Kapasitas Gudang", count:capCount},
+                {id:"ALL", icon:"▦", label:"Semua", count:total},
+                {id:"TUG", icon:"↔", label:"TUG", count:tugCount},
+                {id:"ALAT_BERAT", icon:"⚙", label:"Alat Berat", count:alatBeratCount},
+                {id:"OPNAME", icon:"▣", label:"Stock Opname", count:opnameCount},
+                {id:"STOCK_COUNT", icon:"≋", label:"Stock Count", count:stockCountCount},
+                {id:"STOK", icon:"□", label:"Perubahan Stok", count:stokCount},
+                {id:"LOKASI", icon:"⌖", label:"Lokasi / Blok", count:lokasiCount},
+                {id:"KAPASITAS", icon:"▥", label:"Kapasitas", count:capCount},
               ].filter(c=>c.id==="ALL"||c.count>0);
               return (
-                <div style={{marginBottom:12}}>
-                  <h1 style={sty.pageTitle}>Approval</h1>
-                  <p style={{color:C.muted,fontSize:13,marginBottom:total>0?10:0}}>{total} item menunggu persetujuan atau tindakan kamu ({ROLES[currentUser.role]})</p>
+                <div style={{marginBottom:16}}>
+                  <div className="approval-hero">
+                    <div className="approval-hero__copy">
+                      <div className="approval-eyebrow"><span></span> Decision Center</div>
+                      <h1>Approval</h1>
+                      <p>Tinjau dan putuskan seluruh pengajuan operasional dalam satu ruang kerja.</p>
+                    </div>
+                    <div className="approval-hero__summary">
+                      <div><strong>{total}</strong><span>Menunggu tindakan</span></div>
+                      <div><strong>{Math.max(0,chips.length-1)}</strong><span>Kategori aktif</span></div>
+                      <div className="approval-role-chip"><span>Wewenang</span><strong>{ROLES[currentUser.role]}</strong></div>
+                    </div>
+                  </div>
                   {/* Filter jenis approval + pageSize — tepat di bawah subtitle, langsung
                       nyambung ke list di bawahnya (bukan 1 list panjang campur aduk semua jenis). */}
                   {total>0 && (
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",paddingBottom:10,borderBottom:`1px solid ${C.border}`}}>
-                      {chips.map(c=>{
-                        const active = approvalTypeFilter===c.id;
-                        return (
-                          <button key={c.id} onClick={()=>setApprovalTypeFilter(c.id)}
-                            style={{display:"flex",alignItems:"center",gap:5,padding:"5px 12px",borderRadius:20,border:`1.5px solid ${active?C.accent:C.border}`,background:active?C.accent:"white",color:active?"white":C.muted,fontWeight:700,fontSize:11,cursor:"pointer"}}>
-                            <span>{c.label}</span>
-                            <span style={{fontWeight:900}}>({c.count})</span>
-                          </button>
-                        );
-                      })}
-                      <div style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.muted,marginLeft:"auto"}}>
+                    <div className="approval-filterbar">
+                      <div className="approval-filterbar__label"><span>FILTER ANTRIAN</span><small>Pilih kategori keputusan</small></div>
+                      <div className="approval-filterbar__items">
+                        {chips.map(c=>{
+                          const active = approvalTypeFilter===c.id;
+                          return (
+                            <button key={c.id} className={active?"is-active":""} onClick={()=>setApprovalTypeFilter(c.id)}>
+                              <span className="approval-filterbar__icon">{c.icon}</span>
+                              <span>{c.label}</span>
+                              <b>{c.count}</b>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="approval-pagesize">
                         Tampilkan
                         <select style={{...sty.select,width:"auto",padding:"3px 6px",minHeight:"unset",fontSize:11}} value={approvalPageSize} onChange={e=>setApprovalPageSize(Number(e.target.value))}>
                           {[10,20,50].map(n=><option key={n} value={n}>{n}</option>)}
                         </select>
-                        item/halaman
+                        <span>item</span>
                       </div>
                     </div>
                   )}
@@ -5635,7 +5651,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             })()}
 
             {(approvalTypeFilter==="ALL"||approvalTypeFilter==="TUG") && (
-              <div style={{fontWeight:800,fontSize:14,margin:"4px 0 10px"}}>🔄 Transaksi TUG</div>
+              <div className="approval-section-title"><span>↔</span><div>Transaksi TUG<small>Dokumen operasional yang membutuhkan keputusan Anda</small></div></div>
             )}
             <ApprovalTab
               pendingTxns={myPendingApprovals}
