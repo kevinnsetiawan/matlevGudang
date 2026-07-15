@@ -5,6 +5,34 @@ import { hasRole } from "../lib/roles.js";
 import { AIFaqPanel } from "./AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./TelegramWhitelistPanel.jsx";
 
+// Render teks jawaban Pak War: **bold** → <strong>, baris "- " berurutan
+// dikelompokkan jadi <ul class="ai-richlist">, baris lain jadi <p>.
+function renderInline(text) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i}>{part.slice(2, -2)}</strong>
+      : part
+  );
+}
+function renderAIText(text) {
+  const lines = String(text).split("\n");
+  const nodes = [];
+  let list = null;
+  const flush = () => {
+    if (list) { nodes.push(<ul key={`l${nodes.length}`} className="ai-richlist">{list}</ul>); list = null; }
+  };
+  lines.forEach((line, i) => {
+    if (line.startsWith("- ")) {
+      (list ||= []).push(<li key={i}>{renderInline(line.slice(2))}</li>);
+    } else {
+      flush();
+      if (line.trim()) nodes.push(<p key={`p${i}`}>{renderInline(line)}</p>);
+    }
+  });
+  flush();
+  return nodes;
+}
+
 export function AIAgentPage({
   chatHistory, setChatHistory, chatInput, setChatInput,
   chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState,
@@ -69,7 +97,7 @@ export function AIAgentPage({
           <div className="ai-chat-history">
             {chatHistory.map((message,index)=><div key={index} className={`ai-message is-${message.role}`}>
               <div className="ai-message__avatar" aria-hidden="true">{message.role==="user"?"U":"PW"}</div>
-              <div className="ai-message__content"><span>{message.role==="user"?"Anda":"Pak War"}</span><p>{message.text}</p></div>
+              <div className="ai-message__content"><span>{message.role==="user"?"Anda":"Pak War"}</span>{message.role==="user"?<p>{message.text}</p>:<div className="ai-message__bubble">{renderAIText(message.text)}</div>}</div>
             </div>)}
             {chatLoading && <div className="ai-message is-ai is-loading"><div className="ai-message__avatar" aria-hidden="true">PW</div><div className="ai-message__content"><span>Pak War</span><p>Sedang membaca dan menganalisis data gudang...</p></div></div>}
             <div ref={chatEndRef}/>
@@ -77,11 +105,18 @@ export function AIAgentPage({
         )}
 
         <div className="ai-composer">
-          {!isWelcome && <button className="ai-composer__reset" title="Mulai percakapan baru" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data gudang ${WAREHOUSE}?`}])}>Percakapan baru</button>}
-          <textarea rows={1} placeholder="Tulis pertanyaan untuk Pak War..." value={chatInput} onChange={event=>setChatInput(event.target.value)} onKeyDown={handleKeyDown}/>
-          <button className="ai-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>Kirim</button>
+          <label className="ai-composer__field">
+            <span>Tanyakan kepada Pak War</span>
+            <textarea rows={2} placeholder="Contoh: Berapa stok material trafo dan mana yang perlu segera ditindaklanjuti?" value={chatInput} onChange={event=>setChatInput(event.target.value)} onKeyDown={handleKeyDown}/>
+          </label>
+          <div className="ai-composer__actions">
+            <div>
+              {!isWelcome && <button className="ai-composer__reset" title="Mulai percakapan baru" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data gudang ${WAREHOUSE}?`}])}>Percakapan baru</button>}
+              <span className="ai-composer__hint">Enter untuk kirim · Shift + Enter untuk baris baru</span>
+            </div>
+            <button className="ai-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>{chatLoading?"Menganalisis...":"Kirim pertanyaan"}</button>
+          </div>
         </div>
-        <div className="ai-composer__hint">Enter untuk kirim · Shift + Enter untuk baris baru</div>
       </section>
     </div>
   );

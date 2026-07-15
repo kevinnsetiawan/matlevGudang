@@ -2423,9 +2423,10 @@ export default function PLNWarehouse() {
     onLoading(true);
     try {
       const pdfText = await extractPdfText(pdfBase64);
+      const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_GROQ_API_KEY}` },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
           max_tokens: 1000,
@@ -3712,17 +3713,20 @@ export default function PLNWarehouse() {
 
     const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk ${WAREHOUSE}.
 
-INSTRUKSI FORMAT JAWABAN:
-Selalu jawab dalam format terstruktur berikut (gunakan emoji dan baris baru):
+PERSONA & GAYA JAWABAN:
+Kamu Pak War, staf senior gudang PLN yang menjawab pertanyaan rekan kerja. Pakai
+Bahasa Indonesia korporat yang natural dan ramah — bukan template kaku, bukan
+robotik.
 
-📊 DATA
-[fakta & angka spesifik dari data sistem]
-
-🔍 ANALISIS
-[interpretasi, konteks, dan temuan penting]
-
-💡 REKOMENDASI
-[tindakan konkret yang disarankan, spesifik dan dapat dilakukan]
+ATURAN JAWABAN:
+- Jawab HANYA apa yang ditanya. JANGAN menambahkan analisis, interpretasi, atau
+  rekomendasi kecuali user memintanya secara eksplisit.
+- Buka dengan satu kalimat pengantar singkat, lalu langsung ke data. Boleh tutup
+  dengan satu kalimat penawaran bantuan singkat.
+- Saat menyebut material/stok, WAJIB satu bullet per item, satu baris per item,
+  dengan format persis:
+  - **Nama Material** [kode katalog] — stok X unit · Lokasi: Y
+  Selalu cantumkan lokasi bila tersedia di data; kalau tidak ada tulis "Lokasi: -".
 
 Sumber: Data WARNOTO per ${now.toLocaleDateString("id-ID")}
 
@@ -3739,7 +3743,7 @@ SNAPSHOT DATA SISTEM SAAT INI:
 INVENTORI (${enrichedStocks.length} item total):
 Nilai total: Rp ${fmtNum(Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
 Top 20 material by nilai:
-${top20.map(s=>`- ${s.name} [${s.katalog}]: ${fmtNum(s.qty)} ${s.unit} | Rp ${fmtNum(Math.round(s.qty*s.price))}`).join('\n')}
+${top20.map(s=>`- ${s.name} [${s.katalog}]: ${fmtNum(s.qty)} ${s.unit} | Rp ${fmtNum(Math.round(s.qty*s.price))} | lokasi: ${s.lokasi||"-"}`).join('\n')}
 
 MATERIAL KRITIS (stok ≤ minimum):
 ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok ${s.qty} ${s.unit}, min ${s.minQty}`).join('\n')}
@@ -3761,10 +3765,45 @@ ${ragContextText}
 
 Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pencarian Knowledge Base). Gunakan Bahasa Indonesia yang profesional.`;
 
+    function buildLocalWarehouseAnswer() {
+      const normalized = msg.toLowerCase();
+      const keywords = normalized
+        .replace(/[^a-z0-9\s-]/g," ")
+        .split(/\s+/)
+        .filter(word=>word.length>=3 && !["berapa","material","gudang","stoknya","tolong","pak","war","yang","untuk","dengan","dari","saat","sekarang","hari","ini"].includes(word));
+      const matchedStocks = enrichedStocks.filter(stock=>{
+        const haystack = `${stock.name||""} ${stock.katalog||""} ${stock.jenisBarang||""}`.toLowerCase();
+        return keywords.length>0 && keywords.some(keyword=>haystack.includes(keyword));
+      }).slice(0,8);
+      const totalValue = enrichedStocks.reduce((sum,stock)=>sum+(stock.qty*stock.price),0);
+      const localNotice = "Layanan AI sedang tidak tersedia, jadi informasi berikut saya bacakan langsung dari data WARNOTO.";
+
+      if (/pending|approval|persetujuan|dokumen|tug/.test(normalized)) {
+        return `${localNotice}\n\nBerikut dokumen yang tercatat menunggu persetujuan:\n${pendingDetailText}\n\nKalau butuh detail salah satu dokumen, tinggal sebutkan ya.`;
+      }
+      if (/kritis|hampir habis|minimum|menipis/.test(normalized)) {
+        const criticalText = kritis.length===0
+          ? "Tidak ada material dengan stok di bawah atau sama dengan batas minimum."
+          : kritis.slice(0,12).map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · minimum ${fmtNum(stock.minQty)}`).join("\n");
+        return `${localNotice}\n\nIni daftar material yang stoknya sudah menyentuh batas minimum:\n${criticalText}\n\nSaya siap bantu kalau perlu data lain.`;
+      }
+      if (matchedStocks.length>0) {
+        const materialText = matchedStocks.map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · Lokasi: ${stock.lokasi||"-"}`).join("\n");
+        return `${localNotice}\n\nBerikut material yang cocok dengan yang Anda tanyakan:\n${materialText}\n\nSebutkan saja bila ada material lain yang mau dicek.`;
+      }
+      if (/forecast|proyeksi|prediksi|bulan|pemakaian/.test(normalized)) {
+        const usageText = topPakai.length===0 ? "Belum ada transaksi pemakaian yang cukup." : topPakai.map(([name,data])=>`- **${name}** — ${fmtNum(data.total)} unit dalam ${data.count} transaksi`).join("\n");
+        return `${localNotice}\n\nIni pemakaian material tertinggi dalam 3 bulan terakhir:\n${usageText}\n\nKalau perlu proyeksi lebih rinci, silakan buka menu Forecast Stok.`;
+      }
+      return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(enrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
+    }
+
     try {
+      const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
+      if (!groqKey) throw new Error("Konfigurasi layanan AI belum tersedia.");
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${import.meta.env.VITE_GROQ_API_KEY}`},
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
         body:JSON.stringify({
           model:"llama-3.3-70b-versatile",
           max_tokens:1500,
@@ -3779,12 +3818,16 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         })
       });
       const data = await resp.json();
-      const reply = data.choices?.[0]?.message?.content || "Maaf, tidak ada jawaban dari AI.";
+      if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
+      const reply = data.choices?.[0]?.message?.content;
+      if (!reply) throw new Error("Layanan AI tidak mengirimkan jawaban.");
       setChatHistory(h=>[...h,{role:"ai",text:reply}]);
-    } catch {
-      setChatHistory(h=>[...h,{role:"ai",text:"❌ Gagal koneksi ke AI. Periksa koneksi internet."}]);
+    } catch (error) {
+      console.error("Pak War beralih ke mode data lokal:", error.message);
+      setChatHistory(h=>[...h,{role:"ai",text:buildLocalWarehouseAnswer()}]);
+    } finally {
+      setChatLoading(false);
     }
-    setChatLoading(false);
   }
 
   async function forecastDrillDown(katalog, stockRows) {
@@ -3838,9 +3881,10 @@ Berikan analisis forecast dalam format:
 Sumber: Data TUG WARNOTO UPT Surabaya`;
 
     try {
+      const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
         method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${import.meta.env.VITE_GROQ_API_KEY}`},
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
         body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:1200,messages:[{role:"user",content:prompt}]})
       });
       const data = await resp.json();
