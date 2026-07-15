@@ -50,10 +50,29 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
 
   return (
     <div className="workspace-page capacity-page">
-      <div className="capacity-context">
-        <div><span>Warehouse capacity</span><strong>Data Kapasitas Gudang</strong></div>
-        <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
-      </div>
+      <section className="kpi-banner capacity-summary-banner" aria-label="Ringkasan kapasitas gudang">
+        <div className="capacity-summary-banner__header">
+          <div><span>Warehouse capacity</span><strong>Data Kapasitas Gudang</strong></div>
+          <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
+        </div>
+        {gudangCapacityList.length > 0 && (
+          <div className="capacity-summary-banner__metrics">
+            {[
+              {label:"Total Luas Lahan",val:fmtNum(Math.round(totalLahan))+" m²"},
+              {label:"Total Terpakai",val:fmtNum(Math.round(totalTerpakai))+" m²"},
+              {label:"Sisa Luas",val:fmtNum(Math.round(totalSisa))+" m²"},
+              {label:"Utilization Total",val:(utilTotal*100).toFixed(1)+"%",cls:utilTotal>=0.9?"is-danger":utilTotal>=0.75?"is-alert":""},
+              {label:"Penuh (≥90%)",val:kritis,cls:"is-danger"},
+              {label:"Terbatas (75-89%)",val:waspada,cls:"is-alert"},
+              {label:"Cukup (<75%)",val:aman,cls:"is-ok"},
+            ].map(kpi=>(
+              <div key={kpi.label} className={`kpi-banner__item${kpi.cls?" "+kpi.cls:""}`}>
+                <strong>{kpi.val}</strong><span>{kpi.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
       <div className="capacity-tabs" role="tablist" aria-label="Tampilan kapasitas gudang">
         {TABS.map(t=>(
           <button key={t.id} className={subTab===t.id?"is-active":""} onClick={()=>setSubTab(t.id)} role="tab" aria-selected={subTab===t.id}>
@@ -79,22 +98,6 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             </div>
           ) : (
             <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:16}}>
-                {[
-                  {label:"Total Luas Lahan",val:fmtNum(Math.round(totalLahan))+" m²",color:C.accent},
-                  {label:"Total Terpakai",val:fmtNum(Math.round(totalTerpakai))+" m²",color:"#7c3aed"},
-                  {label:"Sisa Luas",val:fmtNum(Math.round(totalSisa))+" m²",color:C.green},
-                  {label:"Utilization Total",val:(utilTotal*100).toFixed(1)+"%",color:utilTotal>=0.9?C.red:utilTotal>=0.75?"#f59e0b":C.green},
-                  {label:"🔴 Penuh (≥90%)",val:kritis,color:C.red},
-                  {label:"🟡 Terbatas (75-89%)",val:waspada,color:"#f59e0b"},
-                  {label:"🟢 Cukup (<75%)",val:aman,color:C.green},
-                ].map(kpi=>(
-                  <div key={kpi.label} style={{...sty.card,borderTop:`3px solid ${kpi.color}`,padding:14}}>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:4}}>{kpi.label}</div>
-                    <div style={{fontSize:16,fontWeight:800,color:kpi.color}}>{kpi.val}</div>
-                  </div>
-                ))}
-              </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
                 <div style={{...sty.card}}>
                   <div style={{fontWeight:700,marginBottom:10}}>🏆 Ranking UPT (Utilization)</div>

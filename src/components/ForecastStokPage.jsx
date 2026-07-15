@@ -181,6 +181,16 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
 
   return (
     <div className="workspace-page forecast-page">
+      <section className="forecast-overview kpi-banner">
+        <div className="forecast-overview__copy"><span>Proyeksi persediaan · {WAREHOUSE}</span><strong>Fokus pada material yang paling cepat membutuhkan tindakan</strong><small>Heuristik tersedia untuk seluruh material; prediksi ML muncul saat histori transaksi mencukupi.</small></div>
+        <div className="forecast-overview__metrics">
+          <button disabled={forecastView!=="forecast"} className={forecastView==="forecast"&&statusFilter==="critical"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="critical"?"ALL":"critical")}><span>Kritis</span><strong>{counts.critical}</strong></button>
+          <button disabled={forecastView!=="forecast"} className={forecastView==="forecast"&&statusFilter==="attention"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="attention"?"ALL":"attention")}><span>Perhatian</span><strong>{counts.attention}</strong></button>
+          <div><span>ML tersedia</span><strong>{mlReadyCount}</strong></div>
+          <div><span>Total material</span><strong>{enriched.length}</strong></div>
+        </div>
+      </section>
+
       <div className="forecast-view-switch" role="tablist" aria-label="Tampilan forecast">
         <button className={forecastView==="forecast"?"is-active":""} onClick={()=>setForecastView("forecast")} role="tab" aria-selected={forecastView==="forecast"}>Forecast Stok</button>
         <button className={forecastView==="material_cadang"?"is-active":""} onClick={()=>setForecastView("material_cadang")} role="tab" aria-selected={forecastView==="material_cadang"}>Material Cadang</button>
@@ -199,16 +209,6 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
         />
       ) : (
         <>
-          <section className="forecast-overview">
-            <div className="forecast-overview__copy"><span>Proyeksi persediaan · {WAREHOUSE}</span><strong>Fokus pada material yang paling cepat membutuhkan tindakan</strong><small>Heuristik tersedia untuk seluruh material; prediksi ML muncul saat histori transaksi mencukupi.</small></div>
-            <div className="forecast-overview__metrics">
-              <button className={statusFilter==="critical"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="critical"?"ALL":"critical")}><span>Kritis</span><strong>{counts.critical}</strong></button>
-              <button className={statusFilter==="attention"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="attention"?"ALL":"attention")}><span>Perhatian</span><strong>{counts.attention}</strong></button>
-              <div><span>ML tersedia</span><strong>{mlReadyCount}</strong></div>
-              <div><span>Total material</span><strong>{enriched.length}</strong></div>
-            </div>
-          </section>
-
           <div className="forecast-controls">
             <div className="forecast-search"><span aria-hidden="true">⌕</span><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="Cari nama atau nomor katalog..."/></div>
             <div className="forecast-status-filter">

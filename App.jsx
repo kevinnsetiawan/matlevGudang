@@ -68,7 +68,7 @@ import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
-import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos } from "./src/lib/supabaseSync.js";
+import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage } from "./src/lib/supabaseSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
 
@@ -2452,6 +2452,14 @@ export default function PLNWarehouse() {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader(); r.onload = ev => setter(ev.target.result); r.readAsDataURL(f);
   }
+  // Foto satpam disimpan inline di jsonb (bukan bucket) → wajib dikompres kecil (maks 400px)
+  // supaya tidak membengkakkan master jsonb & localStorage.
+  async function handleSatpamFoto(e) {
+    const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+    if (!f.type.startsWith("image/")) { showToast("File harus berupa gambar.","error"); return; }
+    try { const img = await compressImage(f, { maxDim:400, maxBytes:120_000 }); setSatpamForm(sf=>({...sf, foto:img})); }
+    catch { showToast("Gagal memproses foto.","error"); }
+  }
   async function saveHeavyEquipmentEdit(equipmentId, updates) {
     if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengubah data alat.","error"); return; }
     const alat = heavyEquipmentList.find(eq=>eq.id===equipmentId);
@@ -3982,6 +3990,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
   const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
+  const activeTugTxns = tugSubTab==="TUG15" ? [] : txns.filter(t=>t.docType===tugSubTab);
+  const activeTugSummary = [
+    {label:"Total Dokumen",val:activeTugTxns.length},
+    {label:"Menunggu",val:activeTugTxns.filter(t=>t.status==="PENDING").length,cls:"is-alert"},
+    {label:"Disetujui",val:activeTugTxns.filter(t=>t.status==="APPROVED").length,cls:"is-ok"},
+    {label:"Draft",val:activeTugTxns.filter(t=>t.status==="DRAFT").length},
+  ];
 
   // ── DESIGN TOKENS ──
 
@@ -5018,7 +5033,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 {satpamList.map(sp=>(
                   <div key={sp.id} style={{...sty.card,borderTop:`3px solid ${C.accent}`}}>
                     <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}>
-                      <div style={{width:44,height:44,borderRadius:"50%",background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,border:`1px solid #bfdbfe`}}>🛡️</div>
+                      {sp.foto
+                        ? <img src={sp.foto} alt={sp.name} style={{width:44,height:44,borderRadius:"50%",objectFit:"cover",border:`1px solid #bfdbfe`,flexShrink:0}}/>
+                        : <div style={{width:44,height:44,borderRadius:"50%",background:"#0b2559",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,flexShrink:0}}>{(sp.name||"?").trim().charAt(0).toUpperCase()}</div>}
                       <div>
                         <div style={{fontWeight:700,fontSize:14}}>{sp.name}</div>
                         <div style={{fontSize:12,color:C.muted}}>{sp.id}{sp.telp ? ` • ${sp.telp}` : ""}</div>
@@ -5527,30 +5544,53 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
         {tab==="transaction" && (
           <div className="workspace-page tug-page">
-            <div className="tug-command-bar">
-              <div className="tug-command-bar__copy">
-                <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
-                <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
-                <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
+            <section className={`kpi-banner tug-summary-banner${tugSubTab==="TUG15"?" is-context-only":""}`} aria-label="Ringkasan transaksi TUG">
+              <div className="tug-summary-banner__context">
+                <div className="tug-summary-banner__copy">
+                  <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
+                  <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
+                  <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
+                </div>
               </div>
-              {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>}
-            </div>
+              {tugSubTab!=="TUG15" && (
+                <div className="tug-summary-banner__metrics">
+                  {activeTugSummary.map(metric=>(
+                    <div key={metric.label} className={`kpi-banner__item${metric.cls?" "+metric.cls:""}`}>
+                      <strong>{metric.val}</strong><span>{metric.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
 
-            <div className="tug-process-tabs" role="tablist" aria-label="Pilih proses TUG">
-              {(tugGroup==="penerimaan" ? ["TUG3","TUG10"]
-                : tugGroup==="pengeluaran" ? ["TUG9","TUG8"]
-                : tugGroup==="laporan" ? ["TUG15"]
-                : ["TUG5"]
-              ).map(id=>{
-                const u = TUG_UI[id]||{}; const on = tugSubTab===id;
-                return (
-                <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
-                  <span>{u.code||id}</span>
-                  <strong>{u.chip||id}</strong>
-                </button>
-                );
-              })}
-            </div>
+            <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
+              <div className="tug-process-tabs__header">
+                <strong>Pilih jenis transaksi</strong>
+                <span>Klik kartu untuk membuka proses yang dibutuhkan</span>
+              </div>
+              <div className="tug-process-tabs__options" role="tablist" aria-label="Pilih proses TUG">
+                {(tugGroup==="penerimaan" ? ["TUG3","TUG10"]
+                  : tugGroup==="pengeluaran" ? ["TUG9","TUG8"]
+                  : tugGroup==="laporan" ? ["TUG15"]
+                  : ["TUG5"]
+                ).map(id=>{
+                  const u = TUG_UI[id]||{}; const on = tugSubTab===id;
+                  return (
+                  <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
+                    <span>{u.code||id}</span>
+                    <strong>{u.chip||id}</strong>
+                    <small>{on?"Sedang dibuka":"Klik untuk buka"}</small>
+                  </button>
+                  );
+                })}
+              </div>
+            </section>
+            {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
+              <div className="tug-action-row">
+                <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong></div>
+                <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>
+              </div>
+            )}
             <div className="tug-status-filter">
               <span>Status dokumen</span>
               {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
@@ -5712,7 +5752,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               ].filter(c=>c.id==="ALL"||c.count>0);
               return (
                 <div style={{marginBottom:16}}>
-                    <div className="approval-hero__summary approval-summary-strip">
+                    <div className="approval-hero__summary approval-summary-strip kpi-banner">
                       <div><strong>{total}</strong><span>Menunggu tindakan</span></div>
                       <div><strong>{Math.max(0,chips.length-1)}</strong><span>Kategori aktif</span></div>
                       <div className="approval-role-chip"><span>Wewenang</span><strong>{ROLES[currentUser.role]}</strong></div>
@@ -6370,6 +6410,21 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{marginBottom:12}}>
               <label style={sty.label}>No. Telepon (opsional)</label>
               <input style={sty.input} value={satpamForm.telp||""} onChange={e=>setSatpamForm(sf=>({...sf,telp:e.target.value}))} placeholder="08xxxxxxxxxx"/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <label style={sty.label}>Foto (opsional)</label>
+              <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                <div style={{width:96,height:96,borderRadius:12,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  {satpamForm.foto ? <img src={satpamForm.foto} alt="Foto satpam" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <span style={{fontSize:30}}>🛡️</span>}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  <label style={{...sty.btn("ghost","sm"),textAlign:"center",cursor:"pointer"}}>
+                    📷 {satpamForm.foto?"Ganti Foto":"Upload Foto"}
+                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleSatpamFoto}/>
+                  </label>
+                  {satpamForm.foto && <button style={sty.btn("danger","sm")} onClick={()=>setSatpamForm(sf=>({...sf,foto:null}))}>Hapus Foto</button>}
+                </div>
+              </div>
             </div>
             <div style={{display:"flex",gap:10,marginTop:20}}>
               <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setSatpamModal(null)}>Batal</button>

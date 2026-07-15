@@ -259,7 +259,7 @@ export async function syncFotoMaterialToSupabase(stocks, katalogList) {
 // supaya hemat penyimpanan/bandwidth. Menerima File maupun data URL.
 //   maxBytes : batas ukuran hasil (default 1MB; SIM/KTP pakai ~300KB).
 //   maxDim   : sisi terpanjang maksimum (px) sebelum kualitas diturunkan.
-async function compressImage(input, { maxBytes = 1_000_000, maxDim = 1600 } = {}) {
+export async function compressImage(input, { maxBytes = 1_000_000, maxDim = 1600 } = {}) {
   const srcUrl = typeof input === "string" ? input : URL.createObjectURL(input);
   try {
     const img = await new Promise((resolve, reject) => {

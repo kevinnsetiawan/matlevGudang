@@ -16,6 +16,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
   // halaman tunggal (permintaan user 2026-07-06). `effectiveUptFilter` jadi SATU sumber kebenaran
   // scoping: non-MSB dikunci ke UPT sendiri (tidak bisa diubah — mereka cuma boleh urus UPT-nya),
   // MSB/Manager UIT tetap bebas pilih "Semua UPT" atau fokus ke 1 UPT tertentu via dropdown.
+  const [viewMode, setViewMode] = useState("armada");
   const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
   const effectiveUptFilter = isMSB ? myUptSelected : (myUpt || "");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
@@ -248,37 +249,46 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         </div>
       )}
 
-      {/* Overview kondisi — clickable chips, filter grid "Daftar Alat Berat" di bawah */}
-      <div className="operations-segments">
-        {kondisiGroups.map(g=>{
-          const active = kondisiFilter===g.id;
-          return (
-            <button key={g.id} className={active?"is-active":""} onClick={()=>setKondisiFilter(g.id)} style={{"--segment-color":g.color}}>
-              <span style={{fontWeight:900,fontSize:14}}>{g.count}</span>
-              <span>{g.label}</span>
-            </button>
-          );
-        })}
+      {/* Mode switch (pola dashboard) — ringkasan/overdue di atas tetap tampil di kedua mode */}
+      <div className="dashboard-mode-switch" role="tablist" aria-label="Tampilan alat berat" style={{marginBottom:12}}>
+        {[{id:"armada",label:"Daftar Alat",caption:"Registry & kondisi armada"},{id:"peminjaman",label:"Peminjaman & Histori",caption:"Pengajuan, approval, dan riwayat"}].map(item=>(
+          <button key={item.id} className={viewMode===item.id?"is-active":""} onClick={()=>setViewMode(item.id)} role="tab" aria-selected={viewMode===item.id}>
+            <strong>{item.label}{item.id==="peminjaman"&&pendingCount>0&&<span style={{marginLeft:6,padding:"1px 7px",borderRadius:20,fontSize:12,fontWeight:800,background:C.red,color:"#fff"}}>{pendingCount}</span>}</strong><span>{item.caption}</span>
+          </button>
+        ))}
       </div>
 
+      {viewMode==="armada" && (<>
       {/* ── SECTION: Daftar Alat Berat ── */}
       <div className="operations-section-heading"><div><span>Fleet Registry</span><h2>Daftar Alat Berat</h2></div><small>{filteredEquipment.length} alat sesuai filter</small></div>
-      <div className="operations-category-filters">
-        {EQUIPMENT_CATEGORIES.map(cat=>{
-          const active = categoryFilter===cat.id;
-          const count = equipmentList.filter(e=>
-            (!effectiveUptFilter||e.upt===effectiveUptFilter)&&
-            (cat.id==="ALL"||getEquipmentCategory(e)===cat.id)&&
-            (kondisiFilter==="ALL"||e.statusAlat===kondisiFilter||(kondisiFilter==="DIPINJAM"&&!!activeLoanForEquipment(e.id)))
-          ).length;
-          return (
-            <button key={cat.id} className={active?"is-active":""} onClick={()=>setCategoryFilter(cat.id)}>
-              <span style={{color:active?C.accent:"#9ca3af",display:"flex"}}>{cat.icon}</span>
-              <span style={{fontSize:12,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
-              <span style={{fontSize:12,fontWeight:700,color:active?C.accent:C.muted}}>{count}</span>
-            </button>
-          );
-        })}
+      {/* Kategori (kiri, wrap) + dropdown kondisi ringkas (kanan) — satu baris, hilangkan dualisme chip. */}
+      <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+        <div className="operations-category-filters" style={{flex:1,minWidth:0,marginBottom:0}}>
+          {EQUIPMENT_CATEGORIES.map(cat=>{
+            const active = categoryFilter===cat.id;
+            const count = equipmentList.filter(e=>
+              (!effectiveUptFilter||e.upt===effectiveUptFilter)&&
+              (cat.id==="ALL"||getEquipmentCategory(e)===cat.id)&&
+              (kondisiFilter==="ALL"||e.statusAlat===kondisiFilter||(kondisiFilter==="DIPINJAM"&&!!activeLoanForEquipment(e.id)))
+            ).length;
+            return (
+              <button key={cat.id} className={active?"is-active":""} onClick={()=>setCategoryFilter(cat.id)}>
+                <span style={{color:active?C.accent:"#9ca3af",display:"flex"}}>{cat.icon}</span>
+                <span style={{fontSize:12,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
+                <span style={{fontSize:12,fontWeight:700,color:active?C.accent:C.muted}}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+        <label style={{display:"flex",flexDirection:"column",gap:4,flex:"0 0 auto",width:190}}>
+          <span style={{fontSize:12,fontWeight:700,color:C.muted}}>Kondisi</span>
+          <select value={kondisiFilter} onChange={e=>setKondisiFilter(e.target.value)}
+            style={{width:"100%",minHeight:36,padding:"7px 10px",border:`1px solid ${C.border}`,borderRadius:9,outline:0,background:"#fff",color:C.text,fontSize:13}}>
+            {kondisiGroups.map(g=>(
+              <option key={g.id} value={g.id}>{g.label} ({g.count})</option>
+            ))}
+          </select>
+        </label>
       </div>
       <div style={{fontSize:12,color:C.muted,marginBottom:10}}>
         Menampilkan <b style={{color:C.text}}>{filteredEquipment.length}</b> alat
@@ -309,6 +319,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         })}
       </div>
 
+      </>)}
+
+      {viewMode==="peminjaman" && (<>
       {/* ── SECTION: Ajukan Peminjaman + Peminjaman & Histori ── */}
       <div className="operations-section-heading"><div><span>Loan Operations</span><h2>Peminjaman & Histori</h2></div><small>{unifiedLoans.length} transaksi</small></div>
       <div className="operations-category-filters is-compact">
@@ -404,6 +417,8 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         </div>
 
       </div>
+
+      </>)}
 
       {/* MODAL EDIT ALAT — status alat + upload foto sekaligus, Admin/TL saja */}
       {editingEquipment && (()=>{
