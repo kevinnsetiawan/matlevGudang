@@ -554,6 +554,10 @@
 }
 @keyframes sidebar-overlay-in { from { opacity:0; } to { opacity:1; } }
 @keyframes account-menu-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+
+/* Spinner overlay "Menyimpan Transaksi" (commitNewTxn) */
+.txn-spinner { animation: txn-spin 0.9s linear infinite; }
+@keyframes txn-spin { to { transform: rotate(360deg); } }
 @media (max-width: 768px) {
   .app-sidebar { position: fixed; height: 100dvh; }
   .app-sidebar__nav { overscroll-behavior: contain; }

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { hasRole } from "../lib/roles.js";
 import { SearchableSelect } from "./SearchableSelect.jsx";
 
-export function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, sty, C, saveRencana, deleteRencana, aiExtractKontrak }) {
+export function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, sty, C, saveRencana, deleteRencana, aiExtractKontrak, isMobile }) {
   const [showForm, setShowForm] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");

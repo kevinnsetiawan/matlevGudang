@@ -1,7 +1,7 @@
 // Komponen HeavyEquipmentDashboardSummary — dipindah dari App.jsx (refactor Fase 4e).
 import { UPT } from "../constants.js";
 import { hasRole } from "../lib/roles.js";
-import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanRuntimeStatus, isPendingHeavyEquipmentLoan, getEquipmentCategory } from "../lib/heavyEquipment.js";
+import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanRuntimeStatus, isPendingHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName } from "../lib/heavyEquipment.js";
 
 export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab, currentUser }) {
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();

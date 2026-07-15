@@ -1,6 +1,7 @@
 // RAG helpers: Cohere embed (teks+gambar), OCR.space, pencocokan nameplate,
 // ringkasan transaksi utk chunk RAG. Dipindah dari App.jsx (refactor Fase 3f).
 import { fmtDateOnly } from "./utils.js";
+import { compressImage } from "./supabaseSync.js";
 
 // --- Util normalisasi teks nameplate (dipakai bersama semua pencocokan teks) ---
 export const npNorm    = s => (s || "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();

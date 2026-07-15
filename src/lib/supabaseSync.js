@@ -21,7 +21,7 @@ const TXN_PHOTO_SLOTS = [
   { field: "fotoKontrak",           bucket: "tug-photos",       maxBytes: 1_000_000 },
 ];
 
-const _isDataUrl = (v) => typeof v === "string" && v.startsWith("data:");
+export const _isDataUrl = (v) => typeof v === "string" && v.startsWith("data:");
 
 function rowSyncKey(r) {
   return `${r.katalogId}|${r.ts}|${r.masuk}|${r.keluar}|${r.docType}`;
@@ -139,6 +139,16 @@ export async function syncStockQtyToSupabase(stocks, katalogList) {
   return { katalogCount: katalogPayload.length, stockCount: stockPayload.length };
 }
 
+// Balapan promise vs timeout — kalau promise belum selesai dalam `ms`, reject
+// dengan pesan yang jelas (dipakai supaya upload foto yang macet tidak
+// menggantung proses simpan transaksi selamanya).
+function _withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`Timeout ${label || "upload"} (${Math.round(ms / 1000)}s)`)), ms)),
+  ]);
+}
+
 async function _uploadTxnPhoto(dataUrl, bucket, path) {
   const blob = dataUrlToBlob(dataUrl);
   const { error } = await supabase.storage.from(bucket).upload(path, blob, { upsert: true, contentType: blob.type });
@@ -151,21 +161,35 @@ async function _uploadTxnPhoto(dataUrl, bucket, path) {
 // Upload semua foto base64 sebuah transaksi ke Storage → ganti jadi URL/penanda.
 // Foto yang gagal upload (mis. offline) dibiarkan base64 & dicatat di `pending`
 // (transaksi tetap tersimpan + dokumen tetap bisa dibuat; disinkron ulang nanti).
-export async function processTxnPhotos(txn, prefix) {
+export async function processTxnPhotos(txn, prefix, onProgress) {
   if (!supabase) return { data: txn, pending: [] };
   const t = { ...txn };
   const pending = [];
+
+  // Hitung total foto ber-data-URL yang bakal diupload, supaya onProgress bisa
+  // melapor "x/total" (dipakai overlay progres simpan transaksi di App.jsx).
+  const total = TXN_PHOTO_SLOTS.filter(({ field }) => _isDataUrl(t[field])).length
+    + (Array.isArray(t.fotoMaterial) ? t.fotoMaterial.filter(fm => _isDataUrl(fm?.img)).length : 0)
+    + (Array.isArray(t.stockItems) ? t.stockItems.reduce((n, si) => n + ["fotoNameplate", "fotoBarangRetur"].filter(f => _isDataUrl(si?.[f])).length, 0) : 0);
+  let done = 0;
+  const tick = () => onProgress?.(++done, total);
+
   for (const { field, bucket, maxBytes } of TXN_PHOTO_SLOTS) {
     if (_isDataUrl(t[field])) {
-      try { t[field] = await _uploadTxnPhoto(await compressImage(t[field], { maxBytes }), bucket, `${prefix}/${field}.jpg`); }
+      try { t[field] = await _withTimeout(_uploadTxnPhoto(await compressImage(t[field], { maxBytes }), bucket, `${prefix}/${field}.jpg`), 30_000, "unggah foto"); }
       catch { pending.push(field); }
+      tick();
     }
   }
   if (Array.isArray(t.fotoMaterial)) {
     t.fotoMaterial = await Promise.all(t.fotoMaterial.map(async (fm) => {
       if (!_isDataUrl(fm?.img)) return fm;
-      try { return { ...fm, img: await _uploadTxnPhoto(await compressImage(fm.img, { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/material-${fm.stockId}.jpg`) }; }
-      catch { pending.push(`material:${fm.stockId}`); return fm; }
+      try {
+        const img = await _withTimeout(_uploadTxnPhoto(await compressImage(fm.img, { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/material-${fm.stockId}.jpg`), 30_000, "unggah foto");
+        tick();
+        return { ...fm, img };
+      }
+      catch { pending.push(`material:${fm.stockId}`); tick(); return fm; }
     }));
   }
   if (Array.isArray(t.stockItems)) {
@@ -173,8 +197,9 @@ export async function processTxnPhotos(txn, prefix) {
       const nsi = { ...si };
       for (const field of ["fotoNameplate", "fotoBarangRetur"]) {
         if (_isDataUrl(nsi[field])) {
-          try { nsi[field] = await _uploadTxnPhoto(await compressImage(nsi[field], { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/item${idx}-${field}.jpg`); }
+          try { nsi[field] = await _withTimeout(_uploadTxnPhoto(await compressImage(nsi[field], { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/item${idx}-${field}.jpg`), 30_000, "unggah foto"); }
           catch { pending.push(`item${idx}.${field}`); }
+          tick();
         }
       }
       return nsi;

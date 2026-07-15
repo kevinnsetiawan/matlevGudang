@@ -68,7 +68,7 @@ import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
-import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage } from "./src/lib/supabaseSync.js";
+import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl } from "./src/lib/supabaseSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
 
@@ -404,6 +404,7 @@ export default function PLNWarehouse() {
   const [photoSearchOcrText, setPhotoSearchOcrText] = useState(""); // teks nameplate terbaca (mode nameplate)
   const savingTxnRef = useRef(false); // cegah double-submit transaksi saat upload foto berjalan
   const [savingTxn, setSavingTxn] = useState(false); // mirror React untuk tombol Ajukan (disabled + "Menyimpan...")
+  const [savingInfo, setSavingInfo] = useState(null); // {label, done, total} — overlay progres simpan transaksi
   const [tug10Collapsed, setTug10Collapsed] = useState({}); // {idx:true} kartu barang retur yang diringkas
   const [tug10Highlight, setTug10Highlight] = useState(null); // key field yang di-highlight setelah gagal validasi
   const tug10Refs = useRef({}); // anchor scroll per seksi/field TUG-10
@@ -2981,14 +2982,15 @@ export default function PLNWarehouse() {
     if (savingTxnRef.current) return;       // cegah double-submit saat upload foto berjalan
     savingTxnRef.current = true;
     setSavingTxn(true);
+    setSavingInfo({ label: "Menyiapkan data...", done: 0, total: 0 });
     try {
     // Upload foto base64 ke Storage dulu → blob transaksi jadi ringan. Gagal upload
     // (offline) → foto tetap base64 + _fotoPending; transaksi & dokumen tetap jadi,
     // auto-sync menyusul saat online (syncPendingTxnPhotos).
     const txnId = `${docType}-${uid().slice(-6)}`;
     const _hasFoto = formData && ([formData.fotoKendaraan,formData.fotoSimKtp,formData.fotoSuratPengembalian,formData.fotoBAPengembalian,formData.fotoSuratJalanImg,formData.fotoKontrak].some(_isDataUrl) || (formData.fotoMaterial||[]).some(fm=>_isDataUrl(fm?.img)) || (formData.stockItems||[]).some(si=>_isDataUrl(si.fotoNameplate)||_isDataUrl(si.fotoBarangRetur)));
-    if (_hasFoto) showToast("⏳ Mengunggah foto & menyimpan transaksi...", "info");
-    const { data: _fd, pending: _pend } = await processTxnPhotos(formData, txnId);
+    if (_hasFoto) setSavingInfo({ label: "Mengunggah foto...", done: 0, total: 0 });
+    const { data: _fd, pending: _pend } = await processTxnPhotos(formData, txnId, (done, total) => setSavingInfo({ label: "Mengunggah foto...", done, total }));
     formData = _fd;
     if (_pend.length) showToast(`⚠️ ${_pend.length} foto belum terunggah (sinyal?). Transaksi & dokumen tetap tersimpan; foto disinkron otomatis saat online.`, "info");
 
@@ -3015,6 +3017,7 @@ export default function PLNWarehouse() {
       const newTxnsU = [...txns, nt5u];
       const newSeqU = seq + 1;
       setTxns(newTxnsU); setDocSeq(newSeqU); setTxnModal(false);
+      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
       await saveToCloud({txns: newTxnsU, docSeq: newSeqU});
       showToast(`${nt5u.docNumbers.tug5} dibuat! Menunggu approval Manager ULTG. ⏳`);
       return;
@@ -3039,6 +3042,7 @@ export default function PLNWarehouse() {
       const newTxns5 = [...txns, nt5];
       const newSeq5 = seq + 1;
       setTxns(newTxns5); setDocSeq(newSeq5); setTxnModal(false);
+      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
       await saveToCloud({txns: newTxns5, docSeq: newSeq5});
       showToast(`${nt5.docNumbers.tug5} dibuat! Menunggu approval Asman Konstruksi. ⏳`);
       return;
@@ -3064,6 +3068,7 @@ export default function PLNWarehouse() {
       const newTxns3 = [...txns, nt3];
       const newSeq3 = seq + 1;
       setTxns(newTxns3); setDocSeq(newSeq3); setTxnModal(false);
+      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
       await saveToCloud({txns: newTxns3, docSeq: newSeq3});
       showToast(`Transaksi ${nt3.docNumbers.tug3} dibuat! Menunggu approval TL Logistik (TUG-3 Karantina). ⏳`);
       return;
@@ -3084,9 +3089,13 @@ export default function PLNWarehouse() {
     const newTxns = [...txns, nt];
     const newSeq = seq + 1;
     setTxns(newTxns); setDocSeq(newSeq); setTxnModal(false);
+    setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
     await saveToCloud({txns: newTxns, docSeq: newSeq});
     showToast(`Transaksi ${nt.docNumbers[docKey]} dibuat! Menunggu approval ${ROLES[requiredApprover]}. ⏳`);
-    } finally { savingTxnRef.current = false; setSavingTxn(false); }
+    } catch (err) {
+      console.error("commitNewTxn gagal:", err);
+      showToast(`❌ Gagal menyimpan transaksi: ${err?.message||err}`, "error");
+    } finally { savingTxnRef.current = false; setSavingTxn(false); setSavingInfo(null); }
   }
 
   function docKeyOf(txn) {
@@ -4157,6 +4166,21 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           : {position:"fixed",top:20,right:20,maxWidth:420,zIndex:9999,background:toast.type==="error"?C.red:C.green,color:"white",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,0.2)"}
         }>{toast.msg}</div>
       )}
+      {savingInfo && (
+        <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,0.55)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:16,padding:"28px 32px",width:360,maxWidth:"100%",textAlign:"center",boxShadow:"0 24px 64px rgba(2,6,23,0.35)",borderTop:`4px solid ${C.accent}`}}>
+            <div className="txn-spinner" style={{width:44,height:44,margin:"0 auto 16px",border:`4px solid #e2e8f0`,borderTopColor:C.accent,borderRadius:"50%"}}/>
+            <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>Menyimpan Transaksi</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:savingInfo.total>0?12:0}}>{savingInfo.label}{savingInfo.total>0?` (${savingInfo.done}/${savingInfo.total})`:""}</div>
+            {savingInfo.total>0 && (
+              <div style={{height:6,background:"#e2e8f0",borderRadius:999,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${Math.round((savingInfo.done/savingInfo.total)*100)}%`,background:C.accent,borderRadius:999,transition:"width .3s ease"}}/>
+              </div>
+            )}
+            <div style={{fontSize:12,color:C.muted,marginTop:14}}>Mohon tunggu, jangan tutup halaman ini.</div>
+          </div>
+        </div>
+      )}
       {scannerOpen && <BarcodeScanner onDetect={handleScanResult} onClose={()=>setScannerOpen(false)}/>}
 
       {/* Overlay gelap di belakang drawer sidebar saat dibuka di HP — tap di luar drawer untuk menutup */}
@@ -4589,7 +4613,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             rencanaList={rencanaKedatanganList}
             katalogList={katalogList}
             currentUser={currentUser}
-            sty={sty} C={C}
+            sty={sty} C={C} isMobile={isMobile}
             saveRencana={saveRencana}
             deleteRencana={deleteRencana}
             aiExtractKontrak={aiExtractKontrak}
