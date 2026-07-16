@@ -1,6 +1,7 @@
 // Panel Kelola FAQ Bot (Admin) — kurasi jawaban dari log Telegram. Dipindah Fase 4b.
 import { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient.js";
+import { isDemoMode } from "../lib/demo.js";
 
 const BAD_ANSWER_KEYWORDS = ["maaf","tidak ada data","tidak bisa","tidak tersedia","kendala","tidak ditemukan"];
 
@@ -37,6 +38,7 @@ export function AIFaqPanel({ sty, C, onSaved }) {
   useEffect(() => { loadData(); }, []);
 
   async function saveFaq(log) {
+    if (isDemoMode()) { alert("Mode demo: perubahan tidak disimpan."); return; }
     if (!answerDraft.trim()) return;
     setSaving(true);
     try {
@@ -58,6 +60,7 @@ export function AIFaqPanel({ sty, C, onSaved }) {
   }
 
   async function deactivateFaq(id) {
+    if (isDemoMode()) { alert("Mode demo: perubahan tidak disimpan."); return; }
     await supabase.from("ai_faq_curated").update({is_active:false}).eq("id", id);
     loadData();
   }

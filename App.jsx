@@ -6,6 +6,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "rea
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, ROMAN, JENIS_BARANG, STATUS_RETUR_TO_JENIS } from "./src/constants.js";
 import { supabase, SUPABASE_URL, SUPABASE_KEY, usernameToAuthEmail } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
+import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { C, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
@@ -860,6 +861,7 @@ export default function PLNWarehouse() {
     return ["ADMIN_UIT","MGR_LOGISTIK_UIT"].includes(f.role) || (f.role==="PENGADAAN" && f.pengadaanScope==="UIT");
   }
   async function submitAkunEdit() {
+    if (isDemoMode()) { showToast("Mode demo: manajemen akun dinonaktifkan.","error"); return; }
     const f = akunForm;
     if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
     if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
@@ -881,6 +883,7 @@ export default function PLNWarehouse() {
     showToast("✅ Akun berhasil diperbarui!");
   }
   async function submitAkunBaru() {
+    if (isDemoMode()) { showToast("Mode demo: manajemen akun dinonaktifkan.","error"); return; }
     const f = akunForm;
     if (!f.username?.trim()) { showToast("Username wajib diisi.","error"); return; }
     if (!f.password || f.password.length < 6) { showToast("Password minimal 6 karakter.","error"); return; }
@@ -912,6 +915,7 @@ export default function PLNWarehouse() {
     setGantiPasswordModal(true);
   }
   async function submitGantiPassword() {
+    if (isDemoMode()) { showToast("Mode demo: ganti password dinonaktifkan.","error"); return; }
     const f = gantiPasswordForm;
     if (!f.oldPassword) { showToast("Password lama wajib diisi.","error"); return; }
     if (!f.newPassword || f.newPassword.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
@@ -1072,6 +1076,7 @@ export default function PLNWarehouse() {
     setMaraSearch("");
   }
   async function uploadMaraToDB(file) {
+    if (isDemoMode()) { showToast("Mode demo: import tidak disimpan.", "info"); return; }
     if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
     if (!file) return;
     setMaraUploadLoading(true);
@@ -3571,6 +3576,7 @@ export default function PLNWarehouse() {
   // embedding Cohere. Batasi transaksi ke 6 bulan terakhir supaya knowledge
   // base tidak membengkak tanpa batas dari histori lama.
   async function syncRagChunks(silent = false, onProgress) {
+    if (isDemoMode()) return; // mode demo: rag_chunks dibaca bot Telegram, jangan disentuh
     if (!supabase) { if (!silent) showToast("Supabase belum terkonfigurasi.", "error"); return; }
     if (!silent) setRagSyncing(true);
     try {
@@ -3670,6 +3676,7 @@ export default function PLNWarehouse() {
   }
 
   async function syncWarnotoState(silent = false) {
+    if (isDemoMode()) return; // mode demo: warnoto_state dibaca bot Telegram, jangan disentuh
     if (!supabase) return;
     try {
       const state_data = buildWarnotoStateSnapshot();
@@ -3687,6 +3694,7 @@ export default function PLNWarehouse() {
   // browser, tidak bisa diakses proses server-side sama sekali. "Whole list is the truth"
   // (upsert + hapus yang sudah tidak ada), sama pola dengan sync master data lain.
   async function syncStocksSnapshot(silent = false) {
+    if (isDemoMode()) return; // mode demo: stocks_snapshot dibaca cron malam bot, jangan disentuh
     if (!supabase) return;
     try {
       const rows = enrichedStocks.map(s => {
@@ -4186,6 +4194,15 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   return (
     <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
+      {/* Mode demo per-tab: semua penyimpanan (localStorage + Supabase + Storage)
+          dibekukan — lihat isDemoMode() di src/lib/demo.js. Banner ini pengingat
+          visual bahwa perubahan di tab ini tidak akan tersimpan. */}
+      {isDemoMode() && (
+        <div className="demo-banner">
+          <span>🧪 MODE DEMO — perubahan TIDAK disimpan</span>
+          <button onClick={exitDemoMode}>Keluar</button>
+        </div>
+      )}
       {/* Di HP: toast dipusatkan & dibatasi lebar (bukan nempel kanan tanpa batas
           lebar) supaya pesan panjang tidak terpotong/keluar layar. */}
       {toast && (
@@ -4436,6 +4453,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   </div>
                   <div className="app-account__unit">{UPT}</div>
                   <button role="menuitem" onClick={()=>{setAccountMenuOpen(false);openGantiPassword();}}><SidebarIcon name="key" size={17}/><span>Ganti Password</span></button>
+                  <button role="menuitem" onClick={()=>{setAccountMenuOpen(false);isDemoMode()?exitDemoMode():enterDemoMode();}}><span aria-hidden="true">🧪</span><span>{isDemoMode()?"Keluar Mode Demo":"Mode Demo (TUG)"}</span></button>
                   <button role="menuitem" className="is-danger" onClick={()=>{setAccountMenuOpen(false);handleLogout();}}><SidebarIcon name="logout" size={17}/><span>Logout</span></button>
                 </div>
               )}
@@ -7641,7 +7659,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
               );
             })}
-            <button type="button" style={{width:"100%",padding:"11px",marginBottom:14,border:`2px dashed ${C.accent}`,borderRadius:10,background:"#eef2ff",color:C.accent,fontWeight:800,fontSize:13,cursor:"pointer"}} onClick={addItemRow}>+ Tambah Barang Retur Lain</button>
+            <button type="button" className="tug-add-item" onClick={addItemRow}><span className="tug-add-item__ic" aria-hidden="true">+</span>Tambah Barang Retur Lain</button>
 
             {txnForm.stockItems.some(si=>si.statusMaterial==="Bongkaran ATTB (MTU)") && (
               <div ref={setRef("fotoBAPengembalian")} style={{marginBottom:16,...hl("fotoBAPengembalian")}}>

@@ -2,6 +2,7 @@
 // + decode Plus Code alamat. Dipindah dari App.jsx (refactor Fase 3f).
 import { supabase } from "../supabaseClient.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./openLocationCode.js";
+import { isDemoMode } from "./demo.js";
 
 // Satpam, Tim Mutu, UIT, UPT, Gudang, Lokasi dulu hanya tersimpan di
 // localStorage/CLOUD (per-browser, tidak sinkron antar device/user). Sekarang
@@ -88,6 +89,7 @@ export async function loadMasterTable(table) {
 
 // extraCols(item) => kolom tambahan per baris (FK/status) di luar id & data, opsional
 export async function syncMasterTable(table, list, extraCols) {
+  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!supabase) return false;
   const rows = list.map(item => ({
     id: item.id,
@@ -137,6 +139,7 @@ export async function seedMasterTableIfEmpty(table, defaults, extraCols) {
 // Supabase di sini murni backup/audit-trail — jadi tidak perlu delete-sync
 // simetris seperti syncMasterTable, cukup upsert baris baru saja.
 export async function syncMaterialCadangRows(table, rows, mapFn) {
+  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!supabase || !rows?.length) return false;
   const mapped = rows.map(mapFn);
   const { error } = await supabase.from(table).upsert(mapped, { onConflict: "id" });

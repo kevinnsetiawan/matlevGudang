@@ -1,4 +1,6 @@
 // Abstraksi penyimpanan cloud/local (window.storage atau localStorage) — dipindah dari App.jsx Fase 5h.
+import { isDemoMode } from "./demo.js";
+
 export const CLOUD = {
   async get(key) {
     try {
@@ -12,6 +14,7 @@ export const CLOUD = {
     } catch { return null; }
   },
   async set(key, val) {
+    if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis localStorage
     try {
       if (typeof window.storage !== 'undefined') {
         await window.storage.set(key, JSON.stringify(val));

@@ -175,36 +175,36 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
             )}
 
             {/* Action buttons */}
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <div className="approval-actions">
               {/* TUG-9/8/10 standard approval */}
               {["TUG9","TUG8"].includes(t.docType) && !isTUG8Draft && (
                 rejectingId===t.id
-                  ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTxn(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
-                  : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTxn(t)}>✅ SETUJUI</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
+                  ? <><button className="approval-btn--danger" onClick={()=>{rejectTxn(t,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Konfirmasi Tolak</button><button className="approval-btn--cancel" onClick={()=>setRejectingId(null)}>Batal</button></>
+                  : <><button className="approval-btn--approve" onClick={()=>approveTxn(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
               )}
               {t.docType==="TUG10" && (
                 rejectingId===t.id
-                  ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTxn(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
-                  : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTxn(t)}>✅ SETUJUI — Stok Masuk</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
+                  ? <><button className="approval-btn--danger" onClick={()=>{rejectTxn(t,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Konfirmasi Tolak</button><button className="approval-btn--cancel" onClick={()=>setRejectingId(null)}>Batal</button></>
+                  : <><button className="approval-btn--approve" onClick={()=>approveTxn(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui — Stok Masuk</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
               )}
               {/* TUG-8 Draft dari TUG-7 */}
               {isTUG8Draft && hasRole(currentUser, "ADMIN","TL") && (
-                <button style={{...sty.btn("success"),flex:1}} onClick={()=>konfirmasiDraftTUG8(t)}>✅ Konfirmasi Draft TUG-8 — Aktifkan</button>
+                <button className="approval-btn--approve" onClick={()=>konfirmasiDraftTUG8(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Konfirmasi Draft TUG-8</button>
               )}
               {/* TUG-7 Draft UIT */}
               {isTUG7Draft && hasRole(currentUser, "ADMIN_UIT") && (
-                <button style={{...sty.btn("primary"),flex:1}} onClick={()=>{setTug7Form({uptPengirimId:"",atasBebanRekening:"",perintahKerja:t.perintahKerja||"",kodeAkun:t.kodeAkun||"",fungsi:t.fungsi||""});setTug7Modal(t);}}>📝 Lengkapi TUG-7 (Pilih UPT Pengirim)</button>
+                <button className="approval-btn--primary" onClick={()=>{setTug7Form({uptPengirimId:"",atasBebanRekening:"",perintahKerja:t.perintahKerja||"",kodeAkun:t.kodeAkun||"",fungsi:t.fungsi||""});setTug7Modal(t);}}>Lengkapi TUG-7 (Pilih UPT Pengirim)</button>
               )}
               {t.docType==="TUG7" && t.stage==="PENDING_MGR_LOGISTIK" && hasRole(currentUser, "MGR_LOGISTIK_UIT") && (
                 rejectingId===t.id
-                  ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
-                  : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG7_MgrLogistik(t)}>✅ SETUJUI TUG-7 → Generate Draft TUG-8</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
+                  ? <><button className="approval-btn--danger" onClick={()=>{rejectTUG7_MgrLogistik(t,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Konfirmasi Tolak</button><button className="approval-btn--cancel" onClick={()=>setRejectingId(null)}>Batal</button></>
+                  : <><button className="approval-btn--approve" onClick={()=>approveTUG7_MgrLogistik(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui TUG-7 → Draft TUG-8</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
               )}
               {/* TUG-5 dari ULTG — approval Manager ULTG */}
               {t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="PENDING_MGR_ULTG" && hasRole(currentUser, "MGR_ULTG") && (
                 rejectingId===t.id
-                  ? <><button style={{...sty.btn("danger"),flex:1}} onClick={()=>{rejectTUG5_MgrULTG(t,reason);setRejectingId(null);setReason("");}}>❌ Konfirmasi Tolak</button><button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setRejectingId(null)}>Batal</button></>
-                  : <><button style={{...sty.btn("success"),flex:1}} onClick={()=>approveTUG5_MgrULTG(t)}>✅ SETUJUI (Manager ULTG)</button><button style={{...sty.btn("ghost"),flex:1,border:`1px solid ${C.red}`,color:C.red}} onClick={()=>{setRejectingId(t.id);setReason("");}}>❌ TOLAK</button></>
+                  ? <><button className="approval-btn--danger" onClick={()=>{rejectTUG5_MgrULTG(t,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Konfirmasi Tolak</button><button className="approval-btn--cancel" onClick={()=>setRejectingId(null)}>Batal</button></>
+                  : <><button className="approval-btn--approve" onClick={()=>approveTUG5_MgrULTG(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui (Manager ULTG)</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
               )}
             </div>
           </div>
@@ -251,15 +251,17 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
             {imp.records.length>50 && <div style={{fontSize:12,color:C.muted,padding:6,textAlign:"center"}}>+{imp.records.length-50} baris lainnya</div>}
           </div>
           {rejectingCapId===imp.id ? (
-            <div style={{display:"flex",gap:8}}>
-              <input style={{...sty.input,flex:1}} placeholder="Alasan penolakan..." value={capReason} onChange={e=>setCapReason(e.target.value)}/>
-              <button style={sty.btn("danger","sm")} onClick={()=>{rejectCapacityImport(imp.id, capReason); setRejectingCapId(null); setCapReason("");}}>Kirim Penolakan</button>
-              <button style={sty.btn("ghost","sm")} onClick={()=>{setRejectingCapId(null);setCapReason("");}}>Batal</button>
-            </div>
+            <>
+              <div style={{marginBottom:8}}><input style={sty.input} placeholder="Alasan penolakan..." value={capReason} onChange={e=>setCapReason(e.target.value)}/></div>
+              <div className="approval-actions">
+                <button className="approval-btn--danger" onClick={()=>{rejectCapacityImport(imp.id, capReason); setRejectingCapId(null); setCapReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Kirim Penolakan</button>
+                <button className="approval-btn--cancel" onClick={()=>{setRejectingCapId(null);setCapReason("");}}>Batal</button>
+              </div>
+            </>
           ) : (
-            <div style={{display:"flex",gap:8}}>
-              <button style={sty.btn("success","sm")} onClick={()=>approveCapacityImport(imp.id)}>✅ Setujui & Publish</button>
-              <button style={sty.btn("danger","sm")} onClick={()=>setRejectingCapId(imp.id)}>❌ Tolak</button>
+            <div className="approval-actions">
+              <button className="approval-btn--approve" onClick={()=>approveCapacityImport(imp.id)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui & Publish</button>
+              <button className="approval-btn--reject" onClick={()=>setRejectingCapId(imp.id)}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button>
             </div>
           )}
         </div>
@@ -277,15 +279,15 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
         const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[l.pendingAction]||l.pendingAction;
         return (
           <div key={l.id} className="approval-card" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.yellow}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <div>
                 <div style={{fontSize:12,color:"#92400e",fontWeight:800,textTransform:"uppercase"}}>Perubahan Lokasi/Blok</div>
                 <div style={{fontSize:13,fontWeight:700,marginTop:2}}>{aksiLabel}: {l.pendingAction==="EDIT"?l.pendingData?.kode:l.kode}</div>
                 <div style={{fontSize:12,color:C.muted}}>Diajukan oleh {pemohon?.name||"?"} • {fmtDate(l.requestedAt)}</div>
               </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                <button style={sty.btn("primary","sm")} onClick={()=>approveLokasiChange(l.id)}>✓ Setuju</button>
-                <button style={sty.btn("danger","sm")} onClick={()=>rejectLokasiChange(l.id)}>✕ Tolak</button>
+              <div className="approval-actions approval-actions--compact" style={{flexShrink:0}}>
+                <button className="approval-btn--approve" onClick={()=>approveLokasiChange(l.id)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setuju</button>
+                <button className="approval-btn--reject" onClick={()=>rejectLokasiChange(l.id)}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button>
               </div>
             </div>
           </div>

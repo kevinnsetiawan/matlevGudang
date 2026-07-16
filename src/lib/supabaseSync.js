@@ -7,6 +7,7 @@ import { fmtDateOnly, fmtRp } from "./utils.js";
 import { fmtNum, getSAPLabel } from "./ragShared.mjs";
 import { getSAPStatus } from "./sap.js";
 import { syncMasterTable } from "./masterSync.js";
+import { isDemoMode } from "./demo.js";
 
 const SYNCED_KEYS_STORAGE = "warnoto_synced_tug15_keys";
 
@@ -37,6 +38,7 @@ function saveSyncedKeys(set) {
 }
 
 export async function syncTUG15ToSupabase(rows, katalogList) {
+  if (isDemoMode()) return { katalogCount: 0, historyCount: 0 }; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
@@ -97,6 +99,7 @@ export async function syncTUG15ToSupabase(rows, katalogList) {
 // Push qty stok terkini (dijumlah per katalog dari semua lokasi) supaya job
 // training bisa hitung estimasi_hari_sampai_habis = qty_saat_ini / rata2 prediksi harian.
 export async function syncStockQtyToSupabase(stocks, katalogList) {
+  if (isDemoMode()) return { katalogCount: 0, stockCount: 0 }; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
@@ -162,6 +165,10 @@ async function _uploadTxnPhoto(dataUrl, bucket, path) {
 // Foto yang gagal upload (mis. offline) dibiarkan base64 & dicatat di `pending`
 // (transaksi tetap tersimpan + dokumen tetap bisa dibuat; disinkron ulang nanti).
 export async function processTxnPhotos(txn, prefix, onProgress) {
+  // Mode demo: jangan upload ke Storage — kembalikan txn dengan referensi PERSIS
+  // sama (bukan copy) supaya pemanggil (mis. syncPendingTxnPhotos) yang membandingkan
+  // `data !== x` tidak menganggap ada perubahan & tidak memicu save loop.
+  if (isDemoMode()) return { data: txn, pending: [] };
   if (!supabase) return { data: txn, pending: [] };
   const t = { ...txn };
   const pending = [];
@@ -219,6 +226,7 @@ export async function resolveTxnPrivPhotos(txn) {
 }
 
 export async function syncFotoMaterialToSupabase(stocks, katalogList) {
+  if (isDemoMode()) return { uploadCount: 0 }; // mode demo: pura-pura sukses, tidak upload ke Storage
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
