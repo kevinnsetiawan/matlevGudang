@@ -2,16 +2,23 @@
 import { useState } from "react";
 import { UPT } from "../constants.js";
 import { supabase } from "../supabaseClient.js";
-import { fmtDateOnly, parseIndoNumber } from "../lib/utils.js";
+import { fmtDateOnly, parseIndoNumber, uid } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { normalizeKatalog } from "../lib/sap.js";
 import { logAudit } from "../lib/audit.js";
+import { can } from "../lib/perms.js";
 import * as XLSX from "xlsx";
+
+// Jenis TUG di kolom "Jenis" template Import Transaksi TUG Lama → docType/docNumbers key.
+// Normalisasi terima "TUG-9"/"tug 9"/"TUG9" dsb (lihat normalizeJenis).
+const LEGACY_TUG_DOCTYPE = { TUG3:"TUG3", TUG5:"TUG5", TUG7:"TUG7", TUG8:"TUG8", TUG9:"TUG9", TUG10:"TUG10" };
+const LEGACY_TUG_DOCKEY = { TUG3:"tug3", TUG5:"tug5", TUG7:"tug7", TUG8:"tug8", TUG9:"tug9", TUG10:"tug10" };
+function normalizeJenis(v) { return String(v||"").replace(/[^A-Z0-9]/gi,"").toUpperCase(); }
 
 // ════════════════════════════════════════════════════════════════════
 // MIGRASI DATA TAB
 // ════════════════════════════════════════════════════════════════════
-export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, maraUploadLoading, maraUploadProgress, uploadMaraToDB, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast }) {
+export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, maraUploadLoading, maraUploadProgress, uploadMaraToDB, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast, rolePerms }) {
   const [step, setStep] = useState("upload"); // "upload" | "preview" | "backup" | "done"
   const [sapFile, setSapFile] = useState(null);
   const [sapRows, setSapRows] = useState([]);
@@ -29,6 +36,10 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
   const [previewStats, setPreviewStats] = useState(null);
   const [busy, setBusy] = useState(false);
   const [maraLoading, setMaraLoading] = useState(false);
+  // Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas.
+  const [legacyTugRows, setLegacyTugRows] = useState(null); // null = belum upload; array grup per No Dokumen
+  const [legacyTugChecked, setLegacyTugChecked] = useState(new Set());
+  const [legacyTugBusy, setLegacyTugBusy] = useState(false);
 
   // Parse CSV SAP format PEMAT
   // Referensi format export SAP (diajarkan user 2026-07-02, lihat memory
@@ -540,6 +551,105 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
     showToast(`${ids.size} baris dikosongkan — isi manual lewat Data Stok.`, "success");
   }
 
+  // ── IMPORT TRANSAKSI TUG LAMA — histori murni (APPROVED, legacyImport:true).
+  // TIDAK memutasi stok, TIDAK masuk antrian approval, TIDAK menyentuh docSeq —
+  // nomor dokumen dipakai apa adanya dari file, disimpan di docNumbers sesuai
+  // key docType (pola sama dengan docKeyOf di App.jsx). ──
+  function downloadLegacyTugTemplate() {
+    const headers = ["No Dokumen","Jenis","Tanggal","Kode Katalog","Qty","Keterangan"];
+    const rows = [
+      headers,
+      ["12.TUG-9/LOG.00.02/UPT-SBYA/I/2025","TUG-9","2025-01-15","KTL-001","10","Contoh baris 1 dokumen ini"],
+      ["12.TUG-9/LOG.00.02/UPT-SBYA/I/2025","TUG-9","2025-01-15","KTL-002","5","Baris 2, No Dokumen sama = 1 transaksi"],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [{wch:32},{wch:10},{wch:12},{wch:14},{wch:8},{wch:32}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template Transaksi Lama");
+    XLSX.writeFile(wb, "Template_Import_Transaksi_TUG_Lama.xlsx");
+  }
+
+  async function handleLegacyTugFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      if (raw.length === 0) { showToast("File kosong atau tidak ada baris data.", "error"); return; }
+      if (!Object.prototype.hasOwnProperty.call(raw[0], "No Dokumen") || !Object.prototype.hasOwnProperty.call(raw[0], "Kode Katalog")) {
+        showToast('Kolom wajib "No Dokumen" / "Kode Katalog" tidak ditemukan. Gunakan template.', "error"); return;
+      }
+      const groups = new Map(); // No Dokumen -> {docNo, docType, tanggal, items:[], errors:Set}
+      let skippedNoDoc = 0;
+      raw.forEach(r => {
+        const docNo = String(r["No Dokumen"]||"").trim();
+        if (!docNo) { skippedNoDoc++; return; }
+        const docType = LEGACY_TUG_DOCTYPE[normalizeJenis(r["Jenis"])] || null;
+        const tanggal = String(r["Tanggal"]||"").trim();
+        const kodeKatalog = String(r["Kode Katalog"]||"").trim();
+        const qty = parseIndoNumber(r["Qty"]);
+        const keterangan = String(r["Keterangan"]||"").trim();
+        const katalog = kodeKatalog ? katalogList.find(k=>(k.katalog||"").trim().toLowerCase()===kodeKatalog.toLowerCase()) : null;
+
+        if (!groups.has(docNo)) groups.set(docNo, { docNo, docType, tanggal, items: [], errors: new Set() });
+        const g = groups.get(docNo);
+        if (!docType) g.errors.add("Jenis tidak dikenal");
+        else if (g.docType && g.docType !== docType) g.errors.add("Jenis tidak konsisten untuk No Dokumen ini");
+        if (!tanggal || isNaN(new Date(tanggal).getTime())) g.errors.add("Tanggal tidak valid");
+        if (!kodeKatalog || !katalog) g.errors.add(`Katalog tidak dikenal: ${kodeKatalog||"(kosong)"}`);
+        if (!qty || qty <= 0) g.errors.add("Qty tidak valid");
+        g.items.push({ kodeKatalog, katalog, qty, keterangan });
+      });
+
+      // No Dokumen yang sudah ada di txns (cek semua docNumbers + id) dilewati, bukan error.
+      const existingDocNos = new Set();
+      txns.forEach(t => { Object.values(t.docNumbers||{}).forEach(v=>{ if (v) existingDocNos.add(v); }); existingDocNos.add(t.id); });
+
+      const parsed = Array.from(groups.values()).map(g => ({ ...g, errors: Array.from(g.errors), alreadyExists: existingDocNos.has(g.docNo) }));
+      setLegacyTugRows(parsed);
+      setLegacyTugChecked(new Set(parsed.filter(g=>g.errors.length===0 && !g.alreadyExists).map(g=>g.docNo)));
+      if (skippedNoDoc > 0) showToast(`${skippedNoDoc} baris diabaikan karena "No Dokumen" kosong.`, "info");
+    } catch (err) {
+      showToast("Gagal baca file: " + err.message, "error");
+    }
+  }
+
+  function toggleLegacyTugDoc(docNo) {
+    setLegacyTugChecked(s => { const n = new Set(s); n.has(docNo) ? n.delete(docNo) : n.add(docNo); return n; });
+  }
+
+  async function applyLegacyTugImport() {
+    const toApply = (legacyTugRows||[]).filter(g => legacyTugChecked.has(g.docNo) && g.errors.length===0 && !g.alreadyExists);
+    if (toApply.length === 0) { showToast("Tidak ada dokumen valid yang dicentang.", "error"); return; }
+    setLegacyTugBusy(true);
+    const txnBaru = toApply.map(g => {
+      const ts = new Date(g.tanggal).getTime() || Date.now();
+      const keterangan = g.items.find(it=>it.keterangan)?.keterangan || `Import legacy ${g.docNo}`;
+      return {
+        id: `LEGACY-${uid().slice(-8)}`,
+        docType: g.docType,
+        docNumbers: { [LEGACY_TUG_DOCKEY[g.docType]]: g.docNo },
+        stockItems: g.items.map(it => ({ katalogId: it.katalog.id, qty: it.qty, katalogMode: "existing", statusMaterial: "Material Sisa Baru" })),
+        status: "APPROVED",
+        legacyImport: true,
+        keteranganUmum: keterangan,
+        namaPekerjaan: keterangan,
+        createdBy: currentUser.id, createdAt: ts,
+        approvedBy: currentUser.id, approvedAt: ts,
+      };
+    });
+    const newTxns = [...txnBaru, ...txns];
+    setTxns(newTxns);
+    await saveToCloud({ txns: newTxns });
+    logAudit(currentUser, "IMPORT", "txns", null, { dokumen: txnBaru.length, rows: toApply.reduce((a,g)=>a+g.items.length,0) });
+    showToast(`✅ ${txnBaru.length} dokumen transaksi lama berhasil diimpor (histori, tidak memutasi stok).`);
+    setLegacyTugRows(null); setLegacyTugChecked(new Set());
+    setLegacyTugBusy(false);
+  }
+
   return (
     <div>
       {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
@@ -856,6 +966,60 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
             ))}
             {migratedTug15History.length > 20 && <div style={{padding:8,color:C.muted,fontSize:12,textAlign:"center"}}>...dan {migratedTug15History.length-20} transaksi lainnya</div>}
           </div>
+        </div>
+      )}
+
+      {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas ── */}
+      {can(currentUser, "aksi.import", rolePerms) && (
+        <div style={{...sty.card,marginTop:16,borderLeft:"4px solid #7c3aed"}}>
+          <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
+          <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
+            Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.
+          </p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:legacyTugRows?14:0}}>
+            <button style={sty.btn("ghost","sm")} onClick={downloadLegacyTugTemplate}>⬇️ Download Template</button>
+            <label style={{...sty.btn("primary","sm"),cursor:"pointer"}}>
+              📂 Upload File Excel
+              <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleLegacyTugFile}/>
+            </label>
+            {legacyTugRows && <button style={sty.btn("ghost","sm")} onClick={()=>{setLegacyTugRows(null);setLegacyTugChecked(new Set());}}>Upload Ulang</button>}
+          </div>
+          {legacyTugRows && (
+            <>
+              <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10,flexWrap:"wrap"}}>
+                <span>Total Dokumen: <b>{legacyTugRows.length}</b></span>
+                <span style={{color:C.green}}>Valid: <b>{legacyTugRows.filter(g=>g.errors.length===0 && !g.alreadyExists).length}</b></span>
+                <span style={{color:C.red}}>Error: <b>{legacyTugRows.filter(g=>g.errors.length>0).length}</b></span>
+                <span style={{color:"#92400e"}}>Sudah Ada: <b>{legacyTugRows.filter(g=>g.alreadyExists).length}</b></span>
+              </div>
+              <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:14}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
+                    <tr>{["","No Dokumen","Jenis","Tanggal","Item","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {legacyTugRows.map(g => {
+                      const disabled = g.errors.length>0 || g.alreadyExists;
+                      const statusText = g.alreadyExists ? "Sudah ada, dilewati" : g.errors.length>0 ? g.errors.join("; ") : "OK";
+                      return (
+                        <tr key={g.docNo} style={{borderTop:`1px solid ${C.border}`,background:g.errors.length>0?"#fef2f2":g.alreadyExists?"#fefce8":undefined}}>
+                          <td style={{padding:"4px 8px"}}><input type="checkbox" checked={legacyTugChecked.has(g.docNo)} disabled={disabled} onChange={()=>toggleLegacyTugDoc(g.docNo)}/></td>
+                          <td style={{padding:"4px 8px",fontWeight:700}}>{g.docNo}</td>
+                          <td style={{padding:"4px 8px"}}>{g.docType||"-"}</td>
+                          <td style={{padding:"4px 8px"}}>{g.tanggal||"-"}</td>
+                          <td style={{padding:"4px 8px"}}>{g.items.length}</td>
+                          <td style={{padding:"4px 8px",fontWeight:700,color:g.errors.length>0?C.red:g.alreadyExists?"#92400e":C.green}}>{statusText}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <button style={sty.btn("primary")} disabled={legacyTugBusy||legacyTugChecked.size===0} onClick={applyLegacyTugImport}>
+                {legacyTugBusy?"Menyimpan...":`Terapkan (${legacyTugChecked.size} dokumen)`}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

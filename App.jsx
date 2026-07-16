@@ -39,6 +39,7 @@ import { RencanaKedatanganTab } from "./src/components/RencanaKedatanganTab.jsx"
 import { KapasitasGudangTab } from "./src/components/KapasitasGudangTab.jsx";
 import { AIAgentPage } from "./src/components/AIAgentPage.jsx";
 import { AuditLogPage } from "./src/components/AuditLogPage.jsx";
+import { ImportLokasiModal, downloadLokasiTemplate } from "./src/components/ImportLokasiModal.jsx";
 import { PermMatrixPage } from "./src/components/PermMatrixPage.jsx";
 import { HeavyEquipmentTabV2 } from "./src/components/HeavyEquipmentTabV2.jsx";
 import { AttbTab } from "./src/components/AttbTab.jsx";
@@ -202,6 +203,7 @@ export default function PLNWarehouse() {
   const [gudangList, setGudangList] = useState([]);
   const [subGudangList, setSubGudangList] = useState([]); // level di antara Gudang dan Blok Lokasi
   const [importGudangOpen, setImportGudangOpen] = useState(false); // toggle panel Import & Review di Master Gudang
+  const [importLokasiOpen, setImportLokasiOpen] = useState(false); // modal Import Excel Master Lokasi
   const [showGudangMaintenance, setShowGudangMaintenance] = useState(false); // toggle 2 alat perbaikan (bukan pemakaian rutin) di Master Gudang
   const [rencanaKedatanganList, setRencanaKedatanganList] = useState([]);
   const [opnameList, setOpnameList] = useState([]);
@@ -5076,6 +5078,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
                     {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
                   </button>
+                  <button style={{...sty.btn("ghost","sm")}} onClick={downloadLokasiTemplate}>⬇️ Download Template Lokasi</button>
+                  <button style={{...sty.btn("ghost","sm")}} onClick={()=>setImportLokasiOpen(true)}>📥 Import Excel Lokasi</button>
                 </div>
                 {importGudangOpen && (
                   <div style={{marginTop:12}}>
@@ -5112,6 +5116,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   </div>
                 )}
               </div>
+            )}
+            {importLokasiOpen && (
+              <ImportLokasiModal
+                onClose={()=>setImportLokasiOpen(false)}
+                lokasiList={lokasiList} gudangList={gudangList} subGudangList={subGudangList}
+                isKodeDuplicateInSubGudang={isKodeDuplicateInSubGudang}
+                setLokasiList={setLokasiList} syncLokasi={syncLokasi}
+                currentUser={currentUser} showToast={showToast}
+                sty={sty} C={C}
+              />
             )}
             {/* ── SUB-TAB: MASTER KATALOG ── */}
             {stockSubTab==="katalog" && hasRole(currentUser, "ADMIN") && (
@@ -5760,6 +5774,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 setKatalogList={setKatalogList}
                 setTxns={setTxns}
                 showToast={showToast}
+                rolePerms={rolePerms}
               />
             )}
 
@@ -5880,7 +5895,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         <div style={{fontWeight:800,fontSize:14}}>{t.namaPekerjaan}</div>
                         <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>{t.docNumbers[dKey]}</div>
                       </div>
-                      <span style={sty.statusBadge(t.status)}>{t.status}</span>
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {t.legacyImport && <span title="Diimpor dari histori lama" style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#ede9fe",color:"#6d28d9"}}>🕘 Legacy</span>}
+                        <span style={sty.statusBadge(t.status)}>{t.status}</span>
+                      </div>
                     </div>
                     <div style={{fontSize:12,color:C.muted,display:"flex",gap:16,flexWrap:"wrap",marginBottom:8}}>
                       <span>📍 {t.lokasiPekerjaan}</span>
