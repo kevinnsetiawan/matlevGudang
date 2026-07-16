@@ -3543,7 +3543,7 @@ export default function PLNWarehouse() {
   // di AI Agent (bukan otomatis tiap save) supaya tidak boros panggilan API
   // embedding Cohere. Batasi transaksi ke 6 bulan terakhir supaya knowledge
   // base tidak membengkak tanpa batas dari histori lama.
-  async function syncRagChunks(silent = false) {
+  async function syncRagChunks(silent = false, onProgress) {
     if (!supabase) { if (!silent) showToast("Supabase belum terkonfigurasi.", "error"); return; }
     if (!silent) setRagSyncing(true);
     try {
@@ -3581,6 +3581,7 @@ export default function PLNWarehouse() {
         const rows = batch.map((c,idx)=>({ ...c, embedding: vectors[idx], updated_at: new Date().toISOString() }));
         const { error } = await supabase.from("rag_chunks").upsert(rows, { onConflict: "id" });
         if (error) throw error;
+        onProgress?.(Math.min(i+BATCH, chunks.length), chunks.length);
       }
       // Hapus chunk lama yang sumbernya sudah tidak ada lagi (katalog/txn/FAQ terhapus)
       const currentIds = new Set(chunks.map(c=>c.id));

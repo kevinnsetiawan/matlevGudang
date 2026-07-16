@@ -38,8 +38,8 @@ export function AIAgentPage({
   chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState,
   syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, C, sty,
 }) {
-  const [showFaqPanel, setShowFaqPanel] = useState(false);
-  const [showTgPanel, setShowTgPanel] = useState(false);
+  const [view, setView] = useState("chat");
+  const [syncPct, setSyncPct] = useState(null);
   const isWelcome = chatHistory.length<=1;
   const suggested = [
     {title:"Prioritas stok hari ini",question:"Analisa kondisi stok sekarang dan material yang perlu perhatian"},
@@ -47,6 +47,20 @@ export function AIAgentPage({
     {title:"Material hampir habis",question:"Material apa yang stoknya hampir habis?"},
     {title:"Proyeksi tiga bulan",question:"Forecast kebutuhan material 3 bulan ke depan"},
   ];
+
+  async function handleSync() {
+    try {
+      setSyncPct(5);
+      await syncStocksSnapshot();
+      setSyncPct(15);
+      await syncRagChunks(false, (done,total)=>setSyncPct(15+Math.round((done/total)*75)));
+      setSyncPct(95);
+      await syncWarnotoState();
+      setSyncPct(100);
+    } finally {
+      setTimeout(()=>setSyncPct(null), 1500);
+    }
+  }
 
   function handleKeyDown(event) {
     if (event.key==="Enter" && !event.shiftKey) {
@@ -64,19 +78,24 @@ export function AIAgentPage({
             <div><span>Asisten operasional WARNOTO</span><strong>Pak War</strong><small>Terhubung dengan data {WAREHOUSE}</small></div>
           </div>
           {hasRole(currentUser,"ADMIN") && <div className="ai-conversation__admin">
-            <button disabled={ragSyncing} onClick={async()=>{await syncStocksSnapshot();await syncRagChunks();await syncWarnotoState();}}>{ragSyncing?"Menyinkron...":"Sinkron data"}</button>
-            <button className={showFaqPanel?"is-active":""} onClick={()=>setShowFaqPanel(value=>!value)}>FAQ</button>
-            <button className={showTgPanel?"is-active":""} onClick={()=>setShowTgPanel(value=>!value)}>Telegram</button>
+            <button disabled={syncPct!==null} onClick={handleSync}>{syncPct!==null?`Sinkron ${syncPct}%`:"Sinkron data"}</button>
+            {syncPct!==null && <span className="ai-sync-mini"><i style={{width:`${syncPct}%`}}/></span>}
+            <button className={view==="faq"?"is-active":""} onClick={()=>setView(value=>value==="faq"?"chat":"faq")}>FAQ</button>
+            <button className={view==="telegram"?"is-active":""} onClick={()=>setView(value=>value==="telegram"?"chat":"telegram")}>Telegram</button>
             {ragLastSync && <span>Sync {fmtDate(ragLastSync)}</span>}
           </div>}
         </header>
 
-        {(showFaqPanel||showTgPanel) && <div className="ai-conversation__config">
-          {showFaqPanel && hasRole(currentUser,"ADMIN") && <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>}
-          {showTgPanel && hasRole(currentUser,"ADMIN") && <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>}
+        {view==="faq" && <div className="ai-conversation__config">
+          <button className="ai-config-back" onClick={()=>setView("chat")}>← Kembali ke percakapan</button>
+          <AIFaqPanel sty={sty} C={C} onSaved={async()=>{await syncRagChunks(true);}}/>
+        </div>}
+        {view==="telegram" && <div className="ai-conversation__config">
+          <button className="ai-config-back" onClick={()=>setView("chat")}>← Kembali ke percakapan</button>
+          <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>
         </div>}
 
-        {isWelcome ? (
+        {view==="chat" && (isWelcome ? (
           <div className="ai-start">
             <div className="ai-start__intro">
               <span>Mulai percakapan</span>
@@ -102,9 +121,9 @@ export function AIAgentPage({
             {chatLoading && <div className="ai-message is-ai is-loading"><div className="ai-message__avatar" aria-hidden="true">PW</div><div className="ai-message__content"><span>Pak War</span><p>Sedang membaca dan menganalisis data gudang...</p></div></div>}
             <div ref={chatEndRef}/>
           </div>
-        )}
+        ))}
 
-        <div className="ai-composer">
+        {view==="chat" && <div className="ai-composer">
           <label className="ai-composer__field">
             <span>Tanyakan kepada Pak War</span>
             <textarea rows={2} placeholder="Contoh: Berapa stok material trafo dan mana yang perlu segera ditindaklanjuti?" value={chatInput} onChange={event=>setChatInput(event.target.value)} onKeyDown={handleKeyDown}/>
@@ -116,7 +135,7 @@ export function AIAgentPage({
             </div>
             <button className="ai-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>{chatLoading?"Menganalisis...":"Kirim pertanyaan"}</button>
           </div>
-        </div>
+        </div>}
       </section>
     </div>
   );
