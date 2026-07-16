@@ -85,6 +85,14 @@ Deno.serve(async (req) => {
     // Cuma relevan kalau role===PENGADAAN — role ini punya 2 slot kuota independen
     // (1 di UPT, 1 di UIT), dibedakan lewat field mana yang diisi, bukan role value beda.
     const pengadaanScope = String(body.pengadaanScope || "UPT").trim().toUpperCase();
+    // Batasan akses per gudang (RBAC tingkat 2): null/undefined = semua gudang;
+    // selain itu WAJIB array of string (id gudang).
+    const gudangIdsRaw = body.gudangIds;
+    if (gudangIdsRaw !== null && gudangIdsRaw !== undefined &&
+        (!Array.isArray(gudangIdsRaw) || gudangIdsRaw.some((x) => typeof x !== "string"))) {
+      return json({ ok: false, error: "gudangIds harus null atau array id gudang (string)." });
+    }
+    const gudangIds = (Array.isArray(gudangIdsRaw) && gudangIdsRaw.length) ? gudangIdsRaw : null;
 
     if (!username || !/^[a-z0-9._-]+$/.test(username)) {
       return json({ ok: false, error: "Username wajib diisi, huruf kecil/angka tanpa spasi." });
@@ -155,6 +163,7 @@ Deno.serve(async (req) => {
       upt_id: isUitScoped ? null : uptId,
       ultg_id: ultgId,
       uit_id: isUitScoped ? uitId : null,
+      gudang_ids: gudangIds,
     }).eq("id", userId);
     if (profErr) {
       return json({ ok: false, error: `Akun Auth dibuat tapi gagal menyimpan profil: ${profErr.message}` });

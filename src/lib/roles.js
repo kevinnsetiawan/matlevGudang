@@ -11,6 +11,22 @@ export function hasRole(currentUser, ...allowedRoles) {
   return currentUser?.role === "SUPERADMIN" || allowedRoles.includes(currentUser?.role);
 }
 
+// Batasan akses per gudang (RBAC tingkat 2). Sumbernya profiles.gudang_ids (jsonb):
+// null / undefined / array kosong = boleh SEMUA gudang (perilaku default semua akun
+// existing, tidak berubah). Array of string = hanya gudang ber-id itu yang boleh.
+export function allowedGudangIds(user) {
+  const g = user?.gudangIds;
+  if (!Array.isArray(g) || g.length === 0) return null; // null = tak dibatasi (semua boleh)
+  return g;
+}
+
+export function canAccessGudang(user, gudangId) {
+  const allowed = allowedGudangIds(user);
+  if (!allowed) return true;            // tidak dibatasi
+  if (!gudangId) return true;           // entitas tanpa gudang (belum di-assign) tidak diblok
+  return allowed.includes(gudangId);
+}
+
 export function getUserUptScope(user) {
   // currentUser.upt/uptName/uptKode/uptId nyaris selalu kosong untuk akun biasa (belum di-assign
   // per-user) — fallback ke const UPT global (deployment ini = 1 UPT), pola sama seperti `myUpt`

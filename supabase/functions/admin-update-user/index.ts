@@ -72,6 +72,14 @@ Deno.serve(async (req) => {
     const uitId = body.uitId ? String(body.uitId).trim() : null;
     const pengadaanScope = String(body.pengadaanScope || "UPT").trim().toUpperCase();
     const newPassword = body.newPassword ? String(body.newPassword) : "";
+    // Batasan akses per gudang (RBAC tingkat 2): null/undefined = semua gudang;
+    // selain itu WAJIB array of string (id gudang).
+    const gudangIdsRaw = body.gudangIds;
+    if (gudangIdsRaw !== null && gudangIdsRaw !== undefined &&
+        (!Array.isArray(gudangIdsRaw) || gudangIdsRaw.some((x) => typeof x !== "string"))) {
+      return json({ ok: false, error: "gudangIds harus null atau array id gudang (string)." });
+    }
+    const gudangIds = (Array.isArray(gudangIdsRaw) && gudangIdsRaw.length) ? gudangIdsRaw : null;
 
     if (!userId) return json({ ok: false, error: "userId wajib diisi." });
     if (!name) return json({ ok: false, error: "Nama lengkap wajib diisi." });
@@ -123,6 +131,7 @@ Deno.serve(async (req) => {
       upt_id: isUitScoped ? null : uptId,
       ultg_id: ultgId,
       uit_id: isUitScoped ? uitId : null,
+      gudang_ids: gudangIds,
     }).eq("id", userId);
     if (profErr) return json({ ok: false, error: `Gagal menyimpan profil: ${profErr.message}` });
 

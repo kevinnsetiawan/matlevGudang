@@ -12,7 +12,8 @@ import { C, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
-import { ROLES, CAN_CREATE, hasRole, getUserUptScope } from "./src/lib/roles.js";
+import { ROLES, hasRole, getUserUptScope, canAccessGudang, allowedGudangIds } from "./src/lib/roles.js";
+import { can } from "./src/lib/perms.js";
 import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentStatusFromKondisi, normalizeHeavyEquipmentRecord, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName, normalizeHeavyEquipmentLoanStatus, isPendingHeavyEquipmentLoan, getHeavyEquipmentLoanRuntimeStatus, canApproveHeavyEquipmentLoan, getEquipmentCategory } from "./src/lib/heavyEquipment.js";
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
@@ -38,6 +39,7 @@ import { RencanaKedatanganTab } from "./src/components/RencanaKedatanganTab.jsx"
 import { KapasitasGudangTab } from "./src/components/KapasitasGudangTab.jsx";
 import { AIAgentPage } from "./src/components/AIAgentPage.jsx";
 import { AuditLogPage } from "./src/components/AuditLogPage.jsx";
+import { PermMatrixPage } from "./src/components/PermMatrixPage.jsx";
 import { HeavyEquipmentTabV2 } from "./src/components/HeavyEquipmentTabV2.jsx";
 import { AttbTab } from "./src/components/AttbTab.jsx";
 import { TUG5Tab } from "./src/components/TUG5Tab.jsx";
@@ -187,6 +189,7 @@ export default function PLNWarehouse() {
   const [loginBusy, setLoginBusy] = useState(false);
 
   const [users, setUsers] = useState([]); // di-fetch dari tabel "profiles" Supabase setelah login (lihat effect onAuthStateChange)
+  const [rolePerms, setRolePerms] = useState({}); // override izin per role dari tabel role_permissions ({role: {key:bool}}); {} = pakai DEFAULT_PERMS
   const [stocks, setStocks] = useState([]); // junction rows: katalogId + lokasiId + qty/price/jenis
   const [katalogList, setKatalogList] = useState([]); // Master Katalog Barang
   const [lokasiList, setLokasiList] = useState([]); // Master Lokasi Gudang
@@ -840,7 +843,17 @@ export default function PLNWarehouse() {
   async function reloadUsers() {
     if (!supabase) return;
     const { data: allProfiles } = await supabase.from("profiles").select("*");
-    setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id, uitId: p.uit_id })));
+    setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id, uitId: p.uit_id, gudangIds: p.gudang_ids })));
+  }
+
+  // Muat override izin per role (RBAC) dari Supabase. Latar belakang, tidak
+  // memblokir startup — sampai selesai, can() jatuh ke DEFAULT_PERMS.
+  async function reloadRolePerms() {
+    if (!supabase) return;
+    const { data } = await supabase.from("role_permissions").select("role, perms");
+    const map = {};
+    (data||[]).forEach(r => { if (r.role) map[r.role] = r.perms || {}; });
+    setRolePerms(map);
   }
 
   // Kelola Akun (ADMIN only) — daftarkan user baru lewat Edge Function
@@ -848,12 +861,12 @@ export default function PLNWarehouse() {
   // login tidak ketimpa jadi sesi user baru seperti kalau pakai signUp() biasa
   // langsung dari browser).
   function openAddAkun() {
-    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:"", uitId:"", pengadaanScope:"UPT"});
+    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:"", uitId:"", pengadaanScope:"UPT", gudangIds:[]});
     setAkunResult(null);
     setAkunModal("add");
   }
   function openEditAkun(u) {
-    setAkunForm({id:u.id, username:u.username, password:"", name:u.name||"", role:u.role||"VIEWER", jabatan:u.jabatan||"", uptId:u.uptId||"", ultgId:u.ultgId||"", uitId:u.uitId||"", pengadaanScope:u.uitId?"UIT":"UPT"});
+    setAkunForm({id:u.id, username:u.username, password:"", name:u.name||"", role:u.role||"VIEWER", jabatan:u.jabatan||"", uptId:u.uptId||"", ultgId:u.ultgId||"", uitId:u.uitId||"", pengadaanScope:u.uitId?"UIT":"UPT", gudangIds:Array.isArray(u.gudangIds)?u.gudangIds:[]});
     setAkunResult(null);
     setAkunModal("edit");
   }
@@ -877,6 +890,7 @@ export default function PLNWarehouse() {
       userId: f.id, name: f.name.trim(), role: f.role, jabatan: f.jabatan||"",
       uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"", uitId: uitScoped ? (f.uitId||"") : "",
       pengadaanScope: f.pengadaanScope||"UPT", newPassword: f.password||"",
+      gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
     }});
     setAkunBusy(false);
     if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal menyimpan perubahan akun.","error"); return; }
@@ -901,6 +915,7 @@ export default function PLNWarehouse() {
       username: f.username.trim().toLowerCase(), password: f.password, name: f.name.trim(),
       role: f.role, jabatan: f.jabatan||"", uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"",
       uitId: uitScoped ? (f.uitId||"") : "", pengadaanScope: f.pengadaanScope||"UPT",
+      gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
     }});
     setAkunBusy(false);
     if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal mendaftarkan akun.","error"); return; }
@@ -963,7 +978,7 @@ export default function PLNWarehouse() {
           setCurrentUser(null); setUsers([]);
           try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
         } else {
-          const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id };
+          const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
           setCurrentUser(userObj);
           try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(userObj)); } catch {}
           // LOGIN dicatat cuma untuk login manual (SIGNED_IN) — bukan INITIAL_SESSION
@@ -973,8 +988,9 @@ export default function PLNWarehouse() {
           // Daftar SEMUA user (hanya dipakai layar Admin/Master Data) TIDAK memblokir
           // layar "Memuat sesi..." — dimuat di latar belakang supaya app langsung tampil.
           supabase.from("profiles").select("*").then(({ data: allProfiles }) => {
-            setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id })));
+            setUsers((allProfiles||[]).map(p => ({ id: p.id, name: p.name, username: p.username, role: p.role, jabatan: p.jabatan, avatar: p.avatar, uptId: p.upt_id, ultgId: p.ultg_id, uitId: p.uit_id, gudangIds: p.gudang_ids })));
           });
+          reloadRolePerms();
         }
       } else {
         setCurrentUser(null); setUsers([]);
@@ -987,6 +1003,13 @@ export default function PLNWarehouse() {
     });
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  // RBAC guard render: kalau role tidak (lagi) punya izin menu untuk tab aktif
+  // (mis. Admin mencabut via Matrix Izin), lempar balik ke Dashboard. Selama
+  // rolePerms belum termuat, can() jatuh ke DEFAULT_PERMS (perilaku existing).
+  useEffect(() => {
+    if (currentUser && tab !== "dashboard" && !can(currentUser, "menu." + tab, rolePerms)) setTab("dashboard");
+  }, [tab, currentUser, rolePerms]);
 
   // Auto-sync foto transaksi yang belum ter-upload (mis. submit saat offline di
   // gudang). Dicoba saat app load, saat daftar transaksi berubah, dan saat koneksi
@@ -2987,7 +3010,7 @@ export default function PLNWarehouse() {
   async function saveTxn() {
     if (savingTxn) { showToast("Sedang menyimpan, tunggu sebentar...","info"); return; }
     const canCreateULTG = hasRole(currentUser, "ADMIN_ULTG") && txnForm?.docType==="TUG5";
-    if (!hasRole(currentUser, ...CAN_CREATE) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
+    if (!can(currentUser, "aksi.buatTransaksi", rolePerms) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
     const docType = txnForm.docType;
 
     if (docType !== "TUG3" && docType !== "TUG10") {
@@ -4051,6 +4074,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // stock record so the rest of the UI/PDF/forecast code can use familiar
   // fields (name, katalog, category, unit, lokasi) without modification.
   const enrichedStocks = enrichStocks(stocks, katalogList, lokasiList);
+  // RBAC per gudang: untuk user dengan gudang_ids null (semua akun existing) hasil
+  // ini identik gudangList — canAccessGudang selalu true, jadi ZERO perubahan perilaku.
+  const gudangAccessLimited = allowedGudangIds(currentUser) != null;
+  const visibleGudangList = useMemo(() => gudangList.filter(g => canAccessGudang(currentUser, g.id)), [gudangList, currentUser]);
+  // Kapasitas/Peta Gudang: baris kapasitas dicocokkan by NAMA gudang (warehouse_capacity
+  // tak menyimpan id gudang). ponytail: match-by-name, cukup untuk enforcement UI; unrestricted user di-early-return supaya tak terpengaruh sama sekali.
+  const visibleCapacityList = useMemo(() => {
+    if (!gudangAccessLimited) return gudangCapacityList;
+    const names = new Set(visibleGudangList.map(g => (g.nama||"").trim().toLowerCase()));
+    return gudangCapacityList.filter(r => names.has((r.gudang||"").trim().toLowerCase()));
+  }, [gudangCapacityList, visibleGudangList, gudangAccessLimited]);
   const myPendingApprovals = txns.filter(t => {
     if (currentUser?.role === "SUPERADMIN" && t.status === "PENDING") return true;
     if (t.status === "PENDING" && t.requiredApprover === currentUser?.role) return true;
@@ -4121,7 +4155,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const filteredStocks = enrichedStocks.filter(s=>{
     const ms = matchesStockSearch(s, search);
     const mj = filterJenis==="ALL" || s.jenisBarang===filterJenis;
-    return ms && mj;
+    // RBAC per gudang: sembunyikan stok yang lokasinya milik gudang terlarang.
+    // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
+    const gid = lokasiList.find(l=>l.id===s.lokasiId)?.gudangId || s.gudangId || null;
+    const mg = canAccessGudang(currentUser, gid);
+    return ms && mj && mg;
   });
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
@@ -4209,7 +4247,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const isPengadaan = hasRole(currentUser, "PENGADAAN");
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
   const isUltgRole = hasRole(currentUser, ...ULTG_ROLES);
-  const navItems = isPengadaan ? [
+  const navItems = (isPengadaan ? [
     {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
   ] : isUltgRole ? [
@@ -4235,10 +4273,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
     {id:"forecastStok",icon:<SidebarIcon name="forecast"/>,label:"Forecast Stok"},
     {id:"ai",icon:<SidebarIcon name="ai"/>,label:"Pak War"},
-  ];
+  ]).filter(n => can(currentUser, "menu." + n.id, rolePerms)); // RBAC: sembunyikan menu yang izinnya dicabut Admin (default = perilaku existing)
 
   const sidebarCompact = !isMobile && sidebarCollapsed;
-  const masterPageTitle = stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi":stockSubTab==="akun"?"Kelola Akun":stockSubTab==="migrasi"?"Migrasi Data SAP / Non-SAP":stockSubTab==="auditLog"?"Audit Log":"Master Gudang";
+  const masterPageTitle = stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi":stockSubTab==="akun"?"Kelola Akun":stockSubTab==="migrasi"?"Migrasi Data SAP / Non-SAP":stockSubTab==="auditLog"?"Audit Log":stockSubTab==="perms"?"Matrix Izin":"Master Gudang";
   const pageMeta = {
     dashboard: {eyebrow:"Operations Overview",title:hasRole(currentUser,"MANAGER")?"Dashboard Eksekutif":hasRole(currentUser,"ASMAN")?"Dashboard Operasional":"Dashboard Gudang"},
     stock: {eyebrow:"Inventory Control",title:"Data Stok Gudang"},
@@ -4396,7 +4434,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                         {id:"timmutu",icon:<SidebarIcon name="users" size={16}/>,label:"Tim Mutu"},
                         {id:"organisasi",icon:<SidebarIcon name="organization" size={16}/>,label:"Struktur Organisasi"},
                         {id:"gudang",icon:<SidebarIcon name="warehouse" size={16}/>,label:"Master Gudang"},
-        ...(hasRole(currentUser, "ADMIN") ? [{id:"akun",icon:<SidebarIcon name="user" size={16}/>,label:"Kelola Akun"},{id:"migrasi",icon:<SidebarIcon name="migrate" size={16}/>,label:"Migrasi Data"},{id:"auditLog",icon:<SidebarIcon name="shield" size={16}/>,label:"Audit Log"}] : []),
+        ...(can(currentUser, "aksi.kelolaAkun", rolePerms) ? [{id:"akun",icon:<SidebarIcon name="user" size={16}/>,label:"Kelola Akun"}] : []),
+        ...(hasRole(currentUser, "ADMIN") ? [{id:"migrasi",icon:<SidebarIcon name="migrate" size={16}/>,label:"Migrasi Data"},{id:"auditLog",icon:<SidebarIcon name="shield" size={16}/>,label:"Audit Log"},{id:"perms",icon:<SidebarIcon name="shield" size={16}/>,label:"Matrix Izin"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (
@@ -4703,9 +4742,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* KAPASITAS GUDANG (termasuk Peta Gudang sebagai sub-tab) */}
         {tab==="kapasitasGudang" && (
           <KapasitasGudangTab
-            gudangCapacityList={gudangCapacityList}
+            gudangCapacityList={visibleCapacityList}
             gudangCapacityImports={gudangCapacityImports}
-            gudangList={gudangList}
+            gudangList={visibleGudangList}
             subGudangList={subGudangList}
             lokasiList={lokasiList}
             stocks={enrichedStocks}
@@ -4867,7 +4906,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                 await saveToCloud({stocks:ns});
                               }}>
                               <option value="">-- Pilih Gudang --</option>
-                              {gudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
+                              {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
                             </select>
                           ) : (
                             <span style={{color:C.text}}>{gdg?.kode||gdg?.nama||"—"}</span>
@@ -5016,11 +5055,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 </span>
               </div>
               <div className="workspace-page-toolbar__actions">
-                {hasRole(currentUser, "ADMIN") && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
-                {hasRole(currentUser, "ADMIN") && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
-                {hasRole(currentUser, "ADMIN") && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
-                {hasRole(currentUser, "ADMIN") && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
-                {hasRole(currentUser, "ADMIN") && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
+                {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
+                {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
+                {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
+                {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="gudang" && <button style={sty.btn("primary")} onClick={openAddGudang}>+ Tambah Gudang Baru</button>}
+                {can(currentUser, "aksi.kelolaAkun", rolePerms) && stockSubTab==="akun" && <button style={sty.btn("primary")} onClick={openAddAkun}>+ Daftarkan Akun Baru</button>}
               </div>
             </div>
             {stockSubTab==="gudang" && (
@@ -5028,7 +5067,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 ℹ️ Sebagian besar Gudang biasanya <b>otomatis terbentuk sendiri</b> dari import Excel Kapasitas Gudang (tombol di bawah) setelah disetujui Asman. Kalau ada Gudang yang belum tercakup di laporan itu, tambahkan manual lewat tombol "+ Tambah Gudang Baru" di kanan atas.
               </div>
             )}
-            {stockSubTab==="gudang" && hasRole(currentUser, "ADMIN","TL") && (
+            {stockSubTab==="gudang" && can(currentUser, "aksi.import", rolePerms) && (
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
                   <button style={sty.btn(importGudangOpen?"danger":"primary")} onClick={()=>setImportGudangOpen(o=>!o)}>
@@ -5392,7 +5431,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div>
                 {/* Notifikasi approval blok lokasi sudah dipindahkan ke menu "✅ Approval" — lihat di sana. */}
                 {gudangList.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
-                {gudangList.map(g=>{
+                {visibleGudangList.map(g=>{
                   const upt = uptList.find(u=>u.id===g.uptId);
                   const bloklokasi = lokasiList.filter(l=>l.gudangId===g.id);
                   const blokWithCoord = bloklokasi.filter(l=>l.mapX!=null);
@@ -5662,8 +5701,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
 
-            {/* ── SUB-TAB: KELOLA AKUN (ADMIN only) ── */}
-            {stockSubTab==="akun" && hasRole(currentUser, "ADMIN") && (
+            {/* ── SUB-TAB: KELOLA AKUN (aksi.kelolaAkun, default ADMIN) ── */}
+            {stockSubTab==="akun" && can(currentUser, "aksi.kelolaAkun", rolePerms) && (
               <div style={sty.card}>
                 {users.length===0 ? (
                   <div style={{textAlign:"center",color:C.muted,padding:30}}>Belum ada akun terdaftar.</div>
@@ -5728,6 +5767,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             {stockSubTab==="auditLog" && hasRole(currentUser, "ADMIN") && (
               <AuditLogPage sty={sty} C={C}/>
             )}
+
+            {/* ── SUB-TAB: MATRIX IZIN (ADMIN only) ── */}
+            {stockSubTab==="perms" && hasRole(currentUser, "ADMIN") && (
+              <PermMatrixPage sty={sty} C={C} currentUser={currentUser} rolePerms={rolePerms} reloadRolePerms={reloadRolePerms} showToast={showToast}/>
+            )}
           </div>
         )}
         {tab==="transaction" && (
@@ -5773,7 +5817,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 })}
               </div>
             </section>
-            {(hasRole(currentUser, ...CAN_CREATE) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
+            {(can(currentUser, "aksi.buatTransaksi", rolePerms) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
               <div className="tug-action-row">
                 <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong></div>
                 <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>
@@ -6519,7 +6563,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <label style={sty.label}>Gudang *</label>
               <select style={sty.select} value={lokasiForm.gudangId||""} disabled={gudangList.length===0 || lokasiModal==="edit"} onChange={e=>setLokasiForm(lf=>({...lf,gudangId:e.target.value||null,subGudangId:null}))}>
                 <option value="">-- Pilih Gudang --</option>
-                {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
+                {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
               </select>
               {lokasiModal==="edit" && <div style={{fontSize:12,color:C.muted,marginTop:4}}>Gudang tidak bisa diubah saat edit blok. Hapus & buat ulang blok jika perlu pindah Gudang.</div>}
             </div>
@@ -6603,7 +6647,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <label style={sty.label}>Bertugas di Gudang (opsional)</label>
               <select style={sty.select} value={satpamForm.gudangId||""} onChange={e=>setSatpamForm(sf=>({...sf,gudangId:e.target.value}))}>
                 <option value="">-- Belum di-assign gudang --</option>
-                {gudangList.map(g=>{ const up=uptList.find(u=>u.id===g.uptId); return <option key={g.id} value={g.id}>{g.nama}{up?` — ${up.nama}`:""}</option>; })}
+                {visibleGudangList.map(g=>{ const up=uptList.find(u=>u.id===g.uptId); return <option key={g.id} value={g.id}>{g.nama}{up?` — ${up.nama}`:""}</option>; })}
               </select>
               <div style={{fontSize:12,color:C.muted,marginTop:4}}>Nama satpam akan muncul di dokumen TUG-10 sesuai gudang tempat barang disimpan.</div>
             </div>
@@ -7218,6 +7262,23 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     {ultgList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
                   </select>
                 </div>
+                {/* RBAC per gudang: kosong = semua gudang (perilaku default). Centang untuk
+                    membatasi akun hanya ke gudang tertentu (dropdown/daftar gudang tersaring). */}
+                <div style={{marginBottom:16}}>
+                  <label style={sty.label}>Batasi Akses Gudang <span style={{fontWeight:400,color:C.muted}}>(kosongkan = semua gudang)</span></label>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,maxHeight:150,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
+                    {visibleGudangList.length===0 && <span style={{fontSize:12,color:C.muted}}>Belum ada Master Gudang.</span>}
+                    {visibleGudangList.map(g=>{
+                      const sel = (akunForm.gudangIds||[]).includes(g.id);
+                      return (
+                        <label key={g.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",padding:"4px 8px",borderRadius:6,background:sel?"#e0f2fe":"transparent",border:`1px solid ${sel?"#0369a1":C.border}`}}>
+                          <input type="checkbox" checked={sel} onChange={()=>setAkunForm(f=>{ const cur=f.gudangIds||[]; return {...f, gudangIds: cur.includes(g.id)?cur.filter(x=>x!==g.id):[...cur,g.id]}; })}/>
+                          {g.nama}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
                 <div style={{display:"flex",gap:10}}>
                   <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setAkunModal(null)} disabled={akunBusy}>Batal</button>
                   <button style={{...sty.btn("primary"),flex:2,opacity:akunBusy?0.6:1}} onClick={akunModal==="edit"?submitAkunEdit:submitAkunBaru} disabled={akunBusy}>{akunBusy?(akunModal==="edit"?"Menyimpan...":"Mendaftarkan..."):(akunModal==="edit"?"💾 Simpan Perubahan":"💾 Daftarkan")}</button>
@@ -7560,7 +7621,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
             <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Transaksi akan PENDING sampai disetujui TL Logistik / Asman. Stok akan BERTAMBAH saat disetujui.</div>
 
-            {!hasRole(currentUser, ...CAN_CREATE) && (
+            {!can(currentUser, "aksi.buatTransaksi", rolePerms) && (
               <div style={{background:"#fee2e2",border:"1px solid #fca5a5",borderRadius:8,padding:"8px 12px",fontSize:12,color:"#991b1b",marginBottom:16,fontWeight:600}}>🚫 Role kamu ({ROLES[currentUser?.role]||currentUser?.role||"-"}) tidak bisa mengajukan TUG-10 — hubungi Admin Gudang / TL Logistik.</div>
             )}
 
@@ -7582,7 +7643,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <label style={sty.label}>Gudang Penyimpanan *</label>
                 <select style={sty.select} value={txnForm.gudangTujuanId||""} onChange={e=>{ const gid=e.target.value; setTxnForm(tf=>{ const cand=satpamList.filter(sp=>sp.gudangId===gid); return {...tf, gudangTujuanId:gid, subGudangTujuanId:"", lokasiTujuanId:"", satpamId: cand.length===1?cand[0].id:""}; }); }}>
                   <option value="">-- Pilih Gudang --</option>
-                  {gudangList.map(g=>{ const up=uptList.find(u=>u.id===g.uptId); return <option key={g.id} value={g.id}>{g.nama}{up?` — ${up.nama}`:""}</option>; })}
+                  {visibleGudangList.map(g=>{ const up=uptList.find(u=>u.id===g.uptId); return <option key={g.id} value={g.id}>{g.nama}{up?` — ${up.nama}`:""}</option>; })}
                   {hasLegacyBlok && <option value="__legacy__">Blok tanpa gudang (legacy)</option>}
                 </select>
                 {gudangList.length===0 && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>Belum ada Master Gudang. Tambahkan dulu di Master Data → Master Gudang.</div>}
