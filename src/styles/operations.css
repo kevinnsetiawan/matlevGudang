@@ -151,6 +151,22 @@
 .attb-stage-card.is-source { min-width: 118px !important; }
 .attb-stage-code { display: inline-flex; min-width: 25px; height: 18px; align-items: center; justify-content: center; padding: 0 4px; border-radius: 5px; background: rgba(100,116,139,.12); color: inherit; font-size: 12px; font-weight: 900; letter-spacing: .5px; }
 
+/* ── DARK MODE (hero + heading operasional) ────────────────────────────────
+   Scope MVP: hero berlatar putih & judul section (dark-text agar tidak
+   invisible di dark). Varian .operations-hero--summary-only sudah navy → fine.
+   Kartu/segment/filter operasional sengaja tidak disentuh (perbaikan susulan). */
+[data-theme="dark"] .operations-hero { border-color: #334155; background: #1e293b; color: #e2e8f0; }
+[data-theme="dark"] .operations-hero p { color: #94a3b8; }
+[data-theme="dark"] .operations-hero__controls label { color: #94a3b8; }
+[data-theme="dark"] .operations-hero__controls select { border-color: #475569; background: #0f172a; color: #e2e8f0; }
+[data-theme="dark"] .operations-hero__footer { border-top-color: #334155; background: #0f172a; }
+[data-theme="dark"] .operations-metric { border-right-color: #334155; }
+[data-theme="dark"] .operations-metric span,
+[data-theme="dark"] .operations-hero__scope span { color: #94a3b8; }
+[data-theme="dark"] .operations-section-heading { border-bottom-color: #334155; }
+[data-theme="dark"] .operations-section-heading h2 { color: #e2e8f0; }
+[data-theme="dark"] .operations-section-heading small { color: #94a3b8; }
+
 @media (max-width: 800px) {
   .operations-hero__top { flex-direction: column; padding: 20px; }
   .operations-hero__controls { width: 100%; flex-basis: auto; }

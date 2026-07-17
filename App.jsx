@@ -8,7 +8,7 @@ import { supabase, SUPABASE_URL, SUPABASE_KEY, usernameToAuthEmail } from "./src
 import { CLOUD } from "./src/lib/cloud.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { logAudit } from "./src/lib/audit.js";
-import { C, makeSty } from "./src/theme.js";
+import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
@@ -330,6 +330,10 @@ export default function PLNWarehouse() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // drawer sidebar di HP
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
+  // Dark mode: persist manual di localStorage, default terang (tanpa auto-deteksi OS).
+  // Palet C di-shadow di bawah (dekat makeSty) supaya semua C.xxx/sty.xxx ikut tema.
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("warnoto_theme") || "light"; } catch { return "light"; } });
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); try { localStorage.setItem("warnoto_theme", theme); } catch {} }, [theme]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth <= 1120);
   const compactViewportRef = useRef(typeof window !== "undefined" && window.innerWidth > 768 && window.innerWidth <= 1120);
   const [stockGudangFilter, setStockGudangFilter] = useState({}); // UI-only: stockId -> gudangId terpilih, untuk menyaring opsi dropdown Blok
@@ -4186,7 +4190,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   //   supaya tidak gampang salah pencet pakai jari.
   // - font input >=16px di HP supaya Safari/Chrome iOS tidak auto-zoom saat
   //   field di-tap (auto-zoom terjadi kalau font input <16px).
-  const sty = makeSty(isMobile);
+  // Shadow lokal palet: seluruh C.xxx & sty.xxx di PLNWarehouse + komponen anak
+  // (via prop C={C}) otomatis mengikuti tema aktif. Deklarasi sebelum sty dipakai.
+  const C = theme === "dark" ? C_DARK : C_LIGHT;
+  const sty = makeSty(isMobile, C);
 
   // ══════════════════════ PUBLIC SCAN VIEW (QR dari HP, tanpa login) ══════════════════════
   const scanKatalogId = new URLSearchParams(window.location.search).get("scan");
@@ -4246,9 +4253,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   // ══════════════════════ MAIN APP ══════════════════════
   // Role PENGADAAN hanya punya akses Dashboard + Rencana Kedatangan
-  const isPengadaan = hasRole(currentUser, "PENGADAAN");
+  const isPengadaan = currentUser?.role === "PENGADAAN";
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
-  const isUltgRole = hasRole(currentUser, ...ULTG_ROLES);
+  const isUltgRole = ULTG_ROLES.includes(currentUser?.role);
   const navItems = (isPengadaan ? [
     {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
@@ -4295,7 +4302,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
 
   return (
-    <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg}}>
+    <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
       {/* Mode demo per-tab: semua penyimpanan (localStorage + Supabase + Storage)
           dibekukan — lihat isDemoMode() di src/lib/demo.js. Banner ini pengingat
           visual bahwa perubahan di tab ini tidak akan tersimpan. */}
@@ -4315,7 +4322,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       )}
       {savingInfo && (
         <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,0.55)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"#fff",borderRadius:16,padding:"28px 32px",width:360,maxWidth:"100%",textAlign:"center",boxShadow:"0 24px 64px rgba(2,6,23,0.35)",borderTop:`4px solid ${C.accent}`}}>
+          <div style={{background:C.surface,borderRadius:16,padding:"28px 32px",width:360,maxWidth:"100%",textAlign:"center",boxShadow:"0 24px 64px rgba(2,6,23,0.35)",borderTop:`4px solid ${C.accent}`}}>
             <div className="txn-spinner" style={{width:44,height:44,margin:"0 auto 16px",border:`4px solid #e2e8f0`,borderTopColor:C.accent,borderRadius:"50%"}}/>
             <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>Menyimpan Transaksi</div>
             <div style={{fontSize:12,color:C.muted,marginBottom:savingInfo.total>0?12:0}}>{savingInfo.label}{savingInfo.total>0?` (${savingInfo.done}/${savingInfo.total})`:""}</div>
@@ -4540,6 +4547,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <strong>{pageMeta.title}</strong>
             </div>
             <div className="app-account" ref={accountMenuRef}>
+              <button className={`theme-switch${theme==="dark"?" is-dark":""}`} onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} role="switch" aria-checked={theme==="dark"} aria-label="Mode gelap" title={theme==="dark"?"Mode Terang":"Mode Gelap"}>
+                <span className="theme-switch__knob" aria-hidden="true">{theme==="dark"?"🌙":"☀️"}</span>
+              </button>
               <button className="app-account__trigger" onClick={()=>setAccountMenuOpen(open=>!open)} aria-expanded={accountMenuOpen} aria-haspopup="menu">
                 <span className="app-account__avatar">{currentUser.avatar || currentUser.name?.slice(0,2).toUpperCase()}</span>
                 <span className="app-account__identity">
@@ -5392,7 +5402,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   {uptOfUit.map(upt=>{
                                     const ultgOfUpt = ultgList.filter(x=>x.parentUptId===upt.id).filter(x=>!orgQ || hit(x.kode,x.nama) || hit(upt.kode,upt.nama));
                                     return (
-                                      <div key={upt.id} style={{background:"white",border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
+                                      <div key={upt.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
                                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
                                           <div style={{display:"flex",gap:8,alignItems:"flex-start",minWidth:0}}>
                                             <div style={{fontSize:16,flexShrink:0}}>📍</div>
@@ -6475,9 +6485,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <div style={{marginTop:8,maxHeight:180,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
                   {maraSearchResults.map(item=>(
                     <div key={item.kode_material} onClick={()=>applyMaraToKatalog(item)}
-                      style={{padding:"6px 10px",borderRadius:7,border:"1px solid #bae6fd",background:"white",cursor:"pointer",fontSize:12,display:"flex",justifyContent:"space-between",gap:8}}
+                      style={{padding:"6px 10px",borderRadius:7,border:"1px solid #bae6fd",background:C.surface,cursor:"pointer",fontSize:12,display:"flex",justifyContent:"space-between",gap:8}}
                       onMouseEnter={e=>e.currentTarget.style.background="#e0f2fe"}
-                      onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                      onMouseLeave={e=>e.currentTarget.style.background=C.surface}>
                       <div>
                         <span style={{fontWeight:700,color:"#0369a1"}}>{item.kode_material}</span>
                         <span style={{color:"#334155",marginLeft:8}}>{item.nama}</span>
@@ -7405,7 +7415,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 const isExpanded = idx===tug5ExpandedIdx;
                 if (!isExpanded) {
                   return (
-                    <div key={idx} style={{display:"flex",alignItems:isMobile?"stretch":"center",flexDirection:isMobile?"column":"row",gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",marginBottom:8,background:"white",cursor:"pointer"}} onClick={()=>setTug5ExpandedIdx(idx)}>
+                    <div key={idx} style={{display:"flex",alignItems:isMobile?"stretch":"center",flexDirection:isMobile?"column":"row",gap:8,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",marginBottom:8,background:C.surface,cursor:"pointer"}} onClick={()=>setTug5ExpandedIdx(idx)}>
                       <span style={{fontSize:12,fontWeight:700,color:C.muted}}>#{idx+1}</span>
                       <span style={{flex:1,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{kat ? `${kat.name} [${kat.katalog||"-"}]` : <span style={{color:C.muted,fontStyle:"italic"}}>Belum dipilih</span>}</span>
                       <div style={{display:"flex",alignItems:"center",justifyContent:isMobile?"space-between":"flex-start",gap:8,flexWrap:"wrap"}}>

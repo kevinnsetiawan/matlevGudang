@@ -395,7 +395,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.app-account { position: relative; margin-left: auto; }
+.app-account { position: relative; display: flex; align-items: center; margin-left: auto; }
+/* Saklar tema di header (kiri tombol akun). Header selalu navy → gaya sama di kedua tema. */
+.theme-switch { position: relative; width: 46px; height: 24px; flex-shrink: 0; margin-right: 10px; padding: 0; border: 1px solid rgba(255,255,255,.28); border-radius: 999px; background: rgba(255,255,255,.14); cursor: pointer; }
+.theme-switch:hover { background: rgba(255,255,255,.22); }
+.theme-switch__knob { position: absolute; top: 1px; left: 1px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #fff; font-size: 11px; line-height: 1; box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .18s ease; }
+.theme-switch.is-dark .theme-switch__knob { transform: translateX(22px); background: #0f172a; }
 .app-account__trigger {
   display: flex;
   min-width: 210px;
@@ -1292,3 +1297,137 @@
 /* Mode Demo per-tab (TUG trial) — lihat src/lib/demo.js. */
 .demo-banner { display: flex; align-items: center; gap: 10px; position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9999; padding: 8px 14px; border-radius: 999px; background: #b45309; color: #fff; font-size: 12px; font-weight: 750; box-shadow: 0 10px 26px -12px rgba(180,83,9,.7); }
 .demo-banner button { border: 1px solid rgba(255,255,255,.6); border-radius: 999px; padding: 4px 12px; background: rgba(255,255,255,.15); color: #fff; font-size: 12px; font-weight: 750; cursor: pointer; }
+
+/* ── DARK MODE ─────────────────────────────────────────────────────────────
+   MVP (lihat HANDOFF "Dark mode 2026-07-17"). Palet warna JS `C` sudah
+   theme-aware via inline style (shell bg, sidebar, card, input, page title,
+   badge) — jadi di sini HANYA retrofit kelas hex-literal yang tidak ikut C:
+   dropdown akun (putih), tombol approval berlatar putih, Pak War (.ai-*),
+   scrollbar & selection. Sidebar dan .kpi-banner + turunannya SUDAH navy
+   gelap → sengaja dibiarkan (sudah kontras di dark). Warna badge/chip kecil
+   saturasi juga sengaja dibiarkan (terbaca di kedua tema, pola Slack/GitHub). */
+
+[data-theme="dark"] ::selection { background: rgba(59,130,246,.32); }
+[data-theme="dark"] * { scrollbar-color: #475569 transparent; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #475569; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* Menu akun (dropdown berlatar putih) */
+[data-theme="dark"] .app-account__menu { border-color: #334155; background: #1e293b; color: #e2e8f0; box-shadow: 0 18px 45px -18px rgba(0,0,0,.7); }
+[data-theme="dark"] .app-account__avatar.is-large { border-color: #1e3a8a; background: #1e293b; color: #93c5fd; }
+[data-theme="dark"] .app-account__profile span:not(.app-account__avatar) { color: #94a3b8; }
+[data-theme="dark"] .app-account__unit { border-bottom-color: #334155; color: #94a3b8; }
+[data-theme="dark"] .app-account__menu > button { color: #cbd5e1; }
+[data-theme="dark"] .app-account__menu > button:hover { background: #334155; }
+[data-theme="dark"] .app-account__menu > button.is-danger { color: #f87171; }
+[data-theme="dark"] .app-account__menu > button.is-danger:hover { background: rgba(248,113,113,.12); }
+
+/* Tombol approval berlatar putih (approve/danger sudah gradient → dibiarkan) */
+[data-theme="dark"] .approval-btn--reject { background: #1e293b; color: #f87171; border-color: #7f1d1d; }
+[data-theme="dark"] .approval-btn--reject:hover { background: rgba(248,113,113,.12); border-color: #ef4444; }
+[data-theme="dark"] .approval-btn--cancel { background: #1e293b; color: #cbd5e1; border-color: #475569; }
+[data-theme="dark"] .approval-btn--cancel:hover { background: #334155; }
+
+/* Pak War (.ai-*) — panel & bubble berlatar terang */
+[data-theme="dark"] .ai-conversation { border-color: #334155; background: #1e293b; }
+[data-theme="dark"] .ai-conversation__header { border-bottom-color: #334155; background: #1e293b; }
+[data-theme="dark"] .ai-conversation__identity strong { color: #e2e8f0; }
+[data-theme="dark"] .ai-conversation__identity small { color: #94a3b8; }
+[data-theme="dark"] .ai-conversation__admin button { border-color: #475569; background: #1e293b; color: #cbd5e1; }
+[data-theme="dark"] .ai-conversation__admin button.is-active { border-color: #3b82f6; background: rgba(59,130,246,.16); color: #93c5fd; }
+[data-theme="dark"] .ai-conversation__admin > span { color: #94a3b8; }
+[data-theme="dark"] .ai-conversation__config { background: #0f172a; }
+[data-theme="dark"] .ai-config-back { border-color: #475569; background: #1e293b; color: #cbd5e1; }
+[data-theme="dark"] .ai-sync-mini { background: #334155; }
+[data-theme="dark"] .ai-start { background: linear-gradient(145deg,#1e293b 0%,#0f172a 58%,#132038 100%); }
+[data-theme="dark"] .ai-start__intro h2 { color: #e2e8f0; }
+[data-theme="dark"] .ai-start__intro p { color: #94a3b8; }
+[data-theme="dark"] .ai-start__status { color: #cbd5e1; }
+[data-theme="dark"] .ai-quick-prompts button { border-color: #334155; background: rgba(30,41,59,.9); color: #cbd5e1; }
+[data-theme="dark"] .ai-quick-prompts button:hover { border-color: #3b82f6; background: #1e293b; }
+[data-theme="dark"] .ai-quick-prompts button small { color: #94a3b8; }
+[data-theme="dark"] .ai-quick-prompts button b { color: #93c5fd; }
+[data-theme="dark"] .ai-chat-history { background: #1e293b; }
+[data-theme="dark"] .ai-message__content > span { color: #94a3b8; }
+[data-theme="dark"] .ai-message__content p,
+[data-theme="dark"] .ai-message__bubble { border-color: #334155; background: #0f172a; color: #cbd5e1; }
+[data-theme="dark"] .ai-message.is-user .ai-message__content p { border-color: #3b82f6; background: #1d4ed8; color: #fff; }
+[data-theme="dark"] .ai-message.is-loading .ai-message__content p { color: #94a3b8; }
+[data-theme="dark"] .ai-message__content .ai-richlist li { border-color: #334155; border-left-color: #3b82f6; background: #1e293b; color: #cbd5e1; }
+[data-theme="dark"] .ai-message__content .ai-richlist li strong { color: #93c5fd; }
+[data-theme="dark"] .ai-composer { border-top-color: #334155; background: #0f172a; }
+[data-theme="dark"] .ai-composer__field { color: #cbd5e1; }
+[data-theme="dark"] .ai-composer textarea { border-color: #475569; background: #1e293b; color: #e2e8f0; }
+[data-theme="dark"] .ai-composer__reset { border-color: #475569; background: #1e293b; color: #94a3b8; }
+[data-theme="dark"] .ai-composer__hint { color: #94a3b8; }
+
+/* ── DARK MODE — surface fitur (Opsi A: darken bg + lighten text, koheren) ────
+   Famili kartu/panel berlatar putih (workspace/filter, dashboard/exec, capacity,
+   TUG, forecast, operations actionbar/filterbar). Badge/alert saturasi & state
+   aktif biru-solid SENGAJA dibiarkan (self-contained, terbaca di kedua tema). */
+
+/* Kartu/panel utama (bg putih) → surface gelap + border + teks terang */
+[data-theme="dark"] :is(
+  .workspace-filter-panel, .workspace-page-toolbar, .table-action-button,
+  .approval-filterbar, .exec-kpi, .exec-attention, .dashboard-insight-card,
+  .dashboard-overview-kpi, .tug-command-bar, .tug-action-row, .tug-status-filter,
+  .forecast-overview, .forecast-controls, .forecast-search, .forecast-table-card,
+  .forecast-detail-head, .forecast-analysis-panel, .operations-actionbar,
+  .operations-filterbar
+) { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+
+/* Panel recessed (bg #f8fafc/#eef2f7/#e9eef6) → lebih gelap */
+[data-theme="dark"] :is(
+  .approval-hero__summary, .exec-attention__header, .dashboard-performance-meta,
+  .dashboard-overview__context, .tug-process-tabs, .capacity-tabs,
+  .forecast-view-switch, .forecast-overview__metrics, .forecast-analysis-panel__head
+) { background: #0f172a; border-color: #334155; }
+[data-theme="dark"] :is(.approval-hero__summary > div, .dashboard-performance-meta > div) { background: #1e293b; }
+[data-theme="dark"] .forecast-overview__metrics > * { background: #1e293b; color: #e2e8f0; }
+[data-theme="dark"] .forecast-table th { background: #0f172a; border-bottom-color: #334155; color: #94a3b8; }
+[data-theme="dark"] .forecast-table td { border-bottom-color: #1e293b; color: #e2e8f0; }
+[data-theme="dark"] .forecast-table tbody tr:hover { background: #0f172a; }
+[data-theme="dark"] .forecast-search input { color: #e2e8f0; }
+
+/* Tombol/kontrol kecil berlatar putih dengan teks netral gelap → terang */
+[data-theme="dark"] :is(
+  .forecast-sort select, .forecast-back, .forecast-row-actions button,
+  .forecast-pagination__size select, .forecast-pagination__nav button,
+  .exec-attention__item > button
+) { background: #1e293b; border-color: #334155; color: #e2e8f0; }
+
+/* Tombol/kontrol kecil dengan teks muted (filter) → surface gelap + muted terang */
+[data-theme="dark"] :is(
+  .tug-process-tabs__options > button, .forecast-status-filter button,
+  .approval-filterbar__items button
+) { background: #1e293b; border-color: #334155; color: #94a3b8; }
+
+/* Teks gelap eksplisit (strong/judul) → terang */
+[data-theme="dark"] :is(
+  .dashboard-insight-card__header strong, .dashboard-performance-meta strong,
+  .dashboard-overview__context > strong, .dashboard-mode-switch button strong,
+  .tug-process-tabs__header strong, .tug-process-tabs__options > button strong,
+  .tug-action-row > div strong, .forecast-overview__copy > strong,
+  .forecast-table td:first-child > strong, .forecast-empty strong,
+  .forecast-detail-head__copy > strong, .approval-filterbar__label span,
+  .approval-section-title
+) { color: #e2e8f0; }
+
+/* Teks muted (#64748b) → #94a3b8 biar kontras di gelap */
+[data-theme="dark"] :is(
+  .workspace-context-row, .exec-kpi__copy span, .exec-attention__empty,
+  .dashboard-mode-switch button, .dashboard-insight-card__header span,
+  .dashboard-performance-score span, .dashboard-performance-meta span,
+  .dashboard-performance-empty, .dashboard-overview__context > small,
+  .dashboard-overview-kpi__copy > span, .tug-process-tabs__header span,
+  .tug-process-tabs__options > button small, .tug-action-row > div span,
+  .tug-status-filter > span, .tug-status-filter button, .forecast-overview__copy > small,
+  .forecast-overview__metrics span, .forecast-sort, .forecast-empty,
+  .forecast-pagination__size, .forecast-pagination__nav span,
+  .forecast-detail-head__copy > span, .forecast-detail-head__copy > small,
+  .approval-hero__summary span
+) { color: #94a3b8; }
+
+/* Chip netral kecil (bg abu terang) → gelap biar teks kebaca */
+[data-theme="dark"] .workspace-context-row > span { background: #334155; }
+[data-theme="dark"] :is(.approval-filterbar__items button b, .forecast-status-filter button b) { background: #334155; color: #cbd5e1; }
