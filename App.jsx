@@ -4880,9 +4880,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     const hasDenah = !!(gdg?.denahImageData || (lok?.subGudangId && subGudangList.find(s=>s.id===lok.subGudangId)?.denahImageData));
                     return (
                       <tr className="mobile-card-table__row" key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
-                        <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.img){e.stopPropagation(); setLightboxImg(st.img);} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.img?"zoom-in":"default"}}>
-                          {st.img ? <img src={st.img} alt={st.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
-                            : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
+                        <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.fotoKeseluruhan){e.stopPropagation(); setLightboxImg(st.fotoKeseluruhan);} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.fotoKeseluruhan?"zoom-in":"default"}}>
+                          {st.fotoKeseluruhan ? <img src={st.fotoKeseluruhan} alt={st.name} style={{width:48,height:48,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
+                            : <div style={{width:48,height:48,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
                         </td>
                         <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200}}>
                           <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
