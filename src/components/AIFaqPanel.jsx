@@ -14,6 +14,12 @@ export function AIFaqPanel({ sty, C, onSaved }) {
   const [saving, setSaving] = useState(false);
 
   async function loadData() {
+    if (!supabase) {
+      setBadLogs([]);
+      setFaqList([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [{data: tgLogs}, {data: faq}] = await Promise.all([

@@ -508,11 +508,11 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
               {aiInsightLoading ? "AI sedang menyusun insight manajemen..." : "AI insight belum tersedia. Jalankan Import & Hitung untuk membuat insight."}
             </div>
           ) : (
-            <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(280px,.8fr)",gap:14}}>
+            <div className="material-spares-insight-grid" style={{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(280px,.8fr)",gap:14}}>
               <div style={{...sty.card}}>
                 <div style={{fontSize:12,color:C.muted,fontWeight:800,textTransform:"uppercase",marginBottom:6}}>Executive Summary</div>
                 <div style={{fontSize:14,lineHeight:1.6,fontWeight:600,marginBottom:16}}>{latestAiInsight.executiveSummary}</div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
+                <div className="material-spares-risk-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12}}>
                   <div>
                     <div style={{fontWeight:800,fontSize:13,marginBottom:8,color:C.red}}>Top Risks</div>
                     {(latestAiInsight.topRisks||[]).slice(0,8).map((x,i)=><div key={i} style={{fontSize:12,padding:"5px 0",borderBottom:`1px solid ${C.border}`}}>{typeof x==="string"?x:(x.nama||x.noKatalog||JSON.stringify(x))}</div>)}
@@ -541,7 +541,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
           {/* Keterangan cara perhitungan */}
           <div style={{...sty.card,marginBottom:16,background:"#f0f9ff",border:`1px solid #bae6fd`}}>
             <div style={{fontWeight:800,fontSize:13,color:"#0369a1",marginBottom:10}}>📐 Cara Perhitungan Material Cadang</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:14,fontSize:12}}>
+            <div className="material-spares-method-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:14,fontSize:12}}>
               <div>
                 <div style={{fontWeight:700,color:"#0369a1",marginBottom:4}}>1. Klasifikasi ABC</div>
                 <div style={{color:"#374151",lineHeight:1.7}}>
@@ -745,12 +745,12 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       {/* Modal detail item */}
       {detailItem && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setDetailItem(null)}>
-          <div style={{...sty.card,maxWidth:520,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+          <div style={{...sty.card,maxWidth:520,width:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
               <h3 style={{fontWeight:800,fontSize:16}}>{detailItem.katalogName||detailItem.namaMaterial}</h3>
               <button style={sty.btn("ghost","sm")} onClick={()=>setDetailItem(null)}>✕</button>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12}}>
+            <div className="material-spares-detail-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12}}>
               {[
                 ["No Katalog",detailItem.noKat],["Equipment Cluster",detailItem.cluster],
                 ["Kelas ABC",detailItem.abcClass],["Policy",detailItem.policy],

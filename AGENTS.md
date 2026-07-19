@@ -2,7 +2,11 @@
 
 Ikuti kontrak dua-vendor di `~/.codex/AGENTS.md`: **baca `HANDOFF.md` dulu** dan lanjutkan dari "Langkah berikutnya".
 
+## Aturan routing agent
+- Jika ragu memilih `worker` atau `senior`, wajib prioritaskan `worker` lebih dulu. `senior` hanya dipakai setelah scope/risiko terbukti kompleks atau `worker` mengeskalasi karena pekerjaannya melampaui levelnya; jangan default ke `senior` hanya karena agen utama bingung menentukan level.
+
 ## Aturan HANDOFF ringkas (override khusus project ini)
+- Jangan pernah mengedit atau memperbarui `HANDOFF.md` secara otomatis. Agen utama wajib meminta dan memperoleh persetujuan pengguna terlebih dahulu, termasuk setelah tahap signifikan dan di akhir sesi. Aturan persetujuan ini mengoverride semua aturan pembaruan `HANDOFF.md` otomatis yang bertentangan.
 - `HANDOFF.md` hanya berisi benang merah: tujuan, keputusan yang masih mengikat, status singkat, langkah berikutnya, blocker, dan perintah verifikasi.
 - Perbarui hanya bila status/keputusan/blocker/langkah berikutnya berubah secara material; jangan mencatat setiap sub-langkah.
 - Riwayat hanya ditambah saat pergantian vendor/shift. Simpan maksimal **2 entri shift terakhir**; sebelum menambah entri ketiga, hapus entri tertua.

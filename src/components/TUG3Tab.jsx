@@ -134,7 +134,7 @@ export function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
       {/* TUG-4 FORM MODAL */}
       {tug4Modal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Formulir TUG-4 — Pemeriksaan Mutu</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>untuk {tug4Modal.docNumbers.tug3}</p>
             <div style={{marginBottom:12}}>
@@ -163,10 +163,10 @@ export function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
       {/* TUG-3 FINAL LAMPIRAN MODAL */}
       {finalModal && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
-          <div style={{...sty.card,width:500,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+          <div style={{...sty.card,width:500,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
             <h3 style={{fontSize:18,fontWeight:800,marginBottom:6}}>Lampiran Final TUG-3</h3>
             <p style={{fontSize:12,color:C.muted,marginBottom:16}}>untuk {finalModal.docNumbers.tug3}</p>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+            <div className="tug3-attachment-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
               <div>
                 <label style={sty.label}>Foto Kendaraan</label>
                 <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setFinalForm(f=>({...f,fotoKendaraan:img})))} style={{fontSize:12,color:C.muted}}/>

@@ -34,10 +34,10 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
   }
 
   return (
-    <div style={{marginTop:20}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+    <div className="dashboard-analytics">
+      <div className="dashboard-analytics__heading">
         <h2 style={{fontSize:16,fontWeight:800}}>📊 Analitik Material</h2>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div className="dashboard-analytics__limit">
           <span style={{fontSize:12,color:C.muted}}>Tampilkan</span>
           <select style={{...sty.select,width:80,paddingTop:4,paddingBottom:4,paddingLeft:8,paddingRight:8,fontSize:12}} value={topN} onChange={e=>setTopN(Number(e.target.value))}>
             <option value={5}>Top 5</option>
@@ -47,12 +47,12 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16}}>
+      <div className="dashboard-analytics-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16}}>
         {/* Widget 1 — Paling Sering Dipakai */}
-        <div style={{...sty.card}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div className="dashboard-analytics-card" style={{...sty.card}}>
+          <div className="dashboard-analytics-card__heading">
             <div style={{fontWeight:700,fontSize:13}}>🔥 Paling Sering Dipakai</div>
-            <div style={{display:"flex",gap:4}}>
+            <div className="dashboard-analytics-toggle">
               {["frekuensi","qty"].map(m=>(
                 <button key={m} style={{padding:"3px 8px",borderRadius:20,border:`1px solid ${pemakaianMode===m?C.accent:C.border}`,background:pemakaianMode===m?C.accent:"white",color:pemakaianMode===m?"white":C.muted,fontSize:12,cursor:"pointer",fontWeight:pemakaianMode===m?700:400}} onClick={()=>setPemakaianMode(m)}>
                   {m==="frekuensi"?"Frekuensi":"Qty Keluar"}
@@ -76,7 +76,7 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
         </div>
 
         {/* Widget 2 — Stok Terbanyak */}
-        <div style={{...sty.card}}>
+        <div className="dashboard-analytics-card" style={{...sty.card}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>📦 Stok Terbanyak di Gudang</div>
           {topStok.length===0
             ? <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:20}}>Belum ada data stok</div>
@@ -98,7 +98,7 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
         </div>
 
         {/* Widget 3 — Akan Habis */}
-        <div style={{...sty.card}}>
+        <div className="dashboard-analytics-card" style={{...sty.card}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:12}}>⚠️ Material Akan Habis</div>
           {akanHabis.length===0
             ? <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:20}}>✅ Semua stok dalam kondisi aman</div>

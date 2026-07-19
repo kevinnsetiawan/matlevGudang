@@ -8,10 +8,10 @@ export function RencanaWidget({ rencanaKedatanganList, C, sty, setTab }) {
     .filter(item=>{const d=item.tanggalSerahTerima?new Date(item.tanggalSerahTerima).getTime():0; return d<=plus30;})
     .sort((a,b)=>new Date(a.tanggalSerahTerima)-new Date(b.tanggalSerahTerima));
   return (
-    <div style={{...sty.card,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+    <div className="dashboard-arrival-widget" style={{...sty.card,marginBottom:16}}>
+      <div className="dashboard-arrival-widget__heading">
         <h3 style={{fontSize:13,fontWeight:700}}>📅 Rencana Kedatangan (30 Hari)</h3>
-        <button style={sty.btn("ghost","sm")} onClick={()=>setTab("rencana")}>Lihat Semua</button>
+        <button className="dashboard-widget-action" style={sty.btn("ghost","sm")} onClick={()=>setTab("rencana")}>Lihat Semua</button>
       </div>
       {upcoming.length===0 && (
         <div style={{textAlign:"center",padding:"16px 0",color:C.muted,fontSize:12}}>

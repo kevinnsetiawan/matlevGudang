@@ -66,8 +66,8 @@ export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [],
 
   if (equipmentList.length === 0 && loans.length === 0) return null;
   return (
-    <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${overdueLoans.length?C.red:C.accent}`,cursor:"pointer"}} onClick={()=>setTab("heavyEquipment")}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12}}>
+    <div className="dashboard-heavy-summary" style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${overdueLoans.length?C.red:C.accent}`,cursor:"pointer"}} onClick={()=>setTab("heavyEquipment")}>
+      <div className="dashboard-heavy-summary__heading">
         <div>
           <div style={{fontSize:14,fontWeight:900}}>🚜 Ringkasan Alat Berat</div>
           <div style={{fontSize:12,color:C.muted}}>Scope: <b>{scopeLabel}</b> — status peminjaman, ketersediaan &amp; kondisi alat.</div>
@@ -104,7 +104,7 @@ export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [],
       </div>
       {/* Dipinjam aktif list */}
       {(borrowedLoans.length > 0 || overdueLoans.length > 0) && (
-        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+        <div className="dashboard-heavy-summary__loans">
           {[...overdueLoans, ...borrowedLoans].slice(0,3).map(l=>{
             const status = getHeavyEquipmentLoanRuntimeStatus(l);
             const ownerUpt = getHeavyEquipmentLoanOwnerUpt(l);
@@ -112,12 +112,12 @@ export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [],
             const returnDate = getHeavyEquipmentLoanReturnDate(l);
             const jobName = getHeavyEquipmentLoanJobName(l);
             return (
-              <div key={l.id} style={{fontSize:12,display:"flex",gap:6,alignItems:"center",padding:"4px 8px",borderRadius:6,background:status==="OVERDUE"?"#fef2f2":"#fff7ed"}}>
-                <span style={{fontWeight:700,color:status==="OVERDUE"?C.red:"#c2410c",minWidth:54}}>{status==="OVERDUE"?"⚠ OVERDUE":"📌 Dipinjam"}</span>
-                <span style={{color:C.text}}>{l.equipmentId||"-"}</span>
-                <span style={{color:C.muted}}>→ {requesterUpt}</span>
+              <div key={l.id} className="dashboard-heavy-loan" style={{background:status==="OVERDUE"?"#fef2f2":"#fff7ed"}}>
+                <span className="dashboard-heavy-loan__status" style={{color:status==="OVERDUE"?C.red:"#c2410c"}}>{status==="OVERDUE"?"⚠ OVERDUE":"📌 Dipinjam"}</span>
+                <span className="dashboard-heavy-loan__equipment" style={{color:C.text}}>{l.equipmentId||"-"}</span>
+                <span className="dashboard-heavy-loan__upt" style={{color:C.muted}}>→ {requesterUpt}</span>
                 {!isMSB && ownerUpt!==myUpt && <span style={{color:C.muted,fontStyle:"italic"}}>dari {ownerUpt}</span>}
-                <span style={{marginLeft:"auto",color:C.muted}}>s/d {returnDate||"-"}</span>
+                <span className="dashboard-heavy-loan__date" style={{color:C.muted}}>s/d {returnDate||"-"}</span>
               </div>
             );
           })}

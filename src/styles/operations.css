@@ -56,7 +56,8 @@
 
 /* Banner navy gaya "Maturity Level UPT" (dipakai Alat Berat & ATTB, keduanya summary-only). */
 .operations-hero--summary-only {
-  display: flex;
+  display: grid;
+  grid-template-columns: 230px minmax(0,1fr);
   align-items: stretch;
   min-height: 104px;
   border-color: rgba(255,255,255,.14);
@@ -65,6 +66,31 @@
   color: #fff;
   box-shadow: 0 12px 28px -22px rgba(11,37,89,.8);
 }
+.operations-hero__summary-copy {
+  grid-column: 1 / -1;
+  padding: 15px 18px 13px;
+  border-bottom: 1px solid rgba(219,234,254,.12);
+}
+.operations-hero__summary-copy > span {
+  color: rgba(219,234,254,.8);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.operations-hero__summary-copy h1 {
+  margin-top: 3px;
+  color: #fff;
+  font-size: 18px;
+  letter-spacing: -.2px;
+}
+.operations-hero__summary-copy p {
+  max-width: 760px;
+  margin-top: 5px;
+  color: rgba(219,234,254,.82);
+  line-height: 1.45;
+}
+.operations-hero__summary-copy + .operations-hero__footer { grid-column: 1 / -1; }
 .operations-hero--summary-only > .operations-hero__controls {
   display: flex;
   flex: 0 0 230px;
@@ -172,8 +198,157 @@
   .operations-hero__controls { width: 100%; flex-basis: auto; }
   .operations-hero__footer { flex-direction: column; }
   .operations-hero__scope { align-items: flex-start; text-align: left; border-top: 1px solid rgba(219,234,254,.1); }
-  .operations-hero--summary-only { flex-direction: column; }
-  .operations-hero--summary-only > .operations-hero__controls { flex-basis: auto; border-right: 0; border-bottom: 1px solid rgba(219,234,254,.1); }
+  .operations-hero--summary-only { grid-template-columns: minmax(0,1fr); }
+  .operations-hero__summary-copy,
+  .operations-hero--summary-only > .operations-hero__controls,
+  .operations-hero--summary-only .operations-hero__footer { grid-column: 1; }
+  .operations-hero--summary-only > .operations-hero__controls { width: 100%; flex-basis: auto; border-right: 0; border-bottom: 1px solid rgba(219,234,254,.1); }
   .operations-section-heading { align-items: flex-start; flex-direction: column; gap: 3px; }
   .operations-category-filters { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+}
+
+/* Alat Berat: phone-first composition for 360-390px screens. */
+@media (max-width: 768px) {
+  .heavy-equipment-page { min-width: 0; overflow-x: clip; }
+
+  .heavy-equipment-page .operations-hero--summary-only {
+    min-height: 0;
+    grid-template-columns: minmax(0,1fr);
+  }
+  .heavy-equipment-page .operations-hero__summary-copy { grid-column: 1; padding: 14px; }
+  .heavy-equipment-page .operations-hero__summary-copy h1 { font-size: 17px; }
+  .heavy-equipment-page .operations-hero__summary-copy p { margin-top: 5px; }
+  .heavy-equipment-page .operations-hero--summary-only > .operations-hero__controls {
+    grid-column: 1;
+    width: 100%;
+    flex-basis: auto;
+    padding: 14px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(219,234,254,.14);
+  }
+  .heavy-equipment-page .operations-hero--summary-only .operations-hero__footer { grid-column: 1; }
+  .heavy-equipment-page .operations-hero__controls select { min-height: 44px; }
+  .heavy-equipment-page .operations-hero__footer { display: block; min-width: 0; }
+  .heavy-equipment-page .operations-hero__metrics {
+    display: grid;
+    grid-template-columns: repeat(3,minmax(0,1fr));
+    width: 100%;
+    overflow: visible;
+  }
+  .heavy-equipment-page .operations-hero--summary-only .operations-metric {
+    min-width: 0;
+    padding: 13px 10px;
+    border-top: 1px solid rgba(219,234,254,.1);
+    border-right: 1px solid rgba(219,234,254,.1);
+  }
+  .heavy-equipment-page .operations-metric:nth-child(-n+3) { border-top: 0; }
+  .heavy-equipment-page .operations-metric:nth-child(3n) { border-right: 0; }
+  .heavy-equipment-page .operations-metric strong { font-size: 20px; }
+  .heavy-equipment-page .operations-metric span {
+    min-height: 30px;
+    line-height: 1.25;
+    white-space: normal;
+  }
+  .heavy-equipment-page .operations-hero__scope {
+    min-width: 0;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-top: 1px solid rgba(219,234,254,.14);
+    text-align: left;
+  }
+
+  .heavy-equipment-page .operations-section-heading {
+    min-width: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .heavy-equipment-page .operations-section-heading h2,
+  .heavy-equipment-page .operations-section-heading small { max-width: 100%; overflow-wrap: anywhere; }
+
+  .equipment-filter-layout { width: 100%; flex-direction: column; }
+  .heavy-equipment-page .operations-category-filters {
+    width: 100%;
+    flex: none !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scroll-snap-type: x proximity;
+    padding: 2px 1px 8px;
+  }
+  .heavy-equipment-page .operations-category-filters button {
+    min-width: 122px !important;
+    min-height: 52px;
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+  .heavy-equipment-page .operations-category-filters.is-compact button { min-width: 116px !important; }
+  .heavy-equipment-page .operations-category-filters.is-compact > div:last-child {
+    min-width: max-content;
+    padding-right: 8px;
+  }
+
+  .heavy-equipment-page .equipment-condition-filter { width: 100% !important; }
+  .heavy-equipment-page .equipment-condition-filter select { min-height: 44px !important; }
+
+  .heavy-equipment-page .equipment-card-grid { width: 100%; min-width: 0; }
+  .heavy-equipment-page .equipment-card {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .heavy-equipment-page .equipment-card__header { min-width: 0; flex-wrap: wrap; }
+  .heavy-equipment-page .equipment-card__header > div:first-child {
+    min-width: 0;
+    flex: 1 1 190px;
+    overflow-wrap: anywhere;
+  }
+  .heavy-equipment-page .equipment-card > button {
+    width: 100%;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  .heavy-equipment-page .equipment-loan-layout { width: 100%; min-width: 0; }
+  .heavy-equipment-page .operations-form-panel { width: 100%; min-width: 0; padding: 14px !important; }
+  .heavy-equipment-page .operations-form-panel input,
+  .heavy-equipment-page .operations-form-panel select,
+  .heavy-equipment-page .operations-form-panel textarea,
+  .heavy-equipment-page .operations-form-panel > button { min-height: 44px !important; }
+  .heavy-equipment-page .equipment-loan-list {
+    max-height: none !important;
+    min-width: 0;
+    overflow: visible !important;
+  }
+  .heavy-equipment-page .operations-row-card { min-width: 0; overflow: hidden; }
+  .heavy-equipment-page .equipment-loan-card__header { min-width: 0; flex-wrap: wrap; }
+  .heavy-equipment-page .equipment-loan-card__header > div:first-child {
+    min-width: 0;
+    flex: 1 1 190px;
+    overflow-wrap: anywhere;
+  }
+  .heavy-equipment-page .equipment-loan-card__approval { width: 100%; }
+  .heavy-equipment-page .equipment-loan-card__approval > input { width: 100%; min-height: 44px; flex-basis: 100% !important; }
+  .heavy-equipment-page .equipment-loan-card__approval .approval-actions { width: 100%; }
+  .heavy-equipment-page .equipment-loan-card__approval button,
+  .heavy-equipment-page .operations-row-card > button,
+  .heavy-equipment-page .operations-alert button {
+    min-height: 44px !important;
+  }
+  .heavy-equipment-page .operations-row-card > button {
+    width: 100%;
+    margin-left: 0 !important;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 480px) {
+  .heavy-equipment-page .operations-hero__metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .heavy-equipment-page .operations-metric:nth-child(-n+3) { border-top: 1px solid rgba(219,234,254,.1); }
+  .heavy-equipment-page .operations-metric:nth-child(-n+2) { border-top: 0; }
+  .heavy-equipment-page .operations-metric:nth-child(3n) { border-right: 1px solid rgba(219,234,254,.1); }
+  .heavy-equipment-page .operations-metric:nth-child(2n) { border-right: 0; }
+  .heavy-equipment-page .operations-metric span { min-height: 0; }
+  .heavy-equipment-page .dashboard-mode-switch button { padding-inline: 9px; }
 }

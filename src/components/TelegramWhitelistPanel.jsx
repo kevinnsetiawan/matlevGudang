@@ -13,6 +13,11 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
   const [form, setForm] = useState({ telegram_user_id:"", telegram_username:"", display_name:"", notes:"" });
 
   async function loadUsers() {
+    if (!supabase) {
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await supabase.from("tg_allowed_users").select("*").order("added_at",{ascending:false});
@@ -68,7 +73,7 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
       <div style={{fontWeight:800,fontSize:14,marginBottom:4}}>📱 Kelola User Bot Telegram</div>
       <p style={{fontSize:12,color:C.muted,marginBottom:12}}>Hanya user aktif di daftar ini yang bisa chat dengan bot Telegram WARNOTO. User ID Telegram (angka) didapat dengan chat ke bot <b>@userinfobot</b> di Telegram — bukan @username.</p>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+      <div className="telegram-whitelist-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
         <div><label style={sty.label}>User ID Telegram *</label><input style={sty.input} value={form.telegram_user_id} onChange={e=>setForm(f=>({...f,telegram_user_id:e.target.value}))} placeholder="cth: 123456789"/></div>
         <div><label style={sty.label}>Username (opsional)</label><input style={sty.input} value={form.telegram_username} onChange={e=>setForm(f=>({...f,telegram_username:e.target.value}))} placeholder="cth: @budi_pln"/></div>
         <div style={{gridColumn:"1/-1"}}><label style={sty.label}>Nama *</label><input style={sty.input} value={form.display_name} onChange={e=>setForm(f=>({...f,display_name:e.target.value}))} placeholder="cth: Budi Santoso"/></div>

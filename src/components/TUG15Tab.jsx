@@ -84,7 +84,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
       {/* Filter Panel */}
       <div style={{...sty.card,marginBottom:16,background:"#f8fafc"}}>
         <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:12}}>🔍 Filter Laporan TUG-15</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+        <div className="tug15-date-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
           <div>
             <label style={sty.label}>Dari Tanggal</label>
             <input type="date" style={sty.input} value={filter.dateFrom} onChange={e=>setFilter(f=>({...f,dateFrom:e.target.value}))}/>
@@ -94,7 +94,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             <input type="date" style={sty.input} value={filter.dateTo} onChange={e=>setFilter(f=>({...f,dateTo:e.target.value}))}/>
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
+        <div className="tug15-filter-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
           <div>
             <label style={sty.label}>Kategori SAP</label>
             <select style={sty.select} value={filter.sapStatus||"ALL"} onChange={e=>setFilter(f=>({...f,sapStatus:e.target.value}))}>

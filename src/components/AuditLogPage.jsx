@@ -69,8 +69,8 @@ export function AuditLogPage({ sty, C }) {
   const totalPages = Math.max(1, Math.ceil(count/PAGE_SIZE));
 
   return (
-    <div style={sty.card}>
-      <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:14,alignItems:"flex-end"}}>
+    <div className="admin-mobile-page audit-log-page" style={sty.card}>
+      <div className="audit-log-filters">
         <div>
           <label style={sty.label}>Aksi</label>
           <select style={sty.select} value={actionFilter} onChange={e=>setActionFilter(e.target.value)}>
@@ -91,7 +91,7 @@ export function AuditLogPage({ sty, C }) {
         </div>
       </div>
 
-      <div style={{overflowX:"auto"}}>
+      <div className="audit-log-table">
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead>
             <tr style={{borderBottom:`2px solid ${C.border}`,textAlign:"left"}}>
@@ -112,17 +112,17 @@ export function AuditLogPage({ sty, C }) {
               const badge = actionBadgeStyle(r.action);
               return (
                 <tr key={r.id} style={{borderBottom:`1px solid ${C.border}`}}>
-                  <td style={{padding:"8px 6px",whiteSpace:"nowrap",color:C.muted}}>{fmtDate(r.at)}</td>
-                  <td style={{padding:"8px 6px"}}>
+                  <td data-label="Waktu" style={{padding:"8px 6px",whiteSpace:"nowrap",color:C.muted}}>{fmtDate(r.at)}</td>
+                  <td data-label="User" style={{padding:"8px 6px"}}>
                     <div style={{fontWeight:700}}>{r.user_name||"-"}</div>
                     {r.role && <div style={{fontSize:12,color:C.muted}}>{r.role}</div>}
                   </td>
-                  <td style={{padding:"8px 6px"}}>
+                  <td data-label="Aksi" style={{padding:"8px 6px"}}>
                     <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:badge.bg,color:badge.fg}}>{r.action}</span>
                   </td>
-                  <td style={{padding:"8px 6px"}}>{r.entity||"-"}</td>
-                  <td style={{padding:"8px 6px",color:C.muted}}>{r.entity_id||"-"}</td>
-                  <td style={{padding:"8px 6px",maxWidth:320}}>
+                  <td data-label="Entitas" style={{padding:"8px 6px"}}>{r.entity||"-"}</td>
+                  <td data-label="ID" style={{padding:"8px 6px",color:C.muted}}>{r.entity_id||"-"}</td>
+                  <td data-label="Detail" style={{padding:"8px 6px",maxWidth:320}}>
                     <div>{summarizeDetail(r.detail)}</div>
                     {r.detail && (
                       <details>

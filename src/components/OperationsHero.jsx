@@ -3,6 +3,11 @@
 export function OperationsHero({ eyebrow, title, description, scope, metrics, controls }) {
   return (
     <section className="operations-hero operations-hero--summary-only" aria-label={`${eyebrow}: ${title}`}>
+      <div className="operations-hero__summary-copy">
+        <span>{eyebrow}</span>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
       {controls && <div className="operations-hero__controls">{controls}</div>}
       <div className="operations-hero__footer">
         <div className="operations-hero__metrics">

@@ -64,7 +64,7 @@ export function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, st
             {aiError && <div style={{fontSize:12,color:C.red,marginTop:6}}>❌ {aiError}</div>}
             <div style={{fontSize:12,color:C.muted,marginTop:4}}>Dokumen ini biasanya mencantumkan no. kontrak & tanggal rencana kirim/tiba barang. Setelah upload, review hasilnya di bawah dan edit jika perlu.</div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div className="arrival-form-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
             <div><label style={sty.label}>No. Kontrak</label><input style={sty.input} value={form.noKontrak} onChange={e=>setForm(f=>({...f,noKontrak:e.target.value}))}/></div>
             <div><label style={sty.label}>Supplier</label><input style={sty.input} value={form.supplier} onChange={e=>setForm(f=>({...f,supplier:e.target.value}))}/></div>
             <div><label style={sty.label}>Tanggal Kontrak</label><input type="date" style={sty.input} value={form.tanggalKontrak} onChange={e=>setForm(f=>({...f,tanggalKontrak:e.target.value}))}/></div>
@@ -73,12 +73,12 @@ export function RencanaKedatanganTab({ rencanaList, katalogList, currentUser, st
           <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8}}>Daftar Item Barang</div>
           {form.items.map((item,i)=>(
             <div key={i} style={{border:`1px solid ${C.border}`,borderRadius:8,padding:10,marginBottom:8,background:"#f9fafb"}}>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8,marginBottom:6}}>
+              <div className="arrival-item-main-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8,marginBottom:6}}>
                 <div><label style={sty.label}>Nama Barang</label><input style={sty.input} value={item.namaBarang} onChange={e=>updateItem(i,"namaBarang",e.target.value)}/></div>
                 <div><label style={sty.label}>Jumlah</label><input type="number" inputMode="decimal" min="1" style={sty.input} value={item.jumlah} onChange={e=>updateItem(i,"jumlah",Number(e.target.value))}/></div>
                 <div><label style={sty.label}>Satuan</label><input style={sty.input} value={item.satuan} onChange={e=>updateItem(i,"satuan",e.target.value)}/></div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"flex-end"}}>
+              <div className="arrival-item-meta-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"flex-end"}}>
                 <div>
                   <label style={sty.label}>Link ke Master Katalog (opsional)</label>
                   <SearchableSelect

@@ -370,7 +370,7 @@ export default function PLNWarehouse() {
   // supaya tidak perlu klik tombol "Sync ke Supabase" manual. Di-debounce 2.5 detik supaya
   // tidak nembak Supabase berkali-kali kalau banyak perubahan state beruntun.
   useEffect(() => {
-    if (!currentUser || loading) return;
+    if (!currentUser || loading || !supabase) return;
     const timer = setTimeout(async () => {
       try {
         const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", docTypes:["TUG9","TUG8","TUG10","TUG3"] };
@@ -4302,7 +4302,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
 
   return (
-    <div className="app-shell" style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
+    <div className="app-shell" data-current-tab={tab} style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
       {/* Mode demo per-tab: semua penyimpanan (localStorage + Supabase + Storage)
           dibekukan — lihat isDemoMode() di src/lib/demo.js. Banner ini pengingat
           visual bahwa perubahan di tab ini tidak akan tersimpan. */}
@@ -4853,7 +4853,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             {/* Tampilan tabel horizontal (data & fungsi tidak berubah, cuma cara
                 merendernya — semua handler/state sama persis dengan versi kartu
                 sebelumnya). */}
-            <div style={{...sty.card,padding:0,overflowX:"auto"}}>
+            <div className="mobile-card-table stock-card-table" style={{...sty.card,padding:0,overflowX:"auto"}}>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:980}}>
                 <thead>
                   <tr style={{background:C.sidebar,color:"white"}}>
@@ -4879,24 +4879,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     const canLihatPeta = !!petaInfo;
                     const hasDenah = !!(gdg?.denahImageData || (lok?.subGudangId && subGudangList.find(s=>s.id===lok.subGudangId)?.denahImageData));
                     return (
-                      <tr key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
-                        <td onClick={e=>{ if(st.img){e.stopPropagation(); setLightboxImg(st.img);} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.img?"zoom-in":"default"}}>
+                      <tr className="mobile-card-table__row" key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
+                        <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.img){e.stopPropagation(); setLightboxImg(st.img);} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.img?"zoom-in":"default"}}>
                           {st.img ? <img src={st.img} alt={st.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                             : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
                         </td>
-                        <td style={{padding:"8px 10px",minWidth:200}}>
+                        <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200}}>
                           <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
                           <div style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:1}}>📑 {st.katalog||"-"}</div>
                           {st.deletePending && <div style={{fontSize:12,color:"#dc2626",fontWeight:700,marginTop:2}}>⏳ Menunggu approval Hapus</div>}
                           {st.editPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Ada perubahan menunggu approval TL</div>}
                         </td>
-                        <td style={{padding:"8px 10px"}}>
+                        <td data-label="Kategori" style={{padding:"8px 10px"}}>
                           <div style={{display:"flex",gap:4,flexWrap:"wrap",maxWidth:160}}>
                             <span style={sty.jenisBadge(st.jenisBarang)}>{st.jenisBarang}</span>
                             <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:"#f3f4f6",color:C.muted}}>{st.category}</span>
                           </div>
                         </td>
-                        <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
+                        <td data-label="Qty" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                           {st.jenisBarang==="Non-Stock"
                             ? <span style={{color:C.muted}}>Project-Based</span>
                             : <div>
@@ -4905,7 +4905,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                               </div>}
                           {isLow && <div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
                         </td>
-                        <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
+                        <td data-label="Gudang" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
                           {hasRole(currentUser, "ADMIN","TL") ? (
                             <select
                               value={stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? ""}
@@ -4926,7 +4926,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             <span style={{color:C.text}}>{gdg?.kode||gdg?.nama||"—"}</span>
                           )}
                         </td>
-                        <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:150}}>
+                        <td data-label="Blok" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:150}}>
                           {hasRole(currentUser, "ADMIN") ? (
                             <>
                               <select
@@ -5005,11 +5005,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             <span style={{color:noLokasi?"#f59e0b":C.text,fontWeight:noLokasi?700:400}}>{noLokasi?"⚠️ Belum diisi":st.lokasi||"—"}</span>
                           )}
                         </td>
-                        <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>Rp {fmtNum(st.price)}</td>
-                        <td style={{padding:"8px 10px"}}>
+                        <td data-label="Harga" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>Rp {fmtNum(st.price)}</td>
+                        <td data-label="Status" style={{padding:"8px 10px"}}>
                           {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
                         </td>
-                        <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
+                        <td data-label="Aksi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
                           <div className="table-actions">
                             {hasRole(currentUser, "ADMIN") && (
                               <>
@@ -5061,7 +5061,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
         {/* MASTER DATA — Master Katalog, Master Lokasi, Satpam (identity/reference data) */}
         {tab==="master" && (
-          <div className="workspace-page master-page">
+          <div className={`workspace-page master-page master-page--${stockSubTab}`}>
             <div className="workspace-page-toolbar">
               <div className="workspace-context-row">
                 <span>
@@ -5192,7 +5192,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               : filteredKatalog.length===0
               ? <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Tidak ada hasil untuk "{katalogSearch}".</div>
               : (
-              <div style={{...sty.card,padding:0,overflowX:"auto"}}>
+              <div className="mobile-card-table catalog-card-table" style={{...sty.card,padding:0,overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:860}}>
                   <thead>
                     <tr style={{background:C.sidebar,color:"white"}}>
@@ -5206,25 +5206,25 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                       const sampleFoto = stocks.find(s=>s.katalogId===k.id && s.img)?.img || null;
                       const bs = getSAPBadgeStyle(k.katalog);
                       return (
-                        <tr key={k.id} style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${C.accent}`}}>
-                          <td style={{padding:"8px 10px",textAlign:"center"}}>
+                        <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${C.accent}`}}>
+                          <td className="mobile-card-table__photo" data-label="Foto" style={{padding:"8px 10px",textAlign:"center"}}>
                             {sampleFoto ? <img src={sampleFoto} alt={k.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                               : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
                           </td>
-                          <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
+                          <td className="catalog-card-table__meta" data-label="No Katalog" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                             <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>📑 {k.katalog}</div>
                             <div style={{fontSize:12,color:C.muted}}>{k.id}</div>
                           </td>
-                          <td style={{padding:"8px 10px",minWidth:200,fontWeight:700}}>{k.name}</td>
-                          <td style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:"#f3f4f6",color:C.muted,whiteSpace:"nowrap"}}>{(k.name||"").split(";")[0]?.trim()||k.category||"Lainnya"}</span></td>
-                          <td style={{padding:"8px 10px"}}>
+                          <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200,fontWeight:700}}>{k.name}</td>
+                          <td data-label="Kategori" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:"#f3f4f6",color:C.muted,whiteSpace:"nowrap"}}>{(k.name||"").split(";")[0]?.trim()||k.category||"Lainnya"}</span></td>
+                          <td data-label="Jenis" style={{padding:"8px 10px"}}>
                             <span style={sty.jenisBadge(k.jenisBarang)}>{k.jenisBarang||"-"}</span>
                             {k.pendingOpnameId && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:12,fontWeight:700,background:"#dbeafe",color:"#1e40af"}}>⏳ Pending Approval</span></div>}
                             {k.belumDicocokkanMara && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:12,fontWeight:700,background:"#fef3c7",color:"#92400e"}}>⚠️ Belum MARA</span></div>}
                           </td>
-                          <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
-                          <td style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
-                          <td style={{padding:"8px 10px"}}>
+                          <td data-label="Satuan" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
+                          <td data-label="Status" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
+                          <td data-label="Aksi" style={{padding:"8px 10px"}}>
                             {hasRole(currentUser, "ADMIN") && (
                               <div style={{display:"flex",gap:4,justifyContent:"center"}}>
                                 <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"6px 8px"}} onClick={()=>openEditKatalog(k)}>✏️</button>
@@ -5329,11 +5329,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               const uitMatchesSearch = (uit) => !orgQ || hit(uit.kode, uit.nama) || uptList.some(u=>u.uitId===uit.id && uptMatchesSearch(u));
               const visibleUit = uitList.filter(uitMatchesSearch);
               return (
-              <div>
+              <div className="master-organization-page">
                 {/* Ringkasan — sebelumnya cuma teks kecil di subtitle halaman, sekarang
                     KPI supaya langsung kelihatan skala struktur org tanpa harus scroll/
                     expand semua (keluhan user 2026-07-06: "kurang informatif"). */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
+                <div className="master-organization-kpis" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
                   {[
                     {label:"Total UIT",val:uitList.length,color:C.accent},
                     {label:"Total UPT",val:uptList.length,color:"#0369a1"},
@@ -5371,8 +5371,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                       return next;
                     });
                     return (
-                      <div key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",borderLeft:"4px solid #003087"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:14,cursor:"pointer",background:"#f8fafc"}} onClick={toggleUit}>
+                      <div className="master-organization-card" key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",borderLeft:"4px solid #003087"}}>
+                        <div className="master-organization-card__header" style={{background:"#f8fafc"}} onClick={toggleUit}>
                           <div style={{display:"flex",gap:10,alignItems:"flex-start",minWidth:0}}>
                             <div style={{fontSize:22,flexShrink:0}}>🏢</div>
                             <div style={{minWidth:0}}>
@@ -5384,7 +5384,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                               <div style={{fontSize:12,color:C.muted,marginTop:1}}>{uptOfUit.length} UPT • {totalUltgOfUit} ULTG</div>
                             </div>
                           </div>
-                          <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}} onClick={e=>e.stopPropagation()}>
+                          <div className="master-organization-card__actions" onClick={e=>e.stopPropagation()}>
                             {hasRole(currentUser, "ADMIN") && (<>
                               <button style={sty.btn("ghost","sm")} onClick={()=>openAddUPT(uit.id)}>+ UPT</button>
                               <button title="Edit" style={sty.btn("ghost","sm")} onClick={()=>openEditUIT(uit)}>✏️</button>
@@ -5402,8 +5402,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                   {uptOfUit.map(upt=>{
                                     const ultgOfUpt = ultgList.filter(x=>x.parentUptId===upt.id).filter(x=>!orgQ || hit(x.kode,x.nama) || hit(upt.kode,upt.nama));
                                     return (
-                                      <div key={upt.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
-                                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                                      <div className="master-organization-upt" key={upt.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
+                                        <div className="master-organization-upt__header" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
                                           <div style={{display:"flex",gap:8,alignItems:"flex-start",minWidth:0}}>
                                             <div style={{fontSize:16,flexShrink:0}}>📍</div>
                                             <div style={{minWidth:0}}>
@@ -5415,7 +5415,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                             </div>
                                           </div>
                                           {hasRole(currentUser, "ADMIN") && (
-                                            <div style={{display:"flex",gap:4,flexShrink:0}}>
+                                            <div className="master-organization-upt__actions" style={{display:"flex",gap:4,flexShrink:0}}>
                                               <button style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openAddULTG(upt.id)}>+ ULTG</button>
                                               <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"3px 8px"}} onClick={()=>openEditUPT(upt)}>✏️</button>
                                               <button title="Hapus" style={{...sty.btn("danger","sm"),padding:"3px 8px"}} onClick={()=>deleteUPT(upt.id)}>🗑️</button>
@@ -5423,9 +5423,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                           )}
                                         </div>
                                         {ultgOfUpt.length>0 && (
-                                          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8,paddingLeft:24}}>
+                                          <div className="master-organization-ultg-list" style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8,paddingLeft:24}}>
                                             {ultgOfUpt.map(ultg=>(
-                                              <div key={ultg.id} style={{display:"flex",alignItems:"center",gap:6,background:"#f0fdf4",border:`1px solid #bbf7d0`,borderRadius:20,padding:"4px 10px",fontSize:12}}>
+                                              <div className="master-organization-ultg" key={ultg.id} style={{display:"flex",alignItems:"center",gap:6,background:"#f0fdf4",border:`1px solid #bbf7d0`,borderRadius:20,padding:"4px 10px",fontSize:12}}>
                                                 <span>🏘️ <b>{ultg.kode}</b> {ultg.nama}</span>
                                                 {hasRole(currentUser, "ADMIN") && (
                                                   <span style={{display:"flex",gap:2,marginLeft:2}}>
@@ -5454,7 +5454,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
             {/* ── SUB-TAB: MASTER GUDANG ── */}
             {stockSubTab==="gudang" && (
-              <div>
+              <div className="master-warehouse-page">
                 {/* Notifikasi approval blok lokasi sudah dipindahkan ke menu "✅ Approval" — lihat di sana. */}
                 {gudangList.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
                 {visibleGudangList.map(g=>{
@@ -5464,17 +5464,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   const isExpanded = expandedGudangId===g.id;
                   const subsOfGudang = subGudangList.filter(sg=>sg.gudangId===g.id);
                   return (
-                    <div key={g.id} style={{...sty.card,marginBottom:10,borderTop:`3px solid #003087`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",cursor:"pointer"}} onClick={()=>setExpandedGudangId(isExpanded?null:g.id)}>
-                        <div>
+                    <div className="master-warehouse-card" key={g.id} style={{...sty.card,marginBottom:10,borderTop:`3px solid #003087`}}>
+                      <div className="master-warehouse-card__header" onClick={()=>setExpandedGudangId(isExpanded?null:g.id)}>
+                        <div className="master-warehouse-card__copy">
                           <div style={{fontWeight:800,fontSize:15}}>🏭 {g.nama}</div>
                           <div style={{fontSize:12,color:C.muted}}>{g.kode} • {upt?.nama||"-"} • {g.alamat||"-"}</div>
                           <div style={{fontSize:12,color:C.muted,marginTop:2}}>{bloklokasi.length} blok terkait, {blokWithCoord.length} sudah ter-peta{subsOfGudang.length>0?` • ${subsOfGudang.length} Sub Gudang`:""}</div>
                         </div>
-                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        <div className="master-warehouse-card__actions">
                           {hasRole(currentUser, "ADMIN") && (
-                            <div style={{display:"flex",gap:6}} onClick={e=>e.stopPropagation()}>
-                              <button style={sty.btn("ghost","sm")} onClick={()=>openEditGudang(g)}>✏️ Edit</button>
+                            <div className="master-warehouse-card__admin-actions" style={{display:"flex",gap:6}} onClick={e=>e.stopPropagation()}>
+                              <button aria-label="Edit gudang" title="Edit gudang" style={sty.btn("ghost","sm")} onClick={()=>openEditGudang(g)}>{isMobile?"✏️":"✏️ Edit"}</button>
                               <button title="Hapus" style={sty.btn("danger","sm")} onClick={()=>deleteGudang(g.id)}>🗑️</button>
                             </div>
                           )}

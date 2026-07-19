@@ -262,7 +262,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
       {/* ── SECTION: Daftar Alat Berat ── */}
       <div className="operations-section-heading"><div><span>Fleet Registry</span><h2>Daftar Alat Berat</h2></div><small>{filteredEquipment.length} alat sesuai filter</small></div>
       {/* Kategori (kiri, wrap) + dropdown kondisi ringkas (kanan) — satu baris, hilangkan dualisme chip. */}
-      <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
+      <div className="equipment-filter-layout" style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
         <div className="operations-category-filters" style={{flex:1,minWidth:0,marginBottom:0}}>
           {EQUIPMENT_CATEGORIES.map(cat=>{
             const active = categoryFilter===cat.id;
@@ -280,7 +280,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
             );
           })}
         </div>
-        <label style={{display:"flex",flexDirection:"column",gap:4,flex:"0 0 auto",width:190}}>
+        <label className="equipment-condition-filter" style={{display:"flex",flexDirection:"column",gap:4,flex:"0 0 auto",width:190}}>
           <span style={{fontSize:12,fontWeight:700,color:C.muted}}>Kondisi</span>
           <select value={kondisiFilter} onChange={e=>setKondisiFilter(e.target.value)}
             style={{width:"100%",minHeight:36,padding:"7px 10px",border:`1px solid ${C.border}`,borderRadius:9,outline:0,background:"#fff",color:C.text,fontSize:13}}>
@@ -295,7 +295,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         {kondisiFilter!=="ALL"&&<span> • Kondisi: <b style={{color:C.accent}}>{kondisiGroups.find(g=>g.id===kondisiFilter)?.label}</b></span>}
         {categoryFilter!=="ALL"&&<span> • Kategori: <b style={{color:C.accent}}>{EQUIPMENT_CATEGORIES.find(c=>c.id===categoryFilter)?.label}</b></span>}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12,marginBottom:24}}>
+      <div className="equipment-card-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12,marginBottom:24}}>
         {filteredEquipment.map(eq=>{
           const activeLoan = activeLoanForEquipment(eq.id);
           const lastLoan = latestLoanForEquipment(eq.id);
@@ -304,7 +304,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               <div style={{height:150,borderRadius:10,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center"}}>
                 {eq.foto ? <img src={eq.foto} alt={eq.nama} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <div className="equipment-placeholder">EQ</div>}
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
+              <div className="equipment-card__header" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start"}}>
                 <div><div style={{fontSize:14,fontWeight:900}}>{eq.nama}</div><div style={{fontSize:12,color:C.muted}}>{eq.upt} • {eq.lokasi}</div></div>
                 <Badge metaKey={activeLoan?.runtimeStatus || eq.availabilityStatus || "TERSEDIA"}/>
               </div>
@@ -342,7 +342,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         <div style={{display:"flex",alignItems:"center",fontSize:12,color:C.muted,paddingLeft:4}}>dipinjam/total</div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:canManage?"minmax(260px,300px) 1fr":"1fr",gap:14,alignItems:"start"}}>
+      <div className="equipment-loan-layout" style={{display:"grid",gridTemplateColumns:canManage?"minmax(260px,300px) 1fr":"1fr",gap:14,alignItems:"start"}}>
 
         {/* Form ajukan (Admin/TL only) — alat yang ditawarkan HARUS di luar UPT sendiri untuk
             role non-MSB (Surabaya selalu peminjam di form ini, lihat borrowableEquipment). */}
@@ -369,7 +369,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               )}
             </div>
             <div style={{marginBottom:8}}><label style={sty.label}>Nama Pekerjaan</label><input style={sty.input} value={loanForm.namaPekerjaan} onChange={e=>setLoanForm(f=>({...f,namaPekerjaan:e.target.value}))} placeholder="Contoh: Penggantian PMT Bay Trafo 1"/></div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}><div><label style={sty.label}>Tgl Ambil</label><input style={sty.input} type="date" value={loanForm.tanggalAmbil} onChange={e=>setLoanForm(f=>({...f,tanggalAmbil:e.target.value}))}/></div><div><label style={sty.label}>Tgl Kembali</label><input style={sty.input} type="date" value={loanForm.tanggalKembali} onChange={e=>setLoanForm(f=>({...f,tanggalKembali:e.target.value}))}/></div></div>
+            <div className="equipment-loan-dates" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}><div><label style={sty.label}>Tgl Ambil</label><input style={sty.input} type="date" value={loanForm.tanggalAmbil} onChange={e=>setLoanForm(f=>({...f,tanggalAmbil:e.target.value}))}/></div><div><label style={sty.label}>Tgl Kembali</label><input style={sty.input} type="date" value={loanForm.tanggalKembali} onChange={e=>setLoanForm(f=>({...f,tanggalKembali:e.target.value}))}/></div></div>
             <div style={{marginBottom:8}}><label style={sty.label}>Keperluan</label><textarea style={{...sty.input,minHeight:60}} value={loanForm.keperluan} onChange={e=>setLoanForm(f=>({...f,keperluan:e.target.value}))}/></div>
             <div style={{marginBottom:10}}><label style={sty.label}>Catatan</label><input style={sty.input} value={loanForm.catatan} onChange={e=>setLoanForm(f=>({...f,catatan:e.target.value}))}/></div>
             <button style={{...sty.btn("primary"),width:"100%"}} onClick={submitLoan}>Ajukan Peminjaman</button>
@@ -381,14 +381,14 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
           <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
             {isMSB && !myUptSelected ? "Peminjaman & Histori — Semua UPT" : `Peminjaman & Histori — UPT ${effectiveUptFilter||myUpt||"Surabaya"}`}
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
+          <div className="equipment-loan-list" style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
             {unifiedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,fontSize:13}}>Belum ada data peminjaman.</div>}
             {unifiedLoans.map(loan=>{
               const eq=equipmentList.find(e=>e.id===loan.equipmentId);
               const isActive=["PENDING_OWNER_ASMAN","DIPINJAM","OVERDUE"].includes(loan.runtimeStatus);
               return (
                 <div key={loan.id} className="operations-row-card" style={{...sty.card,padding:12,borderLeft:`4px solid ${loanBorderColor(loan.runtimeStatus)}`,opacity:isActive?1:0.85}}>
-                  <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:4}}>
+                  <div className="equipment-loan-card__header" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:4}}>
                     <div>
                       <div style={{fontWeight:900,fontSize:13}}>{eq?.nama||loan.equipmentId}</div>
                       <div style={{fontSize:12,color:C.muted}}>{loan.ownerUpt} → {loan.requesterUpt}</div>
@@ -398,7 +398,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
                   <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{loan.namaPekerjaan||"-"}</div>
                   <div style={{fontSize:12,color:C.muted,marginBottom:isActive?6:0}}>{loan.tanggalAmbil} s/d {loan.tanggalKembali}</div>
                   {isActive&&isPendingHeavyEquipmentLoan(loan)&&canApproveHeavyEquipmentLoan(currentUser,loan)&&(
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+                    <div className="equipment-loan-card__approval" style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
                       {rejectingId===loan.id
                         ?<><input style={{...sty.input,flex:"1 1 160px"}} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Alasan penolakan"/><span className="approval-actions approval-actions--compact"><button className="approval-btn--danger" onClick={()=>{rejectLoan(loan.id,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button><button className="approval-btn--cancel" onClick={()=>{setRejectingId(null);setReason("");}}>Batal</button></span></>
                         :<span className="approval-actions approval-actions--compact"><button className="approval-btn--approve" onClick={()=>approveLoan(loan.id)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui</button><button className="approval-btn--reject" onClick={()=>setRejectingId(loan.id)}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></span>}
@@ -426,7 +426,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         if (!eq) return null;
         return (
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}}>
-            <div style={{...sty.card,width:420,maxWidth:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{...sty.card,width:420,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
               <h3 style={{fontSize:16,fontWeight:800,marginBottom:4}}>✏️ Edit Alat</h3>
               <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{eq.nama} — {eq.upt}</div>
               <div style={{height:150,borderRadius:10,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:12}}>

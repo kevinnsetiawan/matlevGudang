@@ -27,47 +27,53 @@ export function ExecOverview({ totalVal, kritisMaterials=[], forecastSoon=[], ap
   ];
   return (
     <div className="exec-overview">
-      <div className="exec-overview__kpis">
-        {kpis.map(k=>(
-          <div key={k.label} className="exec-kpi">
-            <div className="exec-kpi__icon">{k.icon}</div>
-            <div className="exec-kpi__copy">
-              <strong style={{color:k.color}}>{k.val}</strong>
-              <span>{k.label}</span>
-            </div>
-          </div>
-        ))}
+      <div className="exec-overview__heading">
+        <div><span>Executive snapshot</span><strong>Ringkasan kinerja gudang</strong></div>
+        <small>Indikator utama dan pekerjaan yang membutuhkan keputusan</small>
       </div>
-      <div className="exec-attention">
-        <div className="exec-attention__header"><span>Prioritas operasional</span><strong>{attention.length} perlu ditinjau</strong></div>
-        {attention.length===0 ? (
-          <div className="exec-attention__empty">Tidak ada pekerjaan yang menunggu keputusan Anda saat ini.</div>
-        ) : (
-          <div className="exec-attention__list">
-            {attention.map((a,i)=>{
-              const hasDetail = !!a.items && a.items.length>0;
-              const isOpen = openIdx===i;
-              return (
-              <div key={i} className="exec-attention__item">
-                <button onClick={()=> hasDetail ? setOpenIdx(isOpen?null:i) : a.go()}>
-                  <span className="exec-attention__icon">{a.icon}</span>
-                  <span className="exec-attention__text">{a.text}</span>
-                  <span className="exec-attention__arrow">{hasDetail?(isOpen?"−":"+"):"→"}</span>
-                </button>
-                {hasDetail && isOpen && (
-                  <div className="exec-attention__detail">
-                    {a.items.map((t,j)=>(
-                      <div key={j} style={{fontSize:12,color:C.text,padding:"5px 0",borderTop:`1px solid ${C.border}`}}>• {t}</div>
-                    ))}
-                    {a.more>0 && <div style={{fontSize:12,color:C.muted,padding:"6px 0 2px"}}>+{a.more} material lainnya…</div>}
-                    <button onClick={a.go} style={{...sty.btn("primary","sm"),marginTop:10}}>{a.goLabel} →</button>
-                  </div>
-                )}
+      <div className="exec-overview__body">
+        <div className="exec-overview__kpis">
+          {kpis.map(k=>(
+            <div key={k.label} className="exec-kpi">
+              <div className="exec-kpi__icon">{k.icon}</div>
+              <div className="exec-kpi__copy">
+                <strong style={{color:k.color}}>{k.val}</strong>
+                <span>{k.label}</span>
               </div>
-              );
-            })}
-          </div>
-        )}
+            </div>
+          ))}
+        </div>
+        <div className="exec-attention">
+          <div className="exec-attention__header"><span>Prioritas operasional</span><strong>{attention.length} perlu ditinjau</strong></div>
+          {attention.length===0 ? (
+            <div className="exec-attention__empty">Tidak ada pekerjaan yang menunggu keputusan Anda saat ini.</div>
+          ) : (
+            <div className="exec-attention__list">
+              {attention.map((a,i)=>{
+                const hasDetail = !!a.items && a.items.length>0;
+                const isOpen = openIdx===i;
+                return (
+                <div key={i} className="exec-attention__item">
+                  <button onClick={()=> hasDetail ? setOpenIdx(isOpen?null:i) : a.go()}>
+                    <span className="exec-attention__icon">{a.icon}</span>
+                    <span className="exec-attention__text">{a.text}</span>
+                    <span className="exec-attention__arrow">{hasDetail?(isOpen?"−":"+"):"→"}</span>
+                  </button>
+                  {hasDetail && isOpen && (
+                    <div className="exec-attention__detail">
+                      {a.items.map((t,j)=>(
+                        <div key={j} style={{fontSize:12,color:C.text,padding:"5px 0",borderTop:`1px solid ${C.border}`}}>• {t}</div>
+                      ))}
+                      {a.more>0 && <div style={{fontSize:12,color:C.muted,padding:"6px 0 2px"}}>+{a.more} material lainnya…</div>}
+                      <button onClick={a.go} style={{...sty.btn("primary","sm"),marginTop:10}}>{a.goLabel} →</button>
+                    </div>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

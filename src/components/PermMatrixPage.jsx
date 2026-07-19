@@ -83,8 +83,8 @@ export function PermMatrixPage({ sty, C, currentUser, rolePerms, reloadRolePerms
   const headStyle = { padding: "8px 8px", textAlign: "center", borderBottom: `2px solid ${C.border}`, fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" };
 
   return (
-    <div style={sty.card}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+    <div className="admin-mobile-page permission-matrix-page" style={sty.card}>
+      <div className="permission-matrix-page__intro">
         <div style={{ fontSize: 12, color: C.muted, maxWidth: 620 }}>
           Centang izin per role. Titik • menandai izin yang <b>berbeda dari default</b>. Perubahan approval bisnis (persetujuan TUG) tetap terkunci di kode dan tidak diatur di sini. Kolom Super Admin selalu penuh.
         </div>
@@ -94,7 +94,7 @@ export function PermMatrixPage({ sty, C, currentUser, rolePerms, reloadRolePerms
         </button>
       </div>
 
-      <div style={{ overflowX: "auto" }}>
+      <div className="permission-matrix-table">
         <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
           <thead>
             <tr>
@@ -115,12 +115,12 @@ export function PermMatrixPage({ sty, C, currentUser, rolePerms, reloadRolePerms
                     <td style={{ padding: "6px 8px", borderBottom: `1px solid ${C.border}`, position: "sticky", left: 0, background: C.card || "#fff", fontWeight: 600 }}>{row.label}</td>
                     {MATRIX_ROLES.map(role => {
                       if (role === "SUPERADMIN") {
-                        return <td key={role} style={cellStyle}><input type="checkbox" checked readOnly disabled /></td>;
+                        return <td data-role={ROLES[role] || role} key={role} style={cellStyle}><input type="checkbox" checked readOnly disabled /></td>;
                       }
                       const val = !!draft[role]?.[row.key];
                       const isDiff = val !== defaultPerm(role, row.key);
                       return (
-                        <td key={role} style={cellStyle}>
+                        <td data-role={ROLES[role] || role} key={role} style={cellStyle}>
                           <span style={{ position: "relative", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                             <input type="checkbox" checked={val} onChange={() => toggle(role, row.key)} />
                             {isDiff && <span title="Berbeda dari default" style={{ position: "absolute", top: -3, right: -6, width: 6, height: 6, borderRadius: "50%", background: "#f59e0b" }} />}
@@ -135,7 +135,7 @@ export function PermMatrixPage({ sty, C, currentUser, rolePerms, reloadRolePerms
             <tr>
               <td style={{ padding: "8px 8px", fontSize: 11, fontWeight: 700, color: C.muted, position: "sticky", left: 0, background: C.card || "#fff" }}>Reset</td>
               {MATRIX_ROLES.map(role => (
-                <td key={role} style={cellStyle}>
+                <td data-role={ROLES[role] || role} key={role} style={cellStyle}>
                   {role === "SUPERADMIN"
                     ? <span style={{ color: C.muted, fontSize: 11 }}>—</span>
                     : <button style={sty.btn("ghost", "sm")} disabled={saving} onClick={() => resetRole(role)} title="Kembalikan ke default">↩️</button>}

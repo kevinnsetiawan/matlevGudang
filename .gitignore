@@ -19,3 +19,7 @@ migration-tools/node_modules/
 # Vercel CLI (link/deploy artefak lokal) — jangan commit.
 .vercel
 .env*
+
+# Playwright generated artifacts (screenshots, traces, HTML report).
+test-results/
+playwright-report/

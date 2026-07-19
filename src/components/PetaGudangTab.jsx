@@ -33,16 +33,16 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+      <div className="warehouse-map-toolbar" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
         <div>
           <p style={{color:C.muted,fontSize:13}}>Visualisasi lokasi blok dan material di denah gudang — data kapasitas m² dari import Excel. Untuk atur titik koordinat blok di denah, buka Master Data → Master Gudang.</p>
         </div>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+        <div className="warehouse-map-toolbar__controls" style={{display:"flex",gap:10,alignItems:"center"}}>
           <label style={{fontSize:12,color:C.muted,display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
             <input type="checkbox" checked={filterHanyaBerisi} onChange={e=>setFilterHanyaBerisi(e.target.checked)}/>
             Hanya blok berisi barang
           </label>
-          <select style={{...sty.select,width:200}} value={selectedGudangId} onChange={e=>setSelectedGudangId(e.target.value)}>
+          <select className="warehouse-map-toolbar__select" style={{...sty.select,width:200}} value={selectedGudangId} onChange={e=>setSelectedGudangId(e.target.value)}>
             {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
           </select>
         </div>
@@ -94,7 +94,7 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
             ))}
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 280px",gap:16}}>
+          <div className="warehouse-map-layout" style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 280px",gap:16}}>
             {/* Peta utama */}
             <div style={{position:"relative",...sty.card,padding:10,display:"flex",justifyContent:"center"}}>
               {/* Lebar wrapper dibatasi via maxWidth SAJA (bukan maxHeight/object-fit
@@ -112,11 +112,11 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
                 return (
                   <div key={l.id}
                     style={{position:"absolute",left:`${l.mapX}%`,top:`${l.mapY}%`,transform:"translate(-50%,-50%)",cursor:"pointer",zIndex:isHovered?10:5,
-                      // Area sentuh dibuat lebih besar (36x36) dari titik visualnya
+                      // Area sentuh dibuat lebih besar (44x44) dari titik visualnya
                       // (14-20px) — di HP jari lebih besar dari kursor mouse, kalau
                       // area klik sama persis dengan ukuran titik kecilnya, gampang
                       // tap-miss. Titik visual tetap kecil, cuma "hit area" yang dibesarkan.
-                      width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}
+                      width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center"}}
                     onMouseEnter={()=>setHoveredLokasi(l.id)}
                     onMouseLeave={()=>setHoveredLokasi(null)}
                     onClick={()=>setHoveredLokasi(isHovered?null:l.id)}>
@@ -128,7 +128,7 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
                     </div>
                     {/* Popup saat hover/tap */}
                     {isHovered && (
-                      <div style={{position:"absolute",top:32,left:"50%",transform:"translateX(-50%)",background:"white",border:`1px solid ${C.border}`,borderRadius:8,padding:10,minWidth:200,maxWidth:280,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",zIndex:20}}>
+                      <div className="warehouse-map-tooltip" style={{position:"absolute",top:36,left:l.mapX<25?0:l.mapX>75?"auto":"50%",right:l.mapX>75?0:"auto",transform:l.mapX>=25&&l.mapX<=75?"translateX(-50%)":"none",background:"white",border:`1px solid ${C.border}`,borderRadius:8,padding:10,minWidth:200,maxWidth:280,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",zIndex:20}}>
                         <div style={{fontWeight:800,fontSize:12,marginBottom:6,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>📍 {l.kode} — {l.nama}</div>
                         {isPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginBottom:6}}>⏳ Blok ini belum final, menunggu approval TL</div>}
                         {isEmpty
@@ -201,7 +201,7 @@ export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, s
         return (
           <div style={{marginTop:24}}>
             <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>🏢 Denah Sub Gudang</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
+            <div className="warehouse-submap-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
               {subsWithDenah.map(sg=>{
                 const blokSub = lokasiList.filter(l=>l.subGudangId===sg.id && l.subMapX!=null);
                 const blokBerisi = blokSub.filter(l=>stokDiBlok(l.id).length>0).length;

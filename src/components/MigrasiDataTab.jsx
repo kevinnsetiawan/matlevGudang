@@ -651,7 +651,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
   }
 
   return (
-    <div>
+    <div className="admin-mobile-page migration-data-page">
       {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
           di atas (lihat App.jsx ~line 5769) — h1 di sini dihapus supaya tidak
           dobel (ditemukan user 2026-07-04). */}
@@ -714,19 +714,19 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
       )}
 
       {/* Step indicator */}
-      <div style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
+      <div className="migration-stepper" style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
         {["upload","preview","backup","done"].map((s,i)=>(
-          <div key={s} style={{display:"flex",alignItems:"center",gap:4}}>
-            <div style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
+          <div className={`migration-stepper__item${step===s?" is-current":""}`} key={s} style={{display:"flex",alignItems:"center",gap:4}}>
+            <div className="migration-stepper__number" style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
             <span style={{fontSize:12,fontWeight:step===s?700:400,color:step===s?C.accent:C.muted,textTransform:"capitalize"}}>{s==="backup"?"Backup & Apply":s}</span>
-            {i<3 && <span style={{color:C.border,marginLeft:4}}>→</span>}
+            {i<3 && <span className="migration-stepper__connector" style={{color:C.border,marginLeft:4}}>→</span>}
           </div>
         ))}
       </div>
 
       {step==="upload" && (
         <div>
-          <div style={{...sty.card,marginBottom:12}}>
+          <div className="migration-upload-card migration-upload-card--sap" style={{...sty.card,marginBottom:12}}>
             <div style={{fontWeight:700,marginBottom:8}}>1. Upload File SAP (PEMAT format)</div>
             <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Format CSV atau XLSX dengan kolom: Material, Material Description, Base Unit of Measure, Unrestricted Use Stock, Valuation Type, Harga Satuan.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -971,7 +971,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
 
       {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas ── */}
       {can(currentUser, "aksi.import", rolePerms) && (
-        <div style={{...sty.card,marginTop:16,borderLeft:"4px solid #7c3aed"}}>
+        <div className="migration-upload-card migration-upload-card--legacy" style={{...sty.card,marginTop:16,borderLeft:"4px solid #7c3aed"}}>
           <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
           <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
             Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.

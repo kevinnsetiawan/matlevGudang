@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WARNOTO — Preview Mobile</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #eef2f7;
+        color: #14213d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-width: 320px;
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        min-height: 100dvh;
+        background:
+          radial-gradient(circle at top, rgba(34, 85, 155, 0.12), transparent 34rem),
+          #eef2f7;
+        font-size: 14px;
+      }
+
+      button {
+        min-height: 44px;
+        border: 1px solid #c8d2e1;
+        border-radius: 10px;
+        padding: 0 14px;
+        background: #ffffff;
+        color: #183153;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: #22559b;
+        background: #f4f8ff;
+      }
+
+      button:focus-visible {
+        outline: 3px solid rgba(34, 85, 155, 0.28);
+        outline-offset: 2px;
+      }
+
+      button[aria-pressed="true"] {
+        border-color: #0b3b78;
+        background: #0b3b78;
+        color: #ffffff;
+      }
+
+      .preview-page {
+        display: flex;
+        min-height: 100dvh;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px clamp(12px, 3vw, 32px) 28px;
+      }
+
+      .preview-header {
+        display: flex;
+        width: min(100%, 760px);
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px 18px;
+        margin-bottom: 18px;
+      }
+
+      .preview-copy h1 {
+        margin: 0 0 4px;
+        font-size: clamp(18px, 3vw, 24px);
+        line-height: 1.2;
+      }
+
+      .preview-copy p {
+        margin: 0;
+        color: #52647c;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .preview-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .reload-button {
+        border-color: #0b3b78;
+        color: #0b3b78;
+      }
+
+      .device-stage {
+        position: relative;
+        flex: 0 0 auto;
+        max-width: 100%;
+        transition: width 180ms ease, height 180ms ease;
+      }
+
+      .device-shell {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        padding: 10px;
+        border: 1px solid #27374d;
+        border-radius: 30px;
+        background: #111827;
+        box-shadow:
+          0 24px 60px rgba(15, 23, 42, 0.22),
+          0 4px 12px rgba(15, 23, 42, 0.16);
+        transform-origin: top center;
+        transition: width 180ms ease, height 180ms ease, transform 180ms ease;
+      }
+
+      .device-screen {
+        display: block;
+        border: 0;
+        border-radius: 21px;
+        background: #ffffff;
+      }
+
+      .viewport-label {
+        width: min(100%, 760px);
+        margin: 14px 0 0;
+        color: #607087;
+        font-size: 12px;
+        text-align: center;
+      }
+
+      @media (max-width: 560px) {
+        .preview-page {
+          padding-top: 14px;
+        }
+
+        .preview-header,
+        .preview-controls {
+          width: 100%;
+        }
+
+        .preview-controls button {
+          flex: 1 1 auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-page">
+      <header class="preview-header">
+        <div class="preview-copy">
+          <h1>Preview Mobile WARNOTO</h1>
+          <p>Aplikasi berjalan dalam viewport ponsel asli tanpa perlu membuka HP.</p>
+        </div>
+        <div class="preview-controls" aria-label="Kontrol preview">
+          <button type="button" data-width="360" data-height="800" aria-pressed="false">
+            360 × 800
+          </button>
+          <button type="button" data-width="390" data-height="844" aria-pressed="true">
+            390 × 844
+          </button>
+          <button type="button" class="reload-button" id="reload-preview">Muat ulang</button>
+        </div>
+      </header>
+
+      <section class="device-stage" id="device-stage" aria-label="Tampilan WARNOTO ukuran ponsel">
+        <div class="device-shell" id="device-shell">
+          <iframe
+            class="device-screen"
+            id="mobile-frame"
+            src="/?mobile-preview=1"
+            width="390"
+            height="844"
+            title="WARNOTO dalam viewport mobile 390 kali 844"
+          ></iframe>
+        </div>
+      </section>
+      <p class="viewport-label" id="viewport-label">Viewport internal: 390 × 844 px</p>
+    </main>
+
+    <script>
+      (() => {
+        const FRAME_PADDING = 20;
+        const BOTTOM_ROOM = 54;
+        const frame = document.getElementById("mobile-frame");
+        const shell = document.getElementById("device-shell");
+        const stage = document.getElementById("device-stage");
+        const label = document.getElementById("viewport-label");
+        const sizeButtons = [...document.querySelectorAll("button[data-width]")];
+        let deviceWidth = 390;
+        let deviceHeight = 844;
+
+        function fitDevice() {
+          const shellWidth = deviceWidth + FRAME_PADDING;
+          const shellHeight = deviceHeight + FRAME_PADDING;
+          const availableWidth = Math.max(280, document.documentElement.clientWidth - 24);
+          const availableHeight = Math.max(320, window.innerHeight - stage.getBoundingClientRect().top - BOTTOM_ROOM);
+          const scale = Math.min(1, availableWidth / shellWidth, availableHeight / shellHeight);
+
+          shell.style.width = `${shellWidth}px`;
+          shell.style.height = `${shellHeight}px`;
+          shell.style.marginLeft = `${-shellWidth / 2}px`;
+          shell.style.transform = `scale(${scale})`;
+          stage.style.width = `${shellWidth * scale}px`;
+          stage.style.height = `${shellHeight * scale}px`;
+        }
+
+        function selectDevice(width, height) {
+          deviceWidth = width;
+          deviceHeight = height;
+          frame.width = String(width);
+          frame.height = String(height);
+          frame.title = `WARNOTO dalam viewport mobile ${width} kali ${height}`;
+          label.textContent = `Viewport internal: ${width} × ${height} px`;
+
+          sizeButtons.forEach((button) => {
+            const isSelected = Number(button.dataset.width) === width;
+            button.setAttribute("aria-pressed", String(isSelected));
+          });
+
+          requestAnimationFrame(fitDevice);
+        }
+
+        sizeButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            selectDevice(Number(button.dataset.width), Number(button.dataset.height));
+          });
+        });
+
+        document.getElementById("reload-preview").addEventListener("click", () => {
+          frame.contentWindow.location.reload();
+        });
+
+        window.addEventListener("resize", fitDevice);
+        selectDevice(deviceWidth, deviceHeight);
+      })();
+    </script>
+  </body>
+</html>

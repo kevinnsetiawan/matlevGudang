@@ -20,37 +20,38 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
   const txnBulanIni = txns.filter(t=>{const d=new Date(t.createdAt); const now=new Date(); return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
 
   return (
-    <div>
+    <div className="dashboard-manager">
       {/* Header Eksekutif */}
-      <div style={{background:"linear-gradient(135deg,#003087,#0098da)",borderRadius:12,padding:"20px 24px",marginBottom:20,color:"white"}}>
-        <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:"flex-start",gap:isMobile?16:12}}>
-          <div>
-            <div style={{fontSize:12,opacity:0.7,fontWeight:600,textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>PT PLN (Persero) UIT-JBM</div>
-            <div style={{fontSize:20,fontWeight:900}}>Dashboard Eksekutif Material</div>
-            <div style={{fontSize:12,opacity:0.8,marginTop:4}}>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+      <section className="dashboard-manager__hero">
+        <div className="dashboard-manager__hero-layout">
+          <div className="dashboard-manager__hero-copy">
+            <span>PT PLN (Persero) · UIT JBM</span>
+            <h2>Dashboard Eksekutif Material</h2>
+            <p>Ringkasan posisi inventori dan aktivitas operasional UPT Surabaya</p>
+            <small>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</small>
           </div>
-          <div style={{textAlign:isMobile?"left":"right",width:isMobile?"100%":"auto"}}>
-            <div style={{fontSize:12,opacity:0.7,marginBottom:4}}>Total Nilai Inventori (UPT Surabaya)</div>
-            <div style={{fontSize:26,fontWeight:900,marginBottom:8}}>{fmtRp(nilaiTotal)}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          <div className="dashboard-manager__inventory">
+            <span>Total nilai inventori · UPT Surabaya</span>
+            <strong>{fmtRp(nilaiTotal)}</strong>
+            <div className="dashboard-manager__inventory-grid">
               {[
                 {label:"Cadang",val:nilaiCadang,color:"#fca5a5"},
                 {label:"Persediaan",val:nilaiPersediaan,color:"#86efac"},
                 {label:"Bursa",val:nilaiPersediaanBursa,color:"#fdba74"},
                 {label:"Pre Memory",val:nilaiPreMemory,color:"#93c5fd"},
               ].map((b,i)=>(
-                <div key={i} style={{background:"rgba(255,255,255,0.15)",borderRadius:6,padding:"4px 8px",textAlign:"right"}}>
-                  <div style={{fontSize:12,opacity:0.8}}>{b.label}</div>
-                  <div style={{fontSize:12,fontWeight:700,color:b.color}}>{fmtRp(b.val)}</div>
+                <div key={i}>
+                  <span>{b.label}</span>
+                  <strong style={{color:b.color}}>{fmtRp(b.val)}</strong>
                 </div>
               ))}
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* KPI Row */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
+      <div className="dashboard-manager__kpis">
         {[
           {label:"Total Item Stok",val:stocks.length,icon:"📦",color:C.accent},
           {label:"Stok Kritis",val:stokKritis.length,icon:"🔴",color:stokKritis.length>0?"#dc2626":"#16a34a"},
@@ -58,10 +59,9 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
           {label:"Rencana Terlambat",val:terlambat.length,icon:"⚠️",color:terlambat.length>0?"#dc2626":"#16a34a"},
           {label:"Transaksi Bulan Ini",val:txnBulanIni.length,icon:"📋",color:"#7c3aed"},
         ].map((s,i)=>(
-          <div key={i} style={{...sty.card,borderTop:`3px solid ${s.color}`,padding:12}}>
-            <div style={{fontSize:18,marginBottom:4}}>{s.icon}</div>
-            <div style={{fontSize:18,fontWeight:900,color:s.color}}>{s.val}</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>{s.label}</div>
+          <div key={i} className="dashboard-manager-kpi" style={{"--manager-kpi-color":s.color}}>
+            <div className="dashboard-manager-kpi__icon">{s.icon}</div>
+            <div><strong>{s.val}</strong><span>{s.label}</span></div>
           </div>
         ))}
       </div>
@@ -79,9 +79,9 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
       )}
 
       {/* Tabel per UPT */}
-      <div style={{...sty.card,marginBottom:20}}>
-        <h3 style={{fontSize:14,fontWeight:800,marginBottom:14}}>📊 Ringkasan per UPT — UIT JBM</h3>
-        <div style={{overflowX:"auto"}}>
+      <section className="dashboard-manager__upt-card">
+        <div className="dashboard-manager__section-heading"><div><span>Network overview</span><h3>Ringkasan per UPT · UIT JBM</h3></div><small>Konsolidasi ketersediaan data unit</small></div>
+        <div className="dashboard-manager__table-scroll">
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
               <tr style={{background:C.sidebar,color:"white"}}>
@@ -106,8 +106,8 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
                     <td style={{padding:"10px 10px"}}>{isSurabaya?`${uptTxn} TUG`:"—"}</td>
                     <td style={{padding:"10px 10px"}}>
                       {isSurabaya
-                        ? <span style={{padding:"3px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#dcfce7",color:"#166534"}}>🟢 Aktif</span>
-                        : <span style={{padding:"3px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#f3f4f6",color:"#6b7280"}}>⚪ Belum terhubung</span>}
+                        ? <span className="dashboard-manager-status is-active" style={{background:"#dcfce7",color:"#166534"}}>● Aktif</span>
+                        : <span className="dashboard-manager-status" style={{background:"#f3f4f6",color:"#6b7280"}}>○ Belum terhubung</span>}
                     </td>
                   </tr>
                 );
@@ -115,10 +115,10 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
             </tbody>
           </table>
         </div>
-        <div style={{fontSize:12,color:C.muted,marginTop:8}}>* Data real hanya tersedia untuk UPT Surabaya (Fase 1). UPT lain akan terhubung di Fase 2.</div>
-      </div>
+        <div className="dashboard-manager__table-note">* Data real hanya tersedia untuk UPT Surabaya (Fase 1). UPT lain akan terhubung di Fase 2.</div>
+      </section>
 
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"2fr 1fr",gap:16,marginBottom:16}}>
+      <div className="dashboard-manager__operations">
         <div>
           <PendingWidget myPendingApprovals={myPendingApprovals} C={C} sty={sty} setTab={setTab}/>
           {/* Compliance — TUG pending lama */}

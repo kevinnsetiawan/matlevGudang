@@ -98,7 +98,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             </div>
           ) : (
             <div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+              <div className="capacity-ranking-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
                 <div style={{...sty.card}}>
                   <div style={{fontWeight:700,marginBottom:10}}>🏆 Ranking UPT (Utilization)</div>
                   {uptRanking.map((u,i)=>(
@@ -138,7 +138,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
       {/* DATA KAPASITAS */}
       {subTab==="data" && (
         <div>
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+          <div className="capacity-filterbar" style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
             <select style={{...sty.select,maxWidth:180}} value={filterUPT} onChange={e=>setFilterUPT(e.target.value)}>
               <option value="ALL">Semua UPT</option>
               {uptLabelList.map(u=><option key={u}>{u}</option>)}
@@ -151,7 +151,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             </select>
             <span style={{color:C.muted,fontSize:12,alignSelf:"center"}}>{filtered.length} record</span>
           </div>
-          <div style={{...sty.card,padding:0,overflowX:"auto"}}>
+          <div className="capacity-data-list" style={{...sty.card,padding:0,overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}}>
               <thead style={{background:C.sidebar,color:"white"}}>
                 <tr>
@@ -162,14 +162,14 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
               </thead>
               <tbody>
                 {filtered.map((r,i)=>(
-                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:r.statusKapasitas==="KRITIS"?"#fef2f2":r.statusKapasitas==="WASPADA"?"#fefce8":"white"}}>
-                    <td style={{padding:"6px 10px",fontWeight:700}}>{r.upt}</td>
-                    <td style={{padding:"6px 10px"}}>{r.gudang}</td>
-                    <td style={{padding:"6px 10px",fontWeight:600}}>{r.subGudang}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.luasLahanM2))}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.luasTerpakaiM2))}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.sisaLuasM2))}</td>
-                    <td style={{padding:"6px 10px"}}>
+                  <tr className="capacity-data-card" key={i} style={{borderBottom:`1px solid ${C.border}`,background:r.statusKapasitas==="KRITIS"?"#fef2f2":r.statusKapasitas==="WASPADA"?"#fefce8":"white"}}>
+                    <td data-label="UPT" style={{padding:"6px 10px",fontWeight:700}}>{r.upt}</td>
+                    <td data-label="Gudang" style={{padding:"6px 10px"}}>{r.gudang}</td>
+                    <td data-label="Sub Gudang" style={{padding:"6px 10px",fontWeight:600}}>{r.subGudang}</td>
+                    <td data-label="Luas" style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.luasLahanM2))} m²</td>
+                    <td data-label="Terpakai" style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.luasTerpakaiM2))} m²</td>
+                    <td data-label="Sisa" style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.sisaLuasM2))} m²</td>
+                    <td data-label="Utilisasi" style={{padding:"6px 10px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
                         <div style={{width:60,height:6,background:"#e5e7eb",borderRadius:3}}>
                           <div style={{width:Math.min(100,(r.persentaseTerpakai*100))+"%",height:"100%",background:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green,borderRadius:3}}/>
@@ -177,11 +177,11 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                         <span style={{fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{(r.persentaseTerpakai*100).toFixed(1)}%</span>
                       </div>
                     </td>
-                    <td style={{padding:"6px 10px"}}>
+                    <td data-label="Status" style={{padding:"6px 10px"}}>
                       <span style={{padding:"2px 8px",borderRadius:10,fontSize:12,fontWeight:700,background:r.statusKapasitas==="KRITIS"?"#fef2f2":r.statusKapasitas==="WASPADA"?"#fefce8":"#f0fdf4",color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#92400e":C.green}}>{KAPASITAS_LABEL[r.statusKapasitas]||r.statusKapasitas}</span>
                     </td>
-                    <td style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.waktuUpdate||"-"}</td>
-                    <td style={{padding:"6px 10px"}}>
+                    <td data-label="Update" style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.waktuUpdate||"-"}</td>
+                    <td data-label="Aksi" style={{padding:"6px 10px"}}>
                       <button style={sty.btn("ghost","sm")} onClick={()=>setDetailRecord(r)}>Detail</button>
                     </td>
                   </tr>
@@ -210,12 +210,12 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
 
       {detailRecord && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setDetailRecord(null)}>
-          <div style={{...sty.card,maxWidth:480,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+          <div className="capacity-detail-modal" style={{...sty.card,maxWidth:480,width:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
               <h3 style={{fontWeight:800}}>{detailRecord.subGudang}</h3>
               <button style={sty.btn("ghost","sm")} onClick={()=>setDetailRecord(null)}>✕</button>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12,marginBottom:12}}>
+            <div className="capacity-detail-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12,marginBottom:12}}>
               {[["UPT",detailRecord.upt],["Gudang",detailRecord.gudang],["Type",detailRecord.typeGudang||"-"],["Alamat",detailRecord.alamat||"-"],
                 ["Luas Lahan",fmtNum(Math.round(detailRecord.luasLahanM2))+" m²"],["Terpakai",fmtNum(Math.round(detailRecord.luasTerpakaiM2))+" m²"],
                 ["Sisa",fmtNum(Math.round(detailRecord.sisaLuasM2))+" m²"],["Utilization",(detailRecord.persentaseTerpakai*100).toFixed(1)+"%"],
