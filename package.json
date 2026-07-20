@@ -23,6 +23,7 @@
     "dev": "vite",
     "dev:e2e": "vite --mode e2e --host localhost --port 4173 --strictPort",
     "build": "vite build",
+    "build:staging": "vite build --mode staging",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:responsive": "playwright test tests/e2e/responsive.spec.js",
