@@ -167,14 +167,16 @@
 .operations-form-panel { padding: 16px !important; border-radius: 12px !important; box-shadow: 0 1px 2px rgba(15,23,42,.04) !important; }
 .operations-row-card { border-radius: 10px !important; box-shadow: 0 1px 2px rgba(15,23,42,.04) !important; }
 
-.operations-actionbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 11px; background: #fff; }
+.operations-actionbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 11px; background: #fff; }
 .operations-filterbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 11px; background: #fff; }
 .operations-table-card { border-radius: 12px !important; box-shadow: 0 1px 2px rgba(15,23,42,.04),0 8px 18px -19px rgba(15,23,42,.7) !important; }
 .operations-table-card thead tr { background: #0b2559 !important; }
 
-.attb-pipeline { display: flex; align-items: stretch; gap: 3px; margin-bottom: 16px; overflow-x: auto; padding: 2px 1px 7px; }
-.attb-stage-card { min-width: 112px !important; padding: 8px 10px !important; border-width: 1px !important; border-radius: 10px !important; box-shadow: none !important; }
-.attb-stage-card.is-source { min-width: 118px !important; }
+.attb-page .operations-segments { margin-bottom: 8px; }
+.attb-pipeline { display: flex; align-items: stretch; gap: 3px; margin-bottom: 16px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scroll-snap-type: x proximity; padding: 2px 1px 7px; }
+.attb-stage-card { flex: 0 0 auto !important; min-width: 94px !important; padding: 7px 8px !important; border-width: 1px !important; border-radius: 10px !important; box-shadow: none !important; scroll-snap-align: start; }
+.attb-stage-card.is-source { min-width: 100px !important; }
+.attb-pipeline > div:not(.attb-stage-card) { flex-shrink: 0; }
 .attb-stage-code { display: inline-flex; min-width: 25px; height: 18px; align-items: center; justify-content: center; padding: 0 4px; border-radius: 5px; background: rgba(100,116,139,.12); color: inherit; font-size: 12px; font-weight: 900; letter-spacing: .5px; }
 
 /* ── DARK MODE (hero + heading operasional) ────────────────────────────────
@@ -351,4 +353,13 @@
   .heavy-equipment-page .operations-metric:nth-child(2n) { border-right: 0; }
   .heavy-equipment-page .operations-metric span { min-height: 0; }
   .heavy-equipment-page .dashboard-mode-switch button { padding-inline: 9px; }
+}
+
+/* ATTB: compact pipeline toolbar (segments + stage cards) for phone screens. */
+@media (max-width: 768px) {
+  .attb-page .operations-segments { margin-bottom: 6px; }
+  .attb-page .attb-pipeline { gap: 4px; padding: 2px 1px 8px; }
+  .attb-page .attb-stage-card { min-width: 84px !important; padding: 6px 7px !important; }
+  .attb-page .attb-stage-card.is-source { min-width: 90px !important; }
+  .attb-page .operations-actionbar { padding: 6px 9px; margin-bottom: 8px; }
 }

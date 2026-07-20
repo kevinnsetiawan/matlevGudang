@@ -268,11 +268,11 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
               style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 12px",minWidth:120,borderRadius:12,border:`2px dashed ${active?color:"#cbd5e1"}`,background:active?color:"#f8fafc",color:active?"white":C.text,cursor:"pointer",boxShadow:active?`0 2px 10px ${color}55`:"none",transition:"all .15s"}}>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
                 <span className="attb-stage-code">SRC</span>
-                <span style={{fontSize:20,fontWeight:900,color:active?"white":color}}>{bongkaranBelum.length}</span>
+                <span style={{fontSize:18,fontWeight:900,color:active?"white":color}}>{bongkaranBelum.length}</span>
               </div>
               <span style={{fontSize:12,fontWeight:700,textAlign:"center",lineHeight:1.2,color:active?"white":C.muted}}>Material Bongkaran<br/>(TUG-10)</span>
             </button>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 2px",color:C.muted,fontSize:22,fontWeight:900,alignSelf:"center"}}>→</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 1px",color:C.muted,fontSize:17,fontWeight:900,alignSelf:"center"}}>→</div>
           </Fragment>
         ); })()}
         {ATTB_STAGES.map((s,i)=>{
@@ -285,19 +285,19 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
                 style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,padding:"10px 12px",minWidth:120,borderRadius:12,border:`2px solid ${active?color:C.border}`,background:active?color:"white",color:active?"white":C.text,cursor:"pointer",boxShadow:active?`0 2px 10px ${color}55`:"none",transition:"all .15s"}}>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <span style={{width:20,height:20,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,background:active?"rgba(255,255,255,0.25)":color+"22",color:active?"white":color}}>{i+1}</span>
-                  <span style={{fontSize:20,fontWeight:900,color:active?"white":color}}>{stageCounts[s.code]||0}</span>
+                  <span style={{fontSize:18,fontWeight:900,color:active?"white":color}}>{stageCounts[s.code]||0}</span>
                 </div>
                 <span style={{fontSize:12,fontWeight:700,textAlign:"center",lineHeight:1.2,color:active?"white":C.muted}}>{s.label}</span>
               </button>
               {!isLast && (
-                <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 2px",color:C.muted,fontSize:22,fontWeight:900,alignSelf:"center"}}>→</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 1px",color:C.muted,fontSize:17,fontWeight:900,alignSelf:"center"}}>→</div>
               )}
             </Fragment>
           );
         })}
         {/* Tujuan akhir proses */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 2px",color:C.green,fontSize:22,fontWeight:900,alignSelf:"center"}}>→</div>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"10px 14px",minWidth:90,borderRadius:12,border:`2px dashed ${C.green}`,background:"#f0fdf4",alignSelf:"center"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"0 1px",color:C.green,fontSize:17,fontWeight:900,alignSelf:"center"}}>→</div>
+        <div className="attb-stage-card" style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"10px 14px",minWidth:90,borderRadius:12,border:`2px dashed ${C.green}`,background:"#f0fdf4",alignSelf:"center"}}>
           <span className="attb-stage-code">KI</span>
           <span style={{fontSize:12,fontWeight:800,color:C.green,textAlign:"center",lineHeight:1.2}}>LELANG<br/>oleh KI</span>
         </div>
