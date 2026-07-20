@@ -316,7 +316,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
             🧰 Daftar material <b>Bongkaran ATTB (MTU)</b> yang masuk lewat TUG-10 (retur). Ini sumber kandidat sebelum diusulkan ke AE.1. Klik <b>Usulkan ATTB</b> untuk memindahkan material ke pipeline (Tahap 1 — Usulan AE.1 ke Unit Induk).
           </div>
           <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Total <b style={{color:C.text}}>{bongkaranPool.length}</b> material bongkaran • <b style={{color:C.accent}}>{bongkaranBelum.length}</b> belum diusulkan</div>
-          <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:24}}>
+          <div className="mobile-card-table attb-card-table" style={{...sty.card,padding:0,overflowX:"auto",marginBottom:24}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:820}}>
               <thead>
                 <tr style={{background:C.sidebar,color:"white"}}>
@@ -327,20 +327,20 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
               </thead>
               <tbody>
                 {bongkaranPool.length===0 && (
-                  <tr><td colSpan={8} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada material Bongkaran ATTB (MTU) dari TUG-10.</td></tr>
+                  <tr className="mobile-card-table__row"><td colSpan={8} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada material Bongkaran ATTB (MTU) dari TUG-10.</td></tr>
                 )}
                 {bongkaranPool.map(p=>{
                   const sudah = promotedKeys.has(p.key);
                   return (
-                    <tr key={p.key} style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${sudah?C.green:"#6b7280"}`,opacity:sudah?0.65:1}}>
-                      <td style={{padding:"8px 10px",fontWeight:600,minWidth:180}}>{p.nama}</td>
-                      <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.qty} {p.satuan}</td>
-                      <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.noSeri||"—"}</td>
-                      <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.noAsset||"—"}</td>
-                      <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.tug10No}{p.namaPekerjaan?<div style={{fontSize:12,color:C.muted}}>{p.namaPekerjaan}</div>:null}</td>
-                      <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.tanggal?new Date(p.tanggal).toLocaleDateString("id-ID"):"—"}</td>
-                      <td style={{padding:"8px 10px"}}><span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:p.status==="APPROVED"?"#dcfce7":"#fef3c7",color:p.status==="APPROVED"?C.green:"#92400e"}}>{p.status||"-"}</span></td>
-                      <td style={{padding:"8px 10px",textAlign:"center"}}>
+                    <tr key={p.key} className="mobile-card-table__row" style={{borderBottom:`1px solid ${C.border}`,"--row-accent":sudah?C.green:"#6b7280",opacity:sudah?0.65:1}}>
+                      <td className="mobile-card-table__title" style={{padding:"8px 10px",fontWeight:600,minWidth:180}}>{p.nama}</td>
+                      <td data-label="Qty" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.qty} {p.satuan}</td>
+                      <td data-label="No Seri" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.noSeri||"—"}</td>
+                      <td data-label="No Asset" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.noAsset||"—"}</td>
+                      <td data-label="Sumber TUG-10" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.tug10No}{p.namaPekerjaan?<div style={{fontSize:12,color:C.muted}}>{p.namaPekerjaan}</div>:null}</td>
+                      <td data-label="Tanggal" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{p.tanggal?new Date(p.tanggal).toLocaleDateString("id-ID"):"—"}</td>
+                      <td data-label="Status TUG-10" style={{padding:"8px 10px"}}><span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:p.status==="APPROVED"?"#dcfce7":"#fef3c7",color:p.status==="APPROVED"?C.green:"#92400e"}}>{p.status||"-"}</span></td>
+                      <td data-label="Aksi" style={{padding:"8px 10px",textAlign:"center"}}>
                         {sudah
                           ? <span style={{fontSize:12,fontWeight:700,color:C.green}}>✅ Sudah diusulkan</span>
                           : canManage
@@ -389,7 +389,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
       {/* Tampilan tabel horizontal, pola sama dengan Data Stok (header biru,
           baris ringkas, border kiri berwarna per tahap). Form Tolak/Belum Lanjut
           muncul sebagai baris expand di bawah baris item terkait. */}
-      <div className="operations-table-card" style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12}}>
+      <div className="operations-table-card mobile-card-table attb-card-table" style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:920}}>
           <thead>
             <tr style={{background:C.sidebar,color:"white"}}>
@@ -400,15 +400,15 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
           </thead>
           <tbody>
             {filteredList.length===0 && (
-              <tr><td colSpan={9} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada item ATTB untuk filter ini.</td></tr>
+              <tr className="mobile-card-table__row"><td colSpan={9} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada item ATTB untuk filter ini.</td></tr>
             )}
             {pagedList.map(item=>{
               const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item);
               const borderColor = item.lanjutBelumLanjut ? "#f59e0b" : stageColor(item.stage);
               return (
                 <Fragment key={item.id}>
-                  <tr style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${borderColor}`}}>
-                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
+                  <tr className="mobile-card-table__row" style={{borderBottom:`1px solid ${C.border}`,"--row-accent":borderColor}}>
+                    <td className="mobile-card-table__title" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                       <div style={{display:"flex",gap:8,alignItems:"center"}}>
                         <div style={{width:34,height:34,flexShrink:0,borderRadius:6,overflow:"hidden",border:`1px solid ${C.border}`,background:"#f3f4f6",display:"flex",alignItems:"center",justifyContent:"center"}}>
                           {item.foto ? <img src={item.foto} alt="foto" style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <span style={{fontSize:15,color:"#9ca3af"}}>📦</span>}
@@ -419,16 +419,16 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
                         </div>
                       </div>
                     </td>
-                    <td style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
+                    <td data-label="Jenis / UPT" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                       <div style={{fontWeight:600}}>{ATTB_JENIS_ASET_LABEL[item.jenisAset]||item.jenisAset}</div>
                       <div style={{fontSize:12,color:C.muted}}>{item.upt}</div>
                     </td>
-                    <td style={{padding:"8px 10px",minWidth:180,maxWidth:280}}>
+                    <td data-label="Deskripsi" style={{padding:"8px 10px",minWidth:180,maxWidth:280}}>
                       <div style={{fontWeight:600,color:C.text}}>{item.description||"-"}</div>
                       {item.bay && <div style={{fontSize:12,color:C.muted,marginTop:2}}>⚡ Asal: {item.bay}</div>}
                       {item.approvalStatus==="DRAFT" && item.alasanTolak && <div style={{fontSize:12,color:C.red,marginTop:2}}>Ditolak: {item.alasanTolak}</div>}
                     </td>
-                    <td onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:180,maxWidth:230}}>
+                    <td data-label="Lokasi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:180,maxWidth:230}}>
                       {(()=>{
                         const loc = resolveLokasiMaster(item);
                         const selGudangId = attbGudangFilter[item.id] ?? item.gudangId ?? loc?.gdg?.id ?? "";
@@ -474,18 +474,18 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
                         );
                       })()}
                     </td>
-                    <td style={{padding:"8px 10px",textAlign:"right",whiteSpace:"nowrap"}}>{item.nilaiPerolehan?Number(item.nilaiPerolehan).toLocaleString("id-ID"):"—"}</td>
-                    <td style={{padding:"8px 10px",textAlign:"right",whiteSpace:"nowrap",color:item.nilaiBuku?C.text:C.muted}}>{item.nilaiBuku?Number(item.nilaiBuku).toLocaleString("id-ID"):"—"}</td>
-                    <td style={{padding:"8px 10px"}}>
+                    <td data-label="Nilai Perolehan" style={{padding:"8px 10px",textAlign:"right",whiteSpace:"nowrap"}}>{item.nilaiPerolehan?Number(item.nilaiPerolehan).toLocaleString("id-ID"):"—"}</td>
+                    <td data-label="Nilai Buku" style={{padding:"8px 10px",textAlign:"right",whiteSpace:"nowrap",color:item.nilaiBuku?C.text:C.muted}}>{item.nilaiBuku?Number(item.nilaiBuku).toLocaleString("id-ID"):"—"}</td>
+                    <td data-label="Status" style={{padding:"8px 10px"}}>
                       <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#f3f4f6",color:C.muted,whiteSpace:"nowrap"}}>{item.approvalStatus||"DRAFT"}</span>
                     </td>
-                    <td style={{padding:"8px 10px"}}>
+                    <td data-label="Tahap" style={{padding:"8px 10px"}}>
                       <div style={{display:"flex",flexDirection:"column",gap:3,alignItems:"flex-start"}}>
                         <span style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:800,background:stageColor(item.stage)+"22",color:stageColor(item.stage),whiteSpace:"nowrap"}}>{attbStageLabel(item.stage)}</span>
                         {item.lanjutBelumLanjut && <span title={`Belum Lanjut: ${item.keteranganTidakLanjut||"-"}`} style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:800,background:"#fef3c7",color:"#92400e",whiteSpace:"nowrap",cursor:"help"}}>⏸ Ditahan</span>}
                       </div>
                     </td>
-                    <td style={{padding:"8px 10px"}}>
+                    <td data-label="Aksi" style={{padding:"8px 10px"}}>
                       <div style={{display:"flex",gap:4,flexWrap:"wrap",justifyContent:"center"}}>
                         {canManage && <button title="Edit" style={{...sty.btn("ghost","sm"),padding:"5px 8px"}} onClick={()=>{setEditingId(item.id);setEditForm({...item});}}>✏️</button>}
                         {canApproveThis && (
@@ -522,7 +522,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
                     </td>
                   </tr>
                   {(rejectingId===item.id || belumLanjutId===item.id) && (
-                    <tr style={{borderLeft:`3px solid ${borderColor}`}}>
+                    <tr className="mobile-card-table__row" style={{"--row-accent":borderColor}}>
                       <td colSpan={9} style={{padding:"8px 10px",background:"#fef2f2"}}>
                         {rejectingId===item.id && (
                           <div>

@@ -1370,8 +1370,12 @@
   .capacity-summary-banner .kpi-banner__item:nth-child(odd) { border-left: 0; box-shadow: none; }
   .capacity-summary-banner .kpi-banner__item:nth-child(n+3) { border-top: 1px solid rgba(219,234,254,.1); }
   .forecast-overview__metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .forecast-overview.kpi-banner { padding: 14px 16px; gap: 14px; }
+  .forecast-overview.kpi-banner .forecast-overview__copy > small { font-size: 12px; line-height: 1.4; }
+  .forecast-overview.kpi-banner .forecast-overview__metrics > * { padding: 8px; }
+  .forecast-overview.kpi-banner .forecast-overview__metrics strong { font-size: 18px; }
   .forecast-detail-head { align-items: flex-start; flex-direction: column; }
-  .forecast-status-filter { width: 100%; }
+  .forecast-status-filter { width: 100%; flex-wrap: wrap; overflow-x: visible; }
   .forecast-pagination { flex-direction: column; align-items: flex-start; }
   .forecast-pagination__nav { width: 100%; justify-content: space-between; }
   .ai-conversation__header { align-items: flex-start; flex-direction: column; }
@@ -1457,7 +1461,6 @@
   .forecast-view-switch { width: 100%; }
   .forecast-view-switch button { flex: 1; }
   .forecast-overview__metrics { grid-template-columns: 1fr 1fr; }
-  .forecast-status-filter button { flex: 1; }
   .ai-conversation { height: calc(100dvh - 105px); min-height: 520px; }
   .ai-start { padding: 18px 14px; }
   .ai-quick-prompts > div { grid-template-columns: 1fr; }
@@ -1665,6 +1668,16 @@
   .stock-card-table .mobile-card-table__row > td[data-label="Gudang"],
   .stock-card-table .mobile-card-table__row > td[data-label="Blok"],
   .stock-card-table .mobile-card-table__row > td[data-label="Harga"] { display: none !important; }
+
+  /* Forecast Stok: kartu mobile cuma nampilin summary (Material, Status, Stok, Estimasi);
+     detail lengkap (Prediksi ML, Validasi, Aksi) dibuka lewat tap-untuk-detail. */
+  .forecast-card-table .mobile-card-table__row > td[data-label="Prediksi ML"],
+  .forecast-card-table .mobile-card-table__row > td[data-label="Validasi"],
+  .forecast-card-table .mobile-card-table__row > td[data-label="Aksi"] { display: none !important; }
+  .forecast-card-table .mobile-card-table__row { border-left-color: var(--risk-accent) !important; }
+
+  .attb-card-table .mobile-card-table__row { border-left-color: var(--row-accent) !important; }
+  .attb-card-table .mobile-card-table__row > td[colspan] { display: block; grid-column: 1/-1; }
 
   .capacity-data-list { overflow: visible !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
   .capacity-data-list table,

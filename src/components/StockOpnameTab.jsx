@@ -563,7 +563,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
 
             {/* Pagination */}
             {totalPages>1 && (
-              <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:10,marginBottom:16}}>
+              <div style={{display:"flex",flexWrap:"wrap",justifyContent:"center",alignItems:"center",gap:10,marginBottom:16}}>
                 <button style={{...sty.btn("ghost","sm"),opacity:page===0?0.4:1}} disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Sebelumnya</button>
                 <div style={{display:"flex",gap:4}}>
                   {Array.from({length:Math.min(totalPages,7)}).map((_,i)=>{
@@ -584,9 +584,9 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
             {/* Aksi Simpan/Submit — sengaja HANYA di sini (bawah tabel), bukan di header juga,
                 supaya tidak dobel/membingungkan (keluhan user 2026-07-07). */}
             {!isReadOnly && (
-              <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:16}}>
-                <button style={sty.btn("ghost")} onClick={()=>saveOpname(activeOpname)}>💾 Simpan Draft</button>
-                <button style={{...sty.btn("primary"), opacity:prog.pct<100?0.5:1}}
+              <div className="approval-actions" style={{marginBottom:16}}>
+                <button className="approval-btn--cancel" onClick={()=>saveOpname(activeOpname)}>💾 Simpan Draft</button>
+                <button className="approval-btn--primary" style={{opacity:prog.pct<100?0.5:1}}
                   onClick={async ()=>{
                     // BUG KRITIS (ditemukan 2026-07-07): dulu saveOpname(activeOpname) dan
                     // submitOpname(activeOpname) dipanggil beruntun TANPA menunggu satu sama lain.
@@ -738,14 +738,14 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?12:0,marginBottom:16}}>
         <div>
           <p style={{color:C.muted,fontSize:13}}>Dilakukan 1× per semester — bandingkan data sistem vs lapangan & SAP</p>
         </div>
         {hasRole(currentUser, "ADMIN","TL") && (
-          <div style={{display:"flex",gap:8}}>
-            <button style={sty.btn("primary")} onClick={()=>startOpname("SAP")}>+ Opname SAP</button>
-            <button style={sty.btn("ghost")} onClick={()=>startOpname("NON_SAP")}>+ Opname Non-SAP</button>
+          <div className="approval-actions">
+            <button className="approval-btn--primary" onClick={()=>startOpname("SAP")}>+ Opname SAP</button>
+            <button className="approval-btn--cancel" onClick={()=>startOpname("NON_SAP")}>+ Opname Non-SAP</button>
           </div>
         )}
       </div>

@@ -13,6 +13,7 @@ const RISK_FILTERS = [
   {key:"safe",label:"Aman"},
 ];
 const RISK_PRIORITY = {critical:0,attention:1,watch:2,safe:3};
+const RISK_COLORS = {critical:"#b91c1c",attention:"#b45309",watch:"#c2410c",safe:"#15803d"};
 
 export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, forecastDetail, setForecastDetail,
   forecastDetailResult, setForecastDetailResult, forecastDetailLoading, forecastDrillDown,
@@ -227,18 +228,18 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
 
           <details className="forecast-methodology"><summary>Bagaimana angka forecast dihitung?</summary><p>Heuristik membandingkan pemakaian historis TUG-9/TUG-8 dengan stok saat ini. ML Prophet memakai histori TUG-15 dan memerlukan minimal 10 transaksi keluar per material.</p></details>
 
-          <div className="forecast-table-card">
+          <div className="forecast-table-card mobile-card-table forecast-card-table">
             <table className="forecast-table">
               <thead><tr><th>Material</th><th>Status</th><th>Stok saat ini</th><th>Estimasi heuristik</th><th>Prediksi ML</th><th>Validasi</th><th>Aksi</th></tr></thead>
               <tbody>
-                {pagedList.map(entry=><tr key={entry.kat.id} onClick={()=>openDetail(entry)}>
-                  <td><strong>{entry.kat.name}</strong><span>{entry.kat.katalog} · {entry.kat.satuan}</span></td>
-                  <td><span className={`forecast-risk is-${entry.risk.key}`}>{entry.risk.label}</span></td>
-                  <td><strong>{fmtNum(entry.totalQty)}</strong><span>{entry.kat.satuan}</span></td>
-                  <td><strong>{formatDays(entry.risk.days)}</strong><span>berdasarkan transaksi</span></td>
-                  <td><strong>{entry.ml?.estimasiHari!=null?formatDays(entry.ml.estimasiHari):"Belum tersedia"}</strong><span>{entry.ml?.modelVersion||"histori belum cukup"}</span></td>
-                  <td>{entry.divergent?<span className="forecast-validation is-warning">Perlu ditinjau</span>:<span className="forecast-validation">Selaras</span>}</td>
-                  <td><div className="forecast-row-actions"><button onClick={event=>{event.stopPropagation();openDetail(entry);}}>Analisis</button><button onClick={event=>{event.stopPropagation();continueInChat(`Analisis dan forecast stok untuk material: ${entry.kat.name} [${entry.kat.katalog}]`);}}>Pak War</button></div></td>
+                {pagedList.map(entry=><tr key={entry.kat.id} className="mobile-card-table__row" onClick={()=>openDetail(entry)} style={{"--risk-accent":RISK_COLORS[entry.risk.key]}}>
+                  <td className="mobile-card-table__title"><strong>{entry.kat.name}</strong><span>{entry.kat.katalog} · {entry.kat.satuan}</span></td>
+                  <td data-label="Status"><span className={`forecast-risk is-${entry.risk.key}`}>{entry.risk.label}</span></td>
+                  <td data-label="Stok"><strong>{fmtNum(entry.totalQty)}</strong><span>{entry.kat.satuan}</span></td>
+                  <td data-label="Estimasi"><strong>{formatDays(entry.risk.days)}</strong><span>berdasarkan transaksi</span></td>
+                  <td data-label="Prediksi ML"><strong>{entry.ml?.estimasiHari!=null?formatDays(entry.ml.estimasiHari):"Belum tersedia"}</strong><span>{entry.ml?.modelVersion||"histori belum cukup"}</span></td>
+                  <td data-label="Validasi">{entry.divergent?<span className="forecast-validation is-warning">Perlu ditinjau</span>:<span className="forecast-validation">Selaras</span>}</td>
+                  <td data-label="Aksi"><div className="forecast-row-actions"><button onClick={event=>{event.stopPropagation();openDetail(entry);}}>Analisis</button><button onClick={event=>{event.stopPropagation();continueInChat(`Analisis dan forecast stok untuk material: ${entry.kat.name} [${entry.kat.katalog}]`);}}>Pak War</button></div></td>
                 </tr>)}
               </tbody>
             </table>
