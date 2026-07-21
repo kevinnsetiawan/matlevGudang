@@ -83,7 +83,7 @@ export function extractLatLngFromAddress(text) {
 export async function loadMasterTable(table) {
   if (!supabase) return null;
   const { data, error } = await supabase.from(table).select("*");
-  if (error) { console.error(`loadMasterTable(${table})`, error); return null; }
+  if (error) { console.error(`loadMasterTable(${table}): ${error.message}`, error); return null; }
   return data.map(row => ({ ...row.data, id: row.id }));
 }
 
@@ -91,7 +91,12 @@ export async function loadMasterTable(table) {
 export async function syncMasterTable(table, list, extraCols) {
   if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!supabase) return false;
-  const rows = list.map(item => ({
+  // Dedupe by id (keep-last) sebelum di-upsert: Postgres upsert().onConflict("id") GAGAL TOTAL
+  // (error 21000, "ON CONFLICT DO UPDATE command cannot affect row a second time within one
+  // command") kalau ada id yang sama muncul >1 kali dalam satu batch. Item terakhir dalam array
+  // dipertahankan karena itu representasi paling baru di state React.
+  const dedupedList = [...new Map(list.map(item => [item.id, item])).values()];
+  const rows = dedupedList.map(item => ({
     id: item.id,
     data: item,
     created_at: item.createdAt ?? Date.now(),
@@ -99,7 +104,7 @@ export async function syncMasterTable(table, list, extraCols) {
   }));
   if (rows.length) {
     const { error } = await supabase.from(table).upsert(rows, { onConflict: "id" });
-    if (error) { console.error(`syncMasterTable upsert(${table})`, error); return false; }
+    if (error) { console.error(`syncMasterTable upsert(${table}): ${error.message}`, error); return false; }
   }
   // PENGAMANAN KRITIS (2026-07-07): kalau `list` yang dikirim KOSONG, JANGAN lanjut ke
   // reconciliation-delete di bawah. Ditemukan lewat bug nyata: state React (mis. opnameList)
@@ -112,12 +117,12 @@ export async function syncMasterTable(table, list, extraCols) {
   // itu sengaja dibiarkan tidak terhapus dari Supabase, harus dihapus manual kalau memang perlu).
   if (list.length === 0) return true;
   const { data: existing, error: selErr } = await supabase.from(table).select("id");
-  if (selErr) { console.error(`syncMasterTable select(${table})`, selErr); return false; }
+  if (selErr) { console.error(`syncMasterTable select(${table}): ${selErr.message}`, selErr); return false; }
   const currentIds = new Set(list.map(i => i.id));
   const toDelete = (existing || []).filter(r => !currentIds.has(r.id)).map(r => r.id);
   if (toDelete.length) {
     const { error: delErr } = await supabase.from(table).delete().in("id", toDelete);
-    if (delErr) { console.error(`syncMasterTable delete(${table})`, delErr); return false; }
+    if (delErr) { console.error(`syncMasterTable delete(${table}): ${delErr.message}`, delErr); return false; }
   }
   return true;
 }
@@ -143,6 +148,6 @@ export async function syncMaterialCadangRows(table, rows, mapFn) {
   if (!supabase || !rows?.length) return false;
   const mapped = rows.map(mapFn);
   const { error } = await supabase.from(table).upsert(mapped, { onConflict: "id" });
-  if (error) { console.error(`syncMaterialCadangRows upsert(${table})`, error); return false; }
+  if (error) { console.error(`syncMaterialCadangRows upsert(${table}): ${error.message}`, error); return false; }
   return true;
 }
