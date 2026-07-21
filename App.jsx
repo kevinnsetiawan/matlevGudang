@@ -463,6 +463,11 @@ export default function PLNWarehouse() {
     if (authLoading || !currentUser) return;
     async function loadCloud() {
       setLoading(true);
+      // Kumpulan label tabel yang GAGAL di-fetch dari Supabase (loadMasterTable === null).
+      // Untuk tabel-tabel ini kita HANYA menampilkan cache lokal demi UX, TAPI TIDAK PERNAH
+      // mendorongnya ke server (mencegah cache basi menimpa data benar di server saat fetch
+      // gagal — mis. Supabase pause/resume/network blip). Di akhir loadCloud diperingatkan via toast.
+      const loadFailures = [];
       const cs = await CLOUD.get("pln_stocks_v4");
       const ckat = await CLOUD.get("pln_katalog_v4");
       const clokLocal = await CLOUD.get("pln_lokasi_v4");
@@ -534,12 +539,21 @@ export default function PLNWarehouse() {
         // karena masih dirujuk FK tug15_history — jangan sampai baris kosong itu dianggap
         // "Supabase sudah ada data" dan menimpa data asli di localStorage.
         const ckatRemoteReal = (ckatRemote||[]).filter(k=>k.name);
-        if (ckatRemoteReal.length > 0) {
+        if (ckatRemote === null) {
+          // Fetch katalog GAGAL — pertahankan tampilan lokal (sudah di-set dari dKat.list di atas),
+          // JANGAN push ke server (cegah cache basi menimpa data server). Deteksi null harus dari
+          // ckatRemote mentah, bukan ckatRemoteReal (yang sudah kehilangan info null lewat `||[]`).
+          loadFailures.push("Master Katalog");
+        } else if (ckatRemoteReal.length > 0) {
           setKatalogList(dedupeById(ckatRemoteReal).list);
         } else if (dKat.list.length > 0) {
           syncMasterTable("katalog", dKat.list);
         }
-        if (csRemote && csRemote.length > 0) {
+        if (csRemote === null) {
+          // Fetch stocks GAGAL — pertahankan tampilan lokal (sudah di-set dari dStk.list di atas),
+          // JANGAN push ke server.
+          loadFailures.push("Data Stok");
+        } else if (csRemote.length > 0) {
           setStocks(dedupeById(csRemote).list);
         } else if (dStk.list.length > 0) {
           syncMasterTable("stocks", dStk.list, s => ({ katalog_id: s.katalogId || null, lokasi_id: s.lokasiId || null }));
@@ -575,13 +589,21 @@ export default function PLNWarehouse() {
       // device/browser lain karena datanya memang cuma ada di localStorage device asal.
       const opnLocal = copn || [];
       const scLocal = csc || [];
-      if (copnRemote && copnRemote.length > 0) {
+      if (copnRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setOpnameList(opnLocal);
+        loadFailures.push("Stock Opname");
+      } else if (copnRemote.length > 0) {
         setOpnameList(copnRemote);
       } else {
         setOpnameList(opnLocal);
         if (opnLocal.length > 0) syncMasterTable("stock_opname", opnLocal, o => ({ status: o.status || null }));
       }
-      if (cscRemote && cscRemote.length > 0) {
+      if (cscRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setStockCountList(scLocal);
+        loadFailures.push("Stock Count");
+      } else if (cscRemote.length > 0) {
         setStockCountList(cscRemote);
       } else {
         setStockCountList(scLocal);
@@ -596,13 +618,21 @@ export default function PLNWarehouse() {
       // sama seperti katalog/stocks/warehouse_capacity di atas).
       const heLocal = (che || DEFAULT_HEAVY_EQUIPMENT).map(normalizeHeavyEquipmentRecord);
       const helLocal = chel || [];
-      if (cheRemote && cheRemote.length > 0) {
+      if (cheRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setHeavyEquipmentList(heLocal);
+        loadFailures.push("Alat Berat");
+      } else if (cheRemote.length > 0) {
         setHeavyEquipmentList(cheRemote.map(normalizeHeavyEquipmentRecord));
       } else {
         setHeavyEquipmentList(heLocal);
         if (heLocal.length > 0) syncMasterTable("heavy_equipment", heLocal, e => ({ upt: e.upt || null }));
       }
-      if (chelRemote && chelRemote.length > 0) {
+      if (chelRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setHeavyEquipmentLoans(helLocal);
+        loadFailures.push("Peminjaman Alat Berat");
+      } else if (chelRemote.length > 0) {
         setHeavyEquipmentLoans(chelRemote);
       } else {
         setHeavyEquipmentLoans(helLocal);
@@ -614,7 +644,11 @@ export default function PLNWarehouse() {
         }));
       }
       const attbLocal = cattb || [];
-      if (cattbRemote && cattbRemote.length > 0) {
+      if (cattbRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setAttbList(attbLocal);
+        loadFailures.push("ATTB");
+      } else if (cattbRemote.length > 0) {
         setAttbList(cattbRemote);
       } else {
         setAttbList(attbLocal);
@@ -629,13 +663,21 @@ export default function PLNWarehouse() {
       // Supabase supaya tidak hilang lagi (pola sama seperti katalog/stocks di atas).
       const gcapLocal = cgcap || [];
       const gcapiLocal = cgcapi || [];
-      if (cgcapRemote && cgcapRemote.length > 0) {
+      if (cgcapRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setGudangCapacityList(gcapLocal);
+        loadFailures.push("Kapasitas Gudang");
+      } else if (cgcapRemote.length > 0) {
         setGudangCapacityList(cgcapRemote);
       } else {
         setGudangCapacityList(gcapLocal);
         if (gcapLocal.length > 0) syncMasterTable("warehouse_capacity", gcapLocal);
       }
-      if (cgcapiRemote && cgcapiRemote.length > 0) {
+      if (cgcapiRemote === null) {
+        // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
+        setGudangCapacityImports(gcapiLocal);
+        loadFailures.push("Import Kapasitas Gudang");
+      } else if (cgcapiRemote.length > 0) {
         setGudangCapacityImports(cgcapiRemote);
       } else {
         setGudangCapacityImports(gcapiLocal);
@@ -643,6 +685,9 @@ export default function PLNWarehouse() {
       }
       setMigratedTug15History(cmig || []);
       setMigrasiPendingReview(cmpr || []);
+      if (loadFailures.length > 0) {
+        showToastRef.current && showToastRef.current(`⚠️ Gagal memuat sebagian data dari cloud (${loadFailures.join(", ")}). Menampilkan data lokal sementara — JANGAN edit sampai refresh berhasil, untuk menghindari data lama menimpa data server.`, "error");
+      }
       setLoading(false);
     }
     loadCloud();
