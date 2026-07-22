@@ -2,6 +2,7 @@
 import { UPT } from "../constants.js";
 import { hasRole } from "../lib/roles.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanRuntimeStatus, isPendingHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName } from "../lib/heavyEquipment.js";
+import { Tractor, Warning, PushPin } from "@phosphor-icons/react";
 
 export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab, currentUser }) {
   const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
@@ -69,7 +70,7 @@ export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [],
     <div className="dashboard-heavy-summary" style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${overdueLoans.length?C.red:C.accent}`,cursor:"pointer"}} onClick={()=>setTab("heavyEquipment")}>
       <div className="dashboard-heavy-summary__heading">
         <div>
-          <div style={{fontSize:14,fontWeight:900}}>🚜 Ringkasan Alat Berat</div>
+          <div style={{fontSize:14,fontWeight:900}}><Tractor weight="fill" size={17} style={{verticalAlign:"-0.15em",marginRight:5}}/>Ringkasan Alat Berat</div>
           <div style={{fontSize:12,color:C.muted}}>Scope: <b>{scopeLabel}</b> — status peminjaman, ketersediaan &amp; kondisi alat.</div>
         </div>
         <button style={sty.btn("ghost","sm")} onClick={(e)=>{e.stopPropagation(); setTab("heavyEquipment");}}>Buka Menu</button>
@@ -113,7 +114,7 @@ export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [],
             const jobName = getHeavyEquipmentLoanJobName(l);
             return (
               <div key={l.id} className="dashboard-heavy-loan" style={{background:status==="OVERDUE"?"#fef2f2":"#fff7ed"}}>
-                <span className="dashboard-heavy-loan__status" style={{color:status==="OVERDUE"?C.red:"#c2410c"}}>{status==="OVERDUE"?"⚠ OVERDUE":"📌 Dipinjam"}</span>
+                <span className="dashboard-heavy-loan__status" style={{color:status==="OVERDUE"?C.red:"#c2410c"}}>{status==="OVERDUE"?<><Warning weight="fill" size={12} style={{verticalAlign:"-0.15em",marginRight:3}}/>OVERDUE</>:<><PushPin weight="fill" size={12} style={{verticalAlign:"-0.15em",marginRight:3}}/>Dipinjam</>}</span>
                 <span className="dashboard-heavy-loan__equipment" style={{color:C.text}}>{l.equipmentId||"-"}</span>
                 <span className="dashboard-heavy-loan__upt" style={{color:C.muted}}>→ {requesterUpt}</span>
                 {!isMSB && ownerUpt!==myUpt && <span style={{color:C.muted,fontStyle:"italic"}}>dari {ownerUpt}</span>}

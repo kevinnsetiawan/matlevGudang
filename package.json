@@ -4,6 +4,7 @@
   "description": "WARNOTO - Warehouse Intelligent Control for Transmission Operation - PT PLN UPT Surabaya",
   "private": true,
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@supabase/supabase-js": "^2.108.2",
     "pdfjs-dist": "^6.0.227",
     "qrcode": "^1.5.4",

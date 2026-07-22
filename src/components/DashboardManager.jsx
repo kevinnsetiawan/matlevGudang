@@ -8,6 +8,7 @@ import { RencanaWidget } from "./RencanaWidget.jsx";
 import { HeavyEquipmentDashboardSummary } from "./HeavyEquipmentDashboardSummary.jsx";
 import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
+import { Package, Warning, Hourglass, Tractor, ClipboardText, Siren } from "@phosphor-icons/react";
 
 export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
@@ -53,11 +54,11 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
       {/* KPI Row */}
       <div className="dashboard-manager__kpis">
         {[
-          {label:"Total Item Stok",val:stocks.length,icon:"📦",color:C.accent},
-          {label:"Stok Kritis",val:stokKritis.length,icon:"🔴",color:stokKritis.length>0?"#dc2626":"#16a34a"},
-          {label:"TUG Pending",val:myPendingApprovals.length,icon:"⏳",color:myPendingApprovals.length>0?"#f59e0b":"#16a34a"},
-          {label:"Rencana Terlambat",val:terlambat.length,icon:"⚠️",color:terlambat.length>0?"#dc2626":"#16a34a"},
-          {label:"Transaksi Bulan Ini",val:txnBulanIni.length,icon:"📋",color:"#7c3aed"},
+          {label:"Total Item Stok",val:stocks.length,icon:<Package weight="fill" size={22}/>,color:C.accent},
+          {label:"Stok Kritis",val:stokKritis.length,icon:<Warning weight="fill" size={22}/>,color:stokKritis.length>0?"#dc2626":"#16a34a"},
+          {label:"TUG Pending",val:myPendingApprovals.length,icon:<Hourglass weight="fill" size={22}/>,color:myPendingApprovals.length>0?"#f59e0b":"#16a34a"},
+          {label:"Rencana Terlambat",val:terlambat.length,icon:<Warning weight="fill" size={22}/>,color:terlambat.length>0?"#dc2626":"#16a34a"},
+          {label:"Transaksi Bulan Ini",val:txnBulanIni.length,icon:<ClipboardText weight="fill" size={22}/>,color:"#7c3aed"},
         ].map((s,i)=>(
           <div key={i} className="dashboard-manager-kpi" style={{"--manager-kpi-color":s.color}}>
             <div className="dashboard-manager-kpi__icon">{s.icon}</div>
@@ -68,7 +69,7 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
 
       <KPISaldoCards stocks={stocks} C={C} sty={sty}/>
       {(heavyEquipmentList?.length>0 || heavyEquipmentLoans?.length>0) && (
-        <CollapsibleSection id="alatberat" title="Alat Berat" icon="🏗️" C={C}>
+        <CollapsibleSection id="alatberat" title="Alat Berat" icon={<Tractor weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} C={C}>
           <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
         </CollapsibleSection>
       )}
@@ -127,7 +128,7 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
             if (overdue.length===0) return null;
             return (
               <div style={{...sty.card,borderLeft:`4px solid #dc2626`}}>
-                <h3 style={{fontSize:13,fontWeight:700,color:"#dc2626",marginBottom:10}}>🚨 TUG Pending &gt; 2 Hari ({overdue.length})</h3>
+                <h3 style={{fontSize:13,fontWeight:700,color:"#dc2626",marginBottom:10}}><Siren weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>TUG Pending &gt; 2 Hari ({overdue.length})</h3>
                 {overdue.slice(0,4).map((t,i)=>{
                   const days = Math.floor((Date.now()-t.createdAt)/(24*60*60*1000));
                   return (

@@ -8,6 +8,7 @@ import { RencanaWidget } from "./RencanaWidget.jsx";
 import { HeavyEquipmentDashboardSummary } from "./HeavyEquipmentDashboardSummary.jsx";
 import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
+import { Package, Money, Warning, Hourglass, ClipboardText } from "@phosphor-icons/react";
 
 export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
@@ -29,11 +30,11 @@ export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganLis
       {/* KPI Row */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:16}}>
         {[
-          {label:"Total Nilai Inventori",val:fmtRp(nilaiTotal),icon:"💰",color:"#16a34a"},
-          {label:"Total Item Stok",val:stocks.length,icon:"📦",color:C.accent},
-          {label:"Stok Kritis",val:stokKritis.length,icon:"🔴",color:stokKritis.length>0?"#dc2626":"#16a34a"},
-          {label:"Transaksi Bulan Ini",val:txnBulanIni.length,icon:"📋",color:"#7c3aed"},
-          {label:"Butuh Approval Saya",val:myPendingApprovals.length,icon:"⏳",color:myPendingApprovals.length>0?"#f59e0b":"#16a34a"},
+          {label:"Total Nilai Inventori",val:fmtRp(nilaiTotal),icon:<Money weight="fill" size={22}/>,color:"#16a34a"},
+          {label:"Total Item Stok",val:stocks.length,icon:<Package weight="fill" size={22}/>,color:C.accent},
+          {label:"Stok Kritis",val:stokKritis.length,icon:<Warning weight="fill" size={22}/>,color:stokKritis.length>0?"#dc2626":"#16a34a"},
+          {label:"Transaksi Bulan Ini",val:txnBulanIni.length,icon:<ClipboardText weight="fill" size={22}/>,color:"#7c3aed"},
+          {label:"Butuh Approval Saya",val:myPendingApprovals.length,icon:<Hourglass weight="fill" size={22}/>,color:myPendingApprovals.length>0?"#f59e0b":"#16a34a"},
         ].map((s,i)=>(
           <div key={i} style={{...sty.card,borderTop:`3px solid ${s.color}`,padding:12}}>
             <div style={{fontSize:18,marginBottom:4}}>{s.icon}</div>
@@ -53,7 +54,7 @@ export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganLis
           {/* Material Kritis */}
           {stokKritis.length>0 && (
             <div style={{...sty.card,borderLeft:`4px solid #dc2626`,marginBottom:16}}>
-              <h3 style={{fontSize:13,fontWeight:700,color:"#dc2626",marginBottom:10}}>🔴 Material Stok Kritis ({stokKritis.length})</h3>
+              <h3 style={{fontSize:13,fontWeight:700,color:"#dc2626",marginBottom:10}}><Warning weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Material Stok Kritis ({stokKritis.length})</h3>
               {stokKritis.slice(0,5).map((s,i)=>(
                 <div key={i} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between"}}>
                   <div><div style={{fontSize:12,fontWeight:600}}>{s.name}</div><div style={{fontSize:12,color:C.muted}}>{s.katalog}</div></div>
@@ -68,7 +69,7 @@ export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganLis
           {/* Material Akan Habis */}
           {akanHabis.length>0 && (
             <div style={{...sty.card}}>
-              <h3 style={{fontSize:13,fontWeight:700,marginBottom:10}}>⚠️ Akan Habis</h3>
+              <h3 style={{fontSize:13,fontWeight:700,marginBottom:10}}><Warning weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Akan Habis</h3>
               {akanHabis.slice(0,4).map((item,i)=>(
                 <div key={i} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
                   <div style={{display:"flex",justifyContent:"space-between"}}>

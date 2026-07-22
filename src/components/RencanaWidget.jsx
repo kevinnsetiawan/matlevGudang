@@ -1,4 +1,5 @@
 // Komponen RencanaWidget — dipindah dari App.jsx (refactor Fase 4d).
+import { CalendarBlank, Warning } from "@phosphor-icons/react";
 
 export function RencanaWidget({ rencanaKedatanganList, C, sty, setTab }) {
   const today = Date.now();
@@ -10,7 +11,7 @@ export function RencanaWidget({ rencanaKedatanganList, C, sty, setTab }) {
   return (
     <div className="dashboard-arrival-widget" style={{...sty.card,marginBottom:16}}>
       <div className="dashboard-arrival-widget__heading">
-        <h3 style={{fontSize:13,fontWeight:700}}>📅 Rencana Kedatangan (30 Hari)</h3>
+        <h3 style={{fontSize:13,fontWeight:700}}><CalendarBlank weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Rencana Kedatangan (30 Hari)</h3>
         <button className="dashboard-widget-action" style={sty.btn("ghost","sm")} onClick={()=>setTab("rencana")}>Lihat Semua</button>
       </div>
       {upcoming.length===0 && (
@@ -28,7 +29,7 @@ export function RencanaWidget({ rencanaKedatanganList, C, sty, setTab }) {
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:12,fontWeight:700,color:isLate?"#dc2626":"#16a34a"}}>{item.tanggalSerahTerima||"-"}</div>
-              {isLate && <div style={{fontSize:12,color:"#dc2626",fontWeight:700}}>⚠️ Terlambat</div>}
+              {isLate && <div style={{fontSize:12,color:"#dc2626",fontWeight:700}}><Warning weight="fill" size={12} style={{verticalAlign:"-0.15em",marginRight:3}}/>Terlambat</div>}
             </div>
           </div>
         );

@@ -1024,7 +1024,7 @@
 .dashboard-overview-kpi::after { position: absolute; inset: auto 0 0; height: 3px; background: var(--dashboard-kpi-color); content: ""; }
 .dashboard-overview-kpi__copy { display: flex; min-width: 0; flex-direction: column; }
 .dashboard-overview-kpi__copy > span { color: #64748b; font-size: 12px; font-weight: 800; letter-spacing: .45px; text-transform: uppercase; }
-.dashboard-overview-kpi__copy > strong { overflow: hidden; margin-top: 5px; color: var(--dashboard-kpi-color); font-size: 18px; font-weight: 900; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-overview-kpi__copy > strong { overflow: hidden; margin-top: 5px; color: var(--dashboard-kpi-color); font-size: 18px; font-weight: 900; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dashboard-overview-kpi__copy > small { margin-top: 4px; color: #94a3b8; font-size: 12px; }
 .dashboard-overview-kpi__icon { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; border-radius: 9px; background: #f1f5f9; font-size: 16px; }
 .dashboard-overview__analysis { margin-bottom: 14px !important; border-radius: 12px !important; box-shadow: none !important; }
@@ -1830,7 +1830,7 @@
 [data-theme="dark"] :is(
   .approval-hero__summary, .exec-attention__header, .dashboard-performance-meta,
   .dashboard-overview__context, .dashboard-manager__section-heading,
-  .tug-process-tabs, .capacity-tabs,
+  .tug-process-tabs, .capacity-tabs, .dashboard-overview-kpi__icon,
   .forecast-view-switch, .forecast-overview__metrics, .forecast-analysis-panel__head
 ) { background: #0f172a; border-color: #334155; }
 [data-theme="dark"] :is(.approval-hero__summary > div, .dashboard-performance-meta > div) { background: #1e293b; }
