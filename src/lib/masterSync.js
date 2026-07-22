@@ -127,6 +127,218 @@ export async function syncMasterTable(table, list, extraCols) {
   return true;
 }
 
+// ════════════════════════════════════════════════════════════════════
+// KAPASITAS GUDANG — load/sync KHUSUS (tabel warehouse_capacity)
+// ────────────────────────────────────────────────────────────────────
+// Berbeda dari master lain, tabel `warehouse_capacity` punya SKEMA KOLOM TYPED
+// PENUH (upt/gudang/sub_gudang/luas_*_m2/…), BUKAN pola generik {id, data jsonb,
+// created_at bigint}. loadMasterTable/syncMasterTable di atas TIDAK bisa dipakai:
+// syncMasterTable mengirim {id, data, created_at} — kolom `data` & `created_at`
+// tidak ada di tabel ini, jadi setiap upsert GAGAL HTTP 400 (tabel selalu 0 baris
+// di produksi, data user hanya tersimpan di localStorage per-browser). loadMasterTable
+// juga salah: `row => ({...row.data, id})` — karena `row.data` tidak ada, semua field
+// kapasitas ikut hilang. Fungsi di bawah memetakan camelCase (JS) ↔ snake_case (kolom)
+// satu per satu. Skema tabel di Supabase SUDAH benar & sengaja typed — JANGAN diubah.
+//
+// Pasangan [kolom_db, fieldJs]. Sumber tunggal untuk load & sync supaya tidak ada
+// nama yang menyimpang antara arah baca & tulis (salah satu huruf = 400 lagi).
+const WAREHOUSE_CAPACITY_FIELDS = [
+  ["upt", "upt"],
+  ["gudang", "gudang"],
+  ["sub_gudang", "subGudang"],
+  ["type_gudang", "typeGudang"],
+  ["alamat", "alamat"],
+  ["latitude", "latitude"],
+  ["longitude", "longitude"],
+  ["luas_lahan_m2", "luasLahanM2"],
+  ["luas_terpakai_m2", "luasTerpakaiM2"],
+  ["sisa_luas_m2", "sisaLuasM2"],
+  ["persentase_terpakai", "persentaseTerpakai"],
+  ["persediaan_pct", "persediaanPct"],
+  ["cadang_pct", "cadangPct"],
+  ["pre_memory_pct", "preMemoryPct"],
+  ["attb_pct", "attbPct"],
+  ["lainnya_pct", "lainnyaPct"],
+  ["status_kapasitas", "statusKapasitas"],
+  ["contact_person", "contactPerson"],
+  ["waktu_update", "waktuUpdate"],
+  ["keterangan", "keterangan"],
+  ["link_gudang", "linkGudang"],
+  ["matched_gudang_id", "matchedGudangId"],
+  ["mapping_status", "mappingStatus"],
+  ["import_batch_id", "importBatchId"],
+];
+// Kolom NOT NULL numeric (default 0 di DB) — jangan pernah kirim undefined/NaN/null.
+const WAREHOUSE_CAPACITY_NUM_NOTNULL = new Set([
+  "luas_lahan_m2", "luas_terpakai_m2", "sisa_luas_m2", "persentase_terpakai",
+]);
+
+// Baris DB (snake_case) → object JS (camelCase) sesuai bentuk yang dipakai
+// KapasitasGudangTab/KapasitasGudangImportTab.
+function warehouseCapacityRowToItem(row) {
+  const item = { id: row.id };
+  for (const [col, key] of WAREHOUSE_CAPACITY_FIELDS) item[key] = row[col];
+  // matchedLokasiId ada di object JS (selalu null, tidak pernah dibaca) tapi tidak
+  // punya kolom DB — kembalikan null supaya bentuk object konsisten dengan komponen.
+  item.matchedLokasiId = null;
+  return item;
+}
+
+// Object JS (camelCase) → baris DB (snake_case). Field `matchedLokasiId` & metadata
+// _errors/_warnings/_valid (kalau tersisa) sengaja TIDAK ikut — tidak ada kolomnya.
+function warehouseCapacityItemToRow(item) {
+  const row = { id: item.id };
+  for (const [col, key] of WAREHOUSE_CAPACITY_FIELDS) {
+    let v = item[key];
+    if (WAREHOUSE_CAPACITY_NUM_NOTNULL.has(col)) {
+      const n = Number(v);
+      v = Number.isFinite(n) ? n : 0;
+    } else if (v === undefined) {
+      v = null;
+    }
+    row[col] = v;
+  }
+  // NOT NULL + CHECK constraint — pastikan selalu nilai valid meski record cacat.
+  if (!row.status_kapasitas) row.status_kapasitas = "AMAN";
+  if (!row.mapping_status) row.mapping_status = "UNMATCHED";
+  return row;
+}
+
+export async function loadWarehouseCapacity() {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("warehouse_capacity").select("*");
+  if (error) { console.error(`loadWarehouseCapacity: ${error.message}`, error); return null; }
+  return data.map(warehouseCapacityRowToItem);
+}
+
+// Mirip syncMasterTable, tapi upsert ke kolom-kolom typed asli (bukan wrap `data` jsonb).
+export async function syncWarehouseCapacity(list) {
+  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
+  if (!supabase) return false;
+  // Dedupe by id (keep-last) — samakan dengan syncMasterTable (hindari error 21000 upsert).
+  const dedupedList = [...new Map(list.map(item => [item.id, item])).values()];
+  const rows = dedupedList.map(warehouseCapacityItemToRow);
+  if (rows.length) {
+    const { error } = await supabase.from("warehouse_capacity").upsert(rows, { onConflict: "id" });
+    if (error) { console.error(`syncWarehouseCapacity upsert: ${error.message}`, error); return false; }
+  }
+  // PENGAMANAN KRITIS (sama seperti syncMasterTable, 2026-07-07): kalau `list` KOSONG,
+  // JANGAN lanjut ke reconciliation-delete — cegah state React yang sempat kosong (race/
+  // stale closure) menghapus SEMUA baris produksi yang tidak pernah diminta user hapus.
+  if (list.length === 0) return true;
+  const { data: existing, error: selErr } = await supabase.from("warehouse_capacity").select("id");
+  if (selErr) { console.error(`syncWarehouseCapacity select: ${selErr.message}`, selErr); return false; }
+  const currentIds = new Set(list.map(i => i.id));
+  const toDelete = (existing || []).filter(r => !currentIds.has(r.id)).map(r => r.id);
+  if (toDelete.length) {
+    const { error: delErr } = await supabase.from("warehouse_capacity").delete().in("id", toDelete);
+    if (delErr) { console.error(`syncWarehouseCapacity delete: ${delErr.message}`, delErr); return false; }
+  }
+  return true;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// IMPORT KAPASITAS GUDANG — load/sync KHUSUS (tabel warehouse_capacity_imports)
+// ────────────────────────────────────────────────────────────────────
+// Antrian approval import Excel Kapasitas Gudang. Sama seperti warehouse_capacity,
+// tabel ini SUDAH DIMIGRASI ke SKEMA KOLOM TYPED PENUH (source_file/status/records
+// jsonb/approved_by/…), BUKAN pola generik {id, data jsonb, created_at bigint}.
+// loadMasterTable/syncMasterTable generik TIDAK bisa dipakai: syncMasterTable
+// mengirim {id, data, created_at} — kolom itu tidak ada lagi di tabel ini, jadi
+// upsert GAGAL HTTP 400. Fungsi di bawah memetakan camelCase (JS) ↔ snake_case
+// (kolom) satu per satu. BEDA dari warehouse_capacity: `records` di sini adalah
+// SATU kolom jsonb yang menyimpan seluruh array baris kapasitas APA ADANYA
+// (passthrough, TIDAK di-flatten per-field). Skema tabel sudah final — JANGAN diubah.
+//
+// Pasangan [kolom_db, fieldJs]. Sumber tunggal untuk load & sync supaya tidak ada
+// nama yang menyimpang antara arah baca & tulis (salah satu huruf = 400 lagi).
+const WAREHOUSE_CAPACITY_IMPORTS_FIELDS = [
+  ["source_file", "sourceFile"],
+  ["sheet_name", "sheetName"],
+  ["imported_by", "importedBy"],
+  ["imported_at", "importedAt"],
+  ["total_rows", "totalRows"],
+  ["valid_rows", "validRows"],
+  ["invalid_rows", "invalidRows"],
+  ["warning_rows", "warningRows"],
+  ["status", "status"],
+  ["records", "records"],
+  ["approved_by", "approvedBy"],
+  ["approved_at", "approvedAt"],
+  ["rejected_by", "rejectedBy"],
+  ["rejected_at", "rejectedAt"],
+  ["reject_reason", "rejectReason"],
+];
+// Kolom NOT NULL integer (default 0 di DB) — jangan pernah kirim undefined/NaN/null.
+const WAREHOUSE_CAPACITY_IMPORTS_NUM_NOTNULL = new Set([
+  "total_rows", "valid_rows", "invalid_rows", "warning_rows",
+]);
+
+// Baris DB (snake_case) → object JS (camelCase) sesuai bentuk yang dipakai
+// KapasitasGudangImportTab/approveCapacityImport/rejectCapacityImport.
+function warehouseCapacityImportRowToItem(row) {
+  const item = { id: row.id };
+  for (const [col, key] of WAREHOUSE_CAPACITY_IMPORTS_FIELDS) item[key] = row[col];
+  // records = kolom jsonb; kalau null/undefined kembalikan [] supaya komponen aman.
+  if (!Array.isArray(item.records)) item.records = [];
+  return item;
+}
+
+// Object JS (camelCase) → baris DB (snake_case). `records` dipassthrough apa adanya
+// (jsonb array utuh, TIDAK di-flatten). Metadata JS lain yang tak berkolom sengaja
+// tidak ikut — hanya field terdaftar di WAREHOUSE_CAPACITY_IMPORTS_FIELDS yang dikirim.
+function warehouseCapacityImportItemToRow(item) {
+  const row = { id: item.id };
+  for (const [col, key] of WAREHOUSE_CAPACITY_IMPORTS_FIELDS) {
+    let v = item[key];
+    if (WAREHOUSE_CAPACITY_IMPORTS_NUM_NOTNULL.has(col)) {
+      const n = Number(v);
+      v = Number.isFinite(n) ? n : 0;
+    } else if (col === "records") {
+      v = Array.isArray(v) ? v : [];
+    } else if (v === undefined) {
+      v = null;
+    }
+    row[col] = v;
+  }
+  // NOT NULL + CHECK constraint — status harus salah satu nilai valid meski record cacat.
+  if (!row.status) row.status = "PENDING_ASMAN";
+  return row;
+}
+
+export async function loadWarehouseCapacityImports() {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("warehouse_capacity_imports").select("*");
+  if (error) { console.error(`loadWarehouseCapacityImports: ${error.message}`, error); return null; }
+  return data.map(warehouseCapacityImportRowToItem);
+}
+
+// Mirip syncMasterTable, tapi upsert ke kolom-kolom typed asli (bukan wrap `data` jsonb).
+export async function syncWarehouseCapacityImports(list) {
+  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
+  if (!supabase) return false;
+  // Dedupe by id (keep-last) — samakan dengan syncMasterTable (hindari error 21000 upsert).
+  const dedupedList = [...new Map(list.map(item => [item.id, item])).values()];
+  const rows = dedupedList.map(warehouseCapacityImportItemToRow);
+  if (rows.length) {
+    const { error } = await supabase.from("warehouse_capacity_imports").upsert(rows, { onConflict: "id" });
+    if (error) { console.error(`syncWarehouseCapacityImports upsert: ${error.message}`, error); return false; }
+  }
+  // PENGAMANAN KRITIS (sama seperti syncMasterTable, 2026-07-07): kalau `list` KOSONG,
+  // JANGAN lanjut ke reconciliation-delete — cegah state React yang sempat kosong (race/
+  // stale closure) menghapus SEMUA baris produksi yang tidak pernah diminta user hapus.
+  if (list.length === 0) return true;
+  const { data: existing, error: selErr } = await supabase.from("warehouse_capacity_imports").select("id");
+  if (selErr) { console.error(`syncWarehouseCapacityImports select: ${selErr.message}`, selErr); return false; }
+  const currentIds = new Set(list.map(i => i.id));
+  const toDelete = (existing || []).filter(r => !currentIds.has(r.id)).map(r => r.id);
+  if (toDelete.length) {
+    const { error: delErr } = await supabase.from("warehouse_capacity_imports").delete().in("id", toDelete);
+    if (delErr) { console.error(`syncWarehouseCapacityImports delete: ${delErr.message}`, delErr); return false; }
+  }
+  return true;
+}
+
 // Seed Supabase sekali dari DEFAULT_* kalau tabelnya masih kosong (instalasi pertama kali)
 export async function seedMasterTableIfEmpty(table, defaults, extraCols) {
   if (!supabase || !defaults?.length) return defaults || [];

@@ -443,45 +443,45 @@ $$;
 --     Laporan KAPASITAS GUDANG UIT JBM.xlsx, diimport lewat UI
 --     (KapasitasGudangImportTab → approveCapacityImport di App.jsx).
 --
---     RIWAYAT: skema ini sebelumnya kolom typed (upt/gudang/sub_gudang/dst)
---     tapi TIDAK PERNAH benar-benar disinkron App.jsx — fitur Kapasitas
---     Gudang cuma tersimpan localStorage/CLOUD sampai ditemukan saat audit
---     2026-07-03. Diganti ke pola jsonb (sama seperti katalog/stocks) supaya
---     bisa pakai syncMasterTable generik & tidak salah-mapping kolom lagi.
+--     RIWAYAT: skema kolom typed ini sempat TIDAK sinkron dengan App.jsx
+--     (syncMasterTable generik mengirim {id,data,created_at} yang tidak
+--     cocok kolom typed di bawah -> upsert selalu gagal HTTP 400, data
+--     kapasitas hanya tersimpan localStorage/CLOUD per-browser). Sempat
+--     direncanakan migrasi ke pola jsonb generik (lihat riwayat git),
+--     tapi migrasi itu TIDAK PERNAH dijalankan ke produksi. Perbaikan
+--     final 2026-07-22: skema kolom typed di bawah DIPERTAHANKAN apa
+--     adanya, App.jsx diperbaiki lewat fungsi mapping khusus
+--     (loadWarehouseCapacity/syncWarehouseCapacity di src/lib/masterSync.js)
+--     yang memetakan camelCase (JS) <-> snake_case (kolom) satu per satu.
 -- ────────────────────────────────────────────────────────────
 create table if not exists warehouse_capacity (
   id text primary key,              -- "CAP-{UPT}-{GUDANG}-{SUB}" uppercase, dibuat App.jsx
-  data jsonb not null default '{}'::jsonb,
-  created_at bigint
+  upt text not null,
+  gudang text not null,
+  sub_gudang text not null,
+  type_gudang text,
+  alamat text,
+  latitude numeric,
+  longitude numeric,
+  luas_lahan_m2 numeric not null default 0,
+  luas_terpakai_m2 numeric not null default 0,
+  sisa_luas_m2 numeric not null default 0,
+  persentase_terpakai numeric not null default 0,
+  persediaan_pct numeric default 0,
+  cadang_pct numeric default 0,
+  pre_memory_pct numeric default 0,
+  attb_pct numeric default 0,
+  lainnya_pct numeric default 0,
+  status_kapasitas text not null default 'AMAN' check (status_kapasitas in ('KRITIS','WASPADA','AMAN')),
+  contact_person text,
+  waktu_update text,
+  keterangan text,
+  link_gudang text,
+  matched_gudang_id text,
+  mapping_status text not null default 'UNMATCHED' check (mapping_status in ('UNMATCHED','AUTO_SUGGESTED','CONFIRMED')),
+  import_batch_id text,
+  updated_at timestamptz default now()
 );
--- Migrasi installasi lama (skema typed-column, orphan/basi -- lihat catatan di atas):
-alter table warehouse_capacity drop column if exists upt;
-alter table warehouse_capacity drop column if exists gudang;
-alter table warehouse_capacity drop column if exists sub_gudang;
-alter table warehouse_capacity drop column if exists type_gudang;
-alter table warehouse_capacity drop column if exists alamat;
-alter table warehouse_capacity drop column if exists latitude;
-alter table warehouse_capacity drop column if exists longitude;
-alter table warehouse_capacity drop column if exists luas_lahan_m2;
-alter table warehouse_capacity drop column if exists luas_terpakai_m2;
-alter table warehouse_capacity drop column if exists sisa_luas_m2;
-alter table warehouse_capacity drop column if exists persentase_terpakai;
-alter table warehouse_capacity drop column if exists persediaan_pct;
-alter table warehouse_capacity drop column if exists cadang_pct;
-alter table warehouse_capacity drop column if exists pre_memory_pct;
-alter table warehouse_capacity drop column if exists attb_pct;
-alter table warehouse_capacity drop column if exists lainnya_pct;
-alter table warehouse_capacity drop column if exists status_kapasitas;
-alter table warehouse_capacity drop column if exists contact_person;
-alter table warehouse_capacity drop column if exists waktu_update;
-alter table warehouse_capacity drop column if exists keterangan;
-alter table warehouse_capacity drop column if exists link_gudang;
-alter table warehouse_capacity drop column if exists matched_gudang_id;
-alter table warehouse_capacity drop column if exists mapping_status;
-alter table warehouse_capacity drop column if exists import_batch_id;
-alter table warehouse_capacity drop column if exists updated_at;
-alter table warehouse_capacity add column if not exists data jsonb not null default '{}'::jsonb;
-alter table warehouse_capacity add column if not exists created_at bigint;
 
 alter table warehouse_capacity enable row level security;
 drop policy if exists "Authenticated read warehouse_capacity" on warehouse_capacity;
@@ -490,26 +490,39 @@ create policy "Authenticated read warehouse_capacity" on warehouse_capacity for 
 create policy "Authenticated write warehouse_capacity" on warehouse_capacity for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- ────────────────────────────────────────────────────────────
--- 11. WAREHOUSE_CAPACITY_IMPORTS — riwayat batch import kapasitas gudang
---     (1 baris = 1 file diupload, `data.records` berisi semua baris di batch
---     itu — sama seperti App.jsx gudangCapacityImports, disimpan apa adanya
---     sebagai jsonb supaya tidak perlu mapping kolom manual).
+-- 11. WAREHOUSE_CAPACITY_IMPORTS — riwayat batch import + antrian approval
+--     kapasitas gudang (1 baris = 1 file diupload). Kolom `records` jsonb
+--     menyimpan seluruh array baris kapasitas dalam batch itu APA ADANYA
+--     (passthrough, tidak di-flatten) -- beda dari warehouse_capacity yang
+--     kolomnya di-flatten satu per satu.
+--
+--     RIWAYAT: sama seperti warehouse_capacity di atas, skema kolom typed
+--     ini sempat direncanakan migrasi ke pola jsonb generik tapi tidak
+--     pernah dijalankan. Perbaikan final 2026-07-22: kolom approval
+--     (status/records/approved_*/rejected_*/reject_reason) ditambahkan
+--     lewat migration `warehouse_capacity_imports_add_approval_columns`,
+--     `imported_at` diubah dari timestamptz ke bigint (konsisten epoch-ms
+--     seperti tabel master lain), App.jsx diperbaiki lewat
+--     loadWarehouseCapacityImports/syncWarehouseCapacityImports.
 -- ────────────────────────────────────────────────────────────
 create table if not exists warehouse_capacity_imports (
-  id text primary key,              -- batchId, sama dengan id di App.jsx
-  data jsonb not null default '{}'::jsonb,
-  created_at bigint
+  id text primary key,              -- batchId "CAPIMP-{timestamp}", dibuat App.jsx
+  source_file text not null,
+  sheet_name text,
+  imported_by text,
+  imported_at bigint,
+  total_rows integer not null default 0,
+  valid_rows integer not null default 0,
+  invalid_rows integer not null default 0,
+  warning_rows integer not null default 0,
+  status text not null default 'PENDING_ASMAN' check (status in ('PENDING_ASMAN','APPROVED','REJECTED')),
+  records jsonb not null default '[]'::jsonb,
+  approved_by text,
+  approved_at bigint,
+  rejected_by text,
+  rejected_at bigint,
+  reject_reason text
 );
-alter table warehouse_capacity_imports drop column if exists source_file;
-alter table warehouse_capacity_imports drop column if exists sheet_name;
-alter table warehouse_capacity_imports drop column if exists imported_by;
-alter table warehouse_capacity_imports drop column if exists imported_at;
-alter table warehouse_capacity_imports drop column if exists total_rows;
-alter table warehouse_capacity_imports drop column if exists valid_rows;
-alter table warehouse_capacity_imports drop column if exists invalid_rows;
-alter table warehouse_capacity_imports drop column if exists warning_rows;
-alter table warehouse_capacity_imports add column if not exists data jsonb not null default '{}'::jsonb;
-alter table warehouse_capacity_imports add column if not exists created_at bigint;
 
 alter table warehouse_capacity_imports enable row level security;
 drop policy if exists "Authenticated read wh_cap_imports" on warehouse_capacity_imports;

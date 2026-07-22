@@ -18,7 +18,7 @@ import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentSt
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
-import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, seedMasterTableIfEmpty, syncMaterialCadangRows } from "./src/lib/masterSync.js";
+import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, seedMasterTableIfEmpty, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -505,8 +505,8 @@ export default function PLNWarehouse() {
         seedMasterTableIfEmpty("tim_mutu", DEFAULT_TIM_MUTU),
         loadMasterTable("katalog"),
         loadMasterTable("stocks"),
-        loadMasterTable("warehouse_capacity"),
-        loadMasterTable("warehouse_capacity_imports"),
+        loadWarehouseCapacity(),
+        loadWarehouseCapacityImports(),
         loadMasterTable("heavy_equipment"),
         loadMasterTable("heavy_equipment_loans"),
         loadMasterTable("stock_opname"),
@@ -673,7 +673,7 @@ export default function PLNWarehouse() {
         setGudangCapacityList(cgcapRemote);
       } else {
         setGudangCapacityList(gcapLocal);
-        if (gcapLocal.length > 0) syncMasterTable("warehouse_capacity", gcapLocal);
+        if (gcapLocal.length > 0) syncWarehouseCapacity(gcapLocal);
       }
       if (cgcapiRemote === null) {
         // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
@@ -683,7 +683,7 @@ export default function PLNWarehouse() {
         setGudangCapacityImports(cgcapiRemote);
       } else {
         setGudangCapacityImports(gcapiLocal);
-        if (gcapiLocal.length > 0) syncMasterTable("warehouse_capacity_imports", gcapiLocal);
+        if (gcapiLocal.length > 0) syncWarehouseCapacityImports(gcapiLocal);
       }
       setMigratedTug15History(cmig || []);
       setMigrasiPendingReview(cmpr || []);
@@ -775,8 +775,8 @@ export default function PLNWarehouse() {
     if (overrides.stocks !== undefined) syncTasks.push({ label: "Data Stok", promise: syncMasterTable("stocks", s, item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null })) });
     // Kapasitas Gudang — sebelumnya localStorage/CLOUD-only, sekarang auto-backup
     // ke Supabase tiap kali berubah (lihat schema.sql section 10-11).
-    if (overrides.gudangCapacityList !== undefined) syncTasks.push({ label: "Kapasitas Gudang", promise: syncMasterTable("warehouse_capacity", gcap) });
-    if (overrides.gudangCapacityImports !== undefined) syncTasks.push({ label: "Import Kapasitas Gudang", promise: syncMasterTable("warehouse_capacity_imports", gcapi) });
+    if (overrides.gudangCapacityList !== undefined) syncTasks.push({ label: "Kapasitas Gudang", promise: syncWarehouseCapacity(gcap) });
+    if (overrides.gudangCapacityImports !== undefined) syncTasks.push({ label: "Import Kapasitas Gudang", promise: syncWarehouseCapacityImports(gcapi) });
     // Alat Berat/Peminjaman UPT — sebelumnya localStorage/CLOUD-only (ditemukan saat
     // audit 2026-07-06), sekarang auto-backup ke Supabase tiap kali berubah (lihat
     // schema.sql section 21).
