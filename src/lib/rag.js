@@ -53,7 +53,7 @@ export async function cohereEmbedImage(dataUri) {
 // & angka). Foto dikompres dulu ke <1MB karena itu batas free tier OCR.space.
 // Mengembalikan teks mentah (bisa multi-baris). Key di .env: VITE_OCRSPACE_API_KEY.
 export async function ocrSpaceOCR(dataUri) {
-  const key = import.meta.env.VITE_OCRSPACE_API_KEY;
+  const key = (import.meta.env.VITE_OCRSPACE_API_KEY || "").trim();
   if (!key) throw new Error("VITE_OCRSPACE_API_KEY belum diisi di .env");
   const compact = await compressImage(dataUri, { maxBytes: 900_000, maxDim: 1600 });
   const form = new FormData();
