@@ -205,6 +205,15 @@ const PHASE1_CACHE_KEYS = [
   "pln_gudang_capacity_imports_v1", "pln_txns_v3", "pln_docseq_v3",
 ];
 
+// Kunci localStorage cache Fase 2 — master data yang sebelumnya TIDAK PERNAH ditulis ke
+// localStorage (CRUD-nya langsung ke Supabase via syncMasterTable). Dipisah dari
+// PHASE1_CACHE_KEYS supaya jelas mana Fase 1 vs Fase 2 kalau perlu dibedakan nanti.
+// Dibersihkan saat logout bersama PHASE1 (cegah kebocoran data antar user di device sama).
+const PHASE2_CACHE_KEYS = [
+  "pln_lokasi_v4", "pln_gudang_v1", "pln_sub_gudang_v1", "pln_satpam_v1",
+  "pln_tim_mutu_v1", "pln_uit_v1", "pln_upt_v1", "pln_ultg_v1",
+];
+
 // ════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════
@@ -219,15 +228,15 @@ export default function PLNWarehouse() {
   const [rolePerms, setRolePerms] = useState({}); // override izin per role dari tabel role_permissions ({role: {key:bool}}); {} = pakai DEFAULT_PERMS
   const [stocks, setStocks] = useState(() => readCachedList("pln_stocks_v4") ?? []); // junction rows: katalogId + lokasiId + qty/price/jenis
   const [katalogList, setKatalogList] = useState(() => readCachedList("pln_katalog_v4") ?? []); // Master Katalog Barang
-  const [lokasiList, setLokasiList] = useState([]); // Master Lokasi Gudang
+  const [lokasiList, setLokasiList] = useState(() => readCachedList("pln_lokasi_v4") ?? []); // Master Lokasi Gudang
   const [txns, setTxns] = useState(() => readCachedList("pln_txns_v3") ?? []);
-  const [satpamList, setSatpamList] = useState([]);
-  const [timMutuList, setTimMutuList] = useState([]);
-  const [uitList, setUitList] = useState([]);
-  const [uptList, setUptList] = useState([]);
-  const [ultgList, setUltgList] = useState([]); // Unit di bawah UPT (mis. ULTG Surabaya Utara/Selatan)
-  const [gudangList, setGudangList] = useState([]);
-  const [subGudangList, setSubGudangList] = useState([]); // level di antara Gudang dan Blok Lokasi
+  const [satpamList, setSatpamList] = useState(() => readCachedList("pln_satpam_v1") ?? []);
+  const [timMutuList, setTimMutuList] = useState(() => readCachedList("pln_tim_mutu_v1") ?? []);
+  const [uitList, setUitList] = useState(() => readCachedList("pln_uit_v1") ?? []);
+  const [uptList, setUptList] = useState(() => readCachedList("pln_upt_v1") ?? []);
+  const [ultgList, setUltgList] = useState(() => readCachedList("pln_ultg_v1") ?? []); // Unit di bawah UPT (mis. ULTG Surabaya Utara/Selatan)
+  const [gudangList, setGudangList] = useState(() => readCachedList("pln_gudang_v1") ?? []);
+  const [subGudangList, setSubGudangList] = useState(() => readCachedList("pln_sub_gudang_v1") ?? []); // level di antara Gudang dan Blok Lokasi
   const [importGudangOpen, setImportGudangOpen] = useState(false); // toggle panel Import & Review di Master Gudang
   const [importLokasiOpen, setImportLokasiOpen] = useState(false); // modal Import Excel Master Lokasi
   const [showGudangMaintenance, setShowGudangMaintenance] = useState(false); // toggle 2 alat perbaikan (bukan pemakaian rutin) di Master Gudang
@@ -558,6 +567,7 @@ export default function PLNWarehouse() {
         const dStk = dedupeById(cs);
         const dLok = dedupeById(clok);
         setStocks(dStk.list); setKatalogList(dKat.list); setLokasiList(dLok.list);
+        CLOUD.set("pln_lokasi_v4", dLok.list); // refresh cache Fase 2 (lokasi tidak punya branch remote refresh terpisah)
         const totalRemoved = dKat.removed + dStk.removed + dLok.removed;
         if (totalRemoved > 0) {
           showToastRef.current && showToastRef.current(`🧹 Membersihkan ${totalRemoved} data duplikat (id ganda) di Master Katalog/Stok/Lokasi.`, "success");
@@ -615,12 +625,19 @@ export default function PLNWarehouse() {
       setTxns(ct || DEFAULT_TXNS);
       setDocSeq(cseq || 196);
       setSatpamList(csp);
+      CLOUD.set("pln_satpam_v1", csp);
       setTimMutuList(ctm);
+      CLOUD.set("pln_tim_mutu_v1", ctm);
       setUitList(cuit);
+      CLOUD.set("pln_uit_v1", cuit);
       setUptList(cupt);
+      CLOUD.set("pln_upt_v1", cupt);
       setUltgList(cultg);
+      CLOUD.set("pln_ultg_v1", cultg);
       setGudangList(cgdg);
+      CLOUD.set("pln_gudang_v1", cgdg);
       setSubGudangList(csgdg || []);
+      CLOUD.set("pln_sub_gudang_v1", csgdg || []);
       setRencanaKedatanganList(crk || []);
       // Stock Opname & Stock Count — Supabase (stock_opname/stock_count) sekarang sumber
       // utama kalau sudah ada isinya; kalau masih kosong (instalasi lama yang baru upgrade,
@@ -1112,6 +1129,7 @@ export default function PLNWarehouse() {
           setCurrentUser(null); setUsers([]);
           try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
           try { PHASE1_CACHE_KEYS.forEach(k => localStorage.removeItem('warnoto_' + k)); } catch {} // cegah kebocoran data antar user di device sama
+          try { PHASE2_CACHE_KEYS.forEach(k => localStorage.removeItem('warnoto_' + k)); } catch {} // idem, master data Fase 2
         } else {
           const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
           setCurrentUser(userObj);
@@ -1350,6 +1368,7 @@ export default function PLNWarehouse() {
     }
     setLokasiList(nl); setLokasiModal(null);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     logAudit(currentUser, lokasiModal==="edit"?"UPDATE":"CREATE", "lokasi", lokasiForm.kode, {kode:lokasiForm.kode});
     showToast(lokasiModal==="edit" ? "Master Lokasi diupdate!" : "Lokasi gudang baru ditambahkan!");
   }
@@ -1365,6 +1384,7 @@ export default function PLNWarehouse() {
     const nl = lokasiList.filter(x=>x.id!==l.id);
     setLokasiList(nl); setLokasiDeleteConfirm(null);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     logAudit(currentUser, "DELETE", "lokasi", l.kode, {kode:l.kode});
     showToast("Lokasi dihapus.");
   }
@@ -1400,6 +1420,7 @@ export default function PLNWarehouse() {
       nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, approvedBy:currentUser.id, approvedAt:Date.now()} : l);
     }
     setLokasiList(nl); await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
     await logApprovalHistory({type:"LOKASI", decision:"APPROVED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
     showToast("✅ Perubahan Blok Lokasi disetujui.");
@@ -1414,6 +1435,7 @@ export default function PLNWarehouse() {
       nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, pendingData:null} : l);
     }
     setLokasiList(nl); await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
     await logApprovalHistory({type:"LOKASI", decision:"REJECTED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
     showToast("❌ Perubahan Blok Lokasi ditolak.");
@@ -1673,6 +1695,7 @@ export default function PLNWarehouse() {
     else nsp = [...satpamList, {...satpamForm, createdAt:Date.now()}];
     setSatpamList(nsp); setSatpamModal(null);
     await syncMasterTable("satpam", nsp);
+    CLOUD.set("pln_satpam_v1", nsp);
     logAudit(currentUser, satpamModal==="edit"?"UPDATE":"CREATE", "satpam", satpamForm.id, {nama:satpamForm.name});
     showToast(satpamModal==="edit" ? "Data Satpam diupdate!" : "Satpam baru ditambahkan!");
   }
@@ -1685,6 +1708,7 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const nsp = satpamList.filter(x=>x.id!==id);
         setSatpamList(nsp); await syncMasterTable("satpam", nsp);
+        CLOUD.set("pln_satpam_v1", nsp);
         logAudit(currentUser, "DELETE", "satpam", id, {nama:s?.name});
         showToast("Satpam dihapus.");
       }
@@ -1697,6 +1721,7 @@ export default function PLNWarehouse() {
     const ntm = timMutuList.map(t=>t.id===timMutuForm.id?{...timMutuForm}:t);
     setTimMutuList(ntm); setTimMutuModal(null);
     await syncMasterTable("tim_mutu", ntm);
+    CLOUD.set("pln_tim_mutu_v1", ntm);
     logAudit(currentUser, "UPDATE", "tim_mutu", timMutuForm.id);
     showToast("Paket Tim Mutu diupdate!");
   }
@@ -1709,6 +1734,7 @@ export default function PLNWarehouse() {
     const nu = uitModal==="add" ? [...uitList, uitForm] : uitList.map(u=>u.id===uitForm.id?uitForm:u);
     setUitList(nu); setUitModal(null);
     await syncMasterTable("uit", nu);
+    CLOUD.set("pln_uit_v1", nu);
     logAudit(currentUser, uitModal==="add"?"CREATE":"UPDATE", "uit", uitForm.id, {nama:uitForm.nama, kode:uitForm.kode});
     showToast(uitModal==="add"?"UIT ditambahkan!":"UIT diupdate!");
   }
@@ -1722,6 +1748,7 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const nu = uitList.filter(x=>x.id!==id);
         setUitList(nu); await syncMasterTable("uit", nu);
+        CLOUD.set("pln_uit_v1", nu);
         logAudit(currentUser, "DELETE", "uit", id, {nama:u?.nama});
         showToast("UIT dihapus.");
       }
@@ -1738,6 +1765,7 @@ export default function PLNWarehouse() {
     const nu = ultgModal==="add" ? [...ultgList, ultgForm] : ultgList.map(u=>u.id===ultgForm.id?ultgForm:u);
     setUltgList(nu); setUltgModal(null);
     await syncUltg(nu);
+    CLOUD.set("pln_ultg_v1", nu);
     logAudit(currentUser, ultgModal==="add"?"CREATE":"UPDATE", "ultg", ultgForm.id, {nama:ultgForm.nama, kode:ultgForm.kode});
     showToast(ultgModal==="add"?"ULTG ditambahkan!":"ULTG diupdate!");
   }
@@ -1750,6 +1778,7 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const nu = ultgList.filter(x=>x.id!==id);
         setUltgList(nu); await syncUltg(nu);
+        CLOUD.set("pln_ultg_v1", nu);
         logAudit(currentUser, "DELETE", "ultg", id, {nama:u?.nama});
         showToast("ULTG dihapus.");
       }
@@ -1765,6 +1794,7 @@ export default function PLNWarehouse() {
     const nu = uptModal==="add" ? [...uptList, uptForm] : uptList.map(u=>u.id===uptForm.id?uptForm:u);
     setUptList(nu); setUptModal(null);
     await syncUpt(nu);
+    CLOUD.set("pln_upt_v1", nu);
     logAudit(currentUser, uptModal==="add"?"CREATE":"UPDATE", "upt", uptForm.id, {nama:uptForm.nama, kode:uptForm.kode});
     showToast(uptModal==="add"?"UPT ditambahkan!":"UPT diupdate!");
   }
@@ -1778,6 +1808,7 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const nu = uptList.filter(x=>x.id!==id);
         setUptList(nu); await syncUpt(nu);
+        CLOUD.set("pln_upt_v1", nu);
         logAudit(currentUser, "DELETE", "upt", id, {nama:u?.nama});
         showToast("UPT dihapus.");
       }
@@ -1918,7 +1949,9 @@ export default function PLNWarehouse() {
     setGudangList(newGudangList);
     setSubGudangList(newSubGudangList);
     await syncGudang(newGudangList);
+    CLOUD.set("pln_gudang_v1", newGudangList);
     await syncSubGudang(newSubGudangList);
+    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
     showToast("✅ Koordinat & data Master Gudang disinkron ulang dari Kapasitas Gudang.", "success");
   }
 
@@ -1990,8 +2023,11 @@ export default function PLNWarehouse() {
     setSubGudangList(newSubGudangList);
     setLokasiList(newLokasiList);
     await syncGudang(newGudangList);
+    CLOUD.set("pln_gudang_v1", newGudangList);
     await syncSubGudang(newSubGudangList);
+    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
     await syncLokasi(newLokasiList);
+    CLOUD.set("pln_lokasi_v4", newLokasiList);
     showToast(`✅ ${mergedGudang} Gudang duplikat & ${mergedSub} Sub Gudang duplikat digabungkan.`, "success");
   }
 
@@ -2016,7 +2052,9 @@ export default function PLNWarehouse() {
     setSubGudangList(newSubGudangList);
     await saveToCloud({ gudangCapacityList: newList, gudangCapacityImports: newImports });
     await syncGudang(newGudangList);
+    CLOUD.set("pln_gudang_v1", newGudangList);
     await syncSubGudang(newSubGudangList);
+    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
     await logApprovalHistory({ type:"KAPASITAS_GUDANG_IMPORT", refId:imp.id, decision:"APPROVED", note:`${imp.sourceFile} — ${newList.length} record, ${created.length} Gudang + ${createdSub.length} Sub Gudang baru` });
     let msg = `Import disetujui — ${newList.length} record kapasitas gudang kini live.`;
     if (created.length || createdSub.length) msg += ` ${created.length} Gudang, ${createdSub.length} Sub Gudang baru dibuat otomatis.`;
@@ -2064,6 +2102,7 @@ export default function PLNWarehouse() {
     const ng = gudangModal==="add" ? [...gudangList, gudangForm] : gudangList.map(g=>g.id===gudangForm.id?gudangForm:g);
     setGudangList(ng); setGudangModal(null);
     await syncGudang(ng);
+    CLOUD.set("pln_gudang_v1", ng);
     logAudit(currentUser, gudangModal==="add"?"CREATE":"UPDATE", "gudang", gudangForm.id, {nama:gudangForm.nama});
     showToast(gudangModal==="add"?"Gudang ditambahkan!":"Gudang diupdate!");
   }
@@ -2074,6 +2113,7 @@ export default function PLNWarehouse() {
     const ng = exists ? gudangList.map(g=>g.id===gudangForm.id?gudangForm:g) : [...gudangList, gudangForm];
     setGudangList(ng);
     await syncGudang(ng);
+    CLOUD.set("pln_gudang_v1", ng);
     logAudit(currentUser, exists?"UPDATE":"CREATE", "gudang", gudangForm.id, {nama:gudangForm.nama});
     setGudangWizardStep(2);
   }
@@ -2087,6 +2127,7 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const ng = gudangList.filter(x=>x.id!==id);
         setGudangList(ng); await syncGudang(ng);
+        CLOUD.set("pln_gudang_v1", ng);
         logAudit(currentUser, "DELETE", "gudang", id, {nama:g?.nama});
         showToast("Gudang dihapus.");
       }
@@ -2109,6 +2150,7 @@ export default function PLNWarehouse() {
     const nl = [...lokasiList, baru];
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     setWizardBlokDraft(null);
     showToast("✅ Blok ditambahkan!");
   }
@@ -2144,6 +2186,7 @@ export default function PLNWarehouse() {
       const ng = gudangList.map(g=>g.id===gudangId ? {...g, denahImageData:imgData, denahUploadedAt:Date.now(), denahOcrWords:null} : g);
       setGudangList(ng);
       await syncGudang(ng);
+      CLOUD.set("pln_gudang_v1", ng);
       showToast("✅ Denah gudang berhasil diupload! Membaca label blok di gambar...");
       await runOcrOnDenah(gudangId, imgData);
     } catch(e) {
@@ -2177,6 +2220,7 @@ export default function PLNWarehouse() {
       const ng2 = stateRef.current.gudangList.map(g => g.id === gudangId ? { ...g, denahOcrWords: words } : g);
       setGudangList(ng2);
       await syncGudang(ng2);
+      CLOUD.set("pln_gudang_v1", ng2);
 
       // Usulkan blok batch dari semua label yang terbaca (filter noise teks pendek/simbol)
       const suggestions = words
@@ -2237,6 +2281,7 @@ export default function PLNWarehouse() {
     const nl = [...lokasiList, ...baru];
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     setOcrSuggestions(s => s.filter(x => !checked.includes(x)));
     const dupMsg = duplikat.length ? ` (${duplikat.length} dilewati karena duplikat kode: ${duplikat.join(", ")})` : "";
     showToast(`✅ ${baru.length} blok ditambahkan!` + dupMsg);
@@ -2260,6 +2305,7 @@ export default function PLNWarehouse() {
     const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:xPct, mapY:yPct, gudangId} : l);
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     showToast(`📍 Koordinat Blok disimpan!`);
   }
 
@@ -2267,6 +2313,7 @@ export default function PLNWarehouse() {
     const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:null, mapY:null, gudangId:null} : l);
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     showToast("Koordinat blok direset.");
   }
 
@@ -2275,6 +2322,7 @@ export default function PLNWarehouse() {
     const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:xPct, subMapY:yPct, subGudangId, gudangId} : l);
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     showToast(`📍 Koordinat Blok (Sub Gudang) disimpan!`);
   }
 
@@ -2283,6 +2331,7 @@ export default function PLNWarehouse() {
     const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:null, subMapY:null} : l);
     setLokasiList(nl);
     await syncLokasi(nl);
+    CLOUD.set("pln_lokasi_v4", nl);
     showToast("Koordinat blok (Sub Gudang) direset.");
   }
 
@@ -2315,6 +2364,7 @@ export default function PLNWarehouse() {
       const nsg = subGudangList.map(sg=>sg.id===subGudangId ? {...sg, denahImageData:imgData, denahUploadedAt:Date.now(), denahOcrWords:null} : sg);
       setSubGudangList(nsg);
       await syncSubGudang(nsg);
+      CLOUD.set("pln_sub_gudang_v1", nsg);
       showToast("✅ Denah Sub Gudang berhasil diupload! Membaca label blok di gambar...");
       await runOcrOnDenahSub(subGudangId, gudangId, imgData);
     } catch(e) {
@@ -2343,6 +2393,7 @@ export default function PLNWarehouse() {
       const nsg2 = stateRef.current.subGudangList.map(sg => sg.id === subGudangId ? { ...sg, denahOcrWords: words } : sg);
       setSubGudangList(nsg2);
       await syncSubGudang(nsg2);
+      CLOUD.set("pln_sub_gudang_v1", nsg2);
 
       const suggestions = words
         .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
