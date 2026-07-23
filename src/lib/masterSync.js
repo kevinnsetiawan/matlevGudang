@@ -82,8 +82,14 @@ export function extractLatLngFromAddress(text) {
 
 export async function loadMasterTable(table) {
   if (!supabase) return null;
-  const { data, error } = await supabase.from(table).select("*");
-  if (error) { console.error(`loadMasterTable(${table}): ${error.message}`, error); return null; }
+  let { data, error } = await supabase.from(table).select("*");
+  if (error) {
+    // Retry SEKALI kalau gagal (mis. timeout parsial server self-host/Cloudflare Tunnel)
+    // sebelum menyerah ke cache localStorage lama di caller (App.jsx loadCloud()).
+    await new Promise(r => setTimeout(r, 1200));
+    ({ data, error } = await supabase.from(table).select("*"));
+    if (error) { console.error(`loadMasterTable(${table}): ${error.message}`, error); return null; }
+  }
   return data.map(row => ({ ...row.data, id: row.id }));
 }
 
