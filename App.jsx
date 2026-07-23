@@ -632,11 +632,22 @@ export default function PLNWarehouse() {
         const migrated = migrateLegacyStocks(legacyStocks);
         if (migrated) {
           setStocks(migrated.stocks); setKatalogList(migrated.katalog); setLokasiList(migrated.lokasi);
+          // Tulis balik cache Fase 1/2 supaya refresh berikutnya masuk jalur `if (cs && ckat && clok)`
+          // yang sehat, bukan terjebak loop layar "Memuat data dari cloud..." (stocks lean tanpa foto base64).
+          CLOUD.set("pln_stocks_v4", leanStocks(migrated.stocks));
+          CLOUD.set("pln_katalog_v4", migrated.katalog);
+          CLOUD.set("pln_lokasi_v4", migrated.lokasi);
           showToastRef.current && showToastRef.current("📦 Data lama berhasil dimigrasikan ke struktur Master Data baru!", "success");
         } else {
-          setStocks((csRemote&&csRemote.length>0) ? csRemote : DEFAULT_STOCKS);
-          setKatalogList((ckatRemote||[]).some(k=>k.name) ? ckatRemote.filter(k=>k.name) : DEFAULT_KATALOG);
-          setLokasiList(clok || DEFAULT_LOKASI);
+          const stocksFallback = (csRemote&&csRemote.length>0) ? csRemote : DEFAULT_STOCKS;
+          const katalogFallback = (ckatRemote||[]).some(k=>k.name) ? ckatRemote.filter(k=>k.name) : DEFAULT_KATALOG;
+          const lokasiFallback = clok || DEFAULT_LOKASI;
+          setStocks(stocksFallback); setKatalogList(katalogFallback); setLokasiList(lokasiFallback);
+          // Tulis balik cache Fase 1/2 dgn NILAI SAMA yang di-set ke state, supaya refresh berikutnya
+          // masuk jalur sehat dan tidak loop layar "Memuat data dari cloud..." (stocks lean tanpa foto base64).
+          CLOUD.set("pln_stocks_v4", leanStocks(stocksFallback));
+          CLOUD.set("pln_katalog_v4", katalogFallback);
+          CLOUD.set("pln_lokasi_v4", lokasiFallback);
         }
       }
       setTxns(ct || DEFAULT_TXNS);
