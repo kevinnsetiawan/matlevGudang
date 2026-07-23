@@ -297,6 +297,9 @@ export async function compressImage(input, { maxBytes = 1_000_000, maxDim = 1600
   try {
     const img = await new Promise((resolve, reject) => {
       const im = new Image();
+      // URL remote http(s) perlu mode CORS eksplisit, kalau tidak canvas jadi "tainted"
+      // dan toDataURL() ditolak browser. blob:/data: (upload File lokal) tidak butuh ini.
+      if (srcUrl.startsWith("http")) im.crossOrigin = "anonymous";
       im.onload = () => resolve(im);
       im.onerror = () => reject(new Error("Gagal memuat gambar untuk kompresi."));
       im.src = srcUrl;
