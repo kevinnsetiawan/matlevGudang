@@ -18,7 +18,7 @@ import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentSt
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
-import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, seedMasterTableIfEmpty, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
+import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -539,14 +539,14 @@ export default function PLNWarehouse() {
       // utamanya Supabase, bukan localStorage lagi — load dulu (seed dari
       // DEFAULT_* kalau tabelnya masih kosong, mis. instalasi baru).
       const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote] = await Promise.all([
-        seedMasterTableIfEmpty("uit", DEFAULT_UIT),
-        seedMasterTableIfEmpty("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null })),
-        loadMasterTable("ultg").then(r => r || []),
-        seedMasterTableIfEmpty("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null })),
-        loadMasterTable("sub_gudang").then(r => r || []),
-        seedMasterTableIfEmpty("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null })),
-        seedMasterTableIfEmpty("satpam", DEFAULT_SATPAM),
-        seedMasterTableIfEmpty("tim_mutu", DEFAULT_TIM_MUTU),
+        loadMasterTable("uit"),
+        loadMasterTable("upt"),
+        loadMasterTable("ultg"),
+        loadMasterTable("gudang"),
+        loadMasterTable("sub_gudang"),
+        loadMasterTable("lokasi"),
+        loadMasterTable("satpam"),
+        loadMasterTable("tim_mutu"),
         loadMasterTable("katalog"),
         loadMasterTable("stocks"),
         loadWarehouseCapacity(),
@@ -609,6 +609,22 @@ export default function PLNWarehouse() {
         } else if (dStk.list.length > 0) {
           syncMasterTable("stocks", dStk.list, s => ({ katalog_id: s.katalogId || null, lokasi_id: s.lokasiId || null }));
         }
+        // Master Lokasi — perhalus initial paint di atas (baris setLokasiList(dLok.list))
+        // dengan pola 3-arah eksplisit yang sama seperti katalog/stocks: fetch GAGAL
+        // (clokRemote === null) → pertahankan tampilan lokal, JANGAN push ke server;
+        // ada data → pakai data server + refresh cache; genuinely kosong → seed sekali
+        // dari DEFAULT_LOKASI (perilaku sama seperti seedMasterTableIfEmpty yang lama).
+        if (clokRemote === null) {
+          loadFailures.push("Master Lokasi");
+        } else if (clokRemote.length > 0) {
+          const lokFresh = dedupeById(clokRemote).list;
+          setLokasiList(lokFresh);
+          CLOUD.set("pln_lokasi_v4", lokFresh);
+        } else if (DEFAULT_LOKASI.length > 0) {
+          setLokasiList(DEFAULT_LOKASI);
+          await syncMasterTable("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null }));
+          CLOUD.set("pln_lokasi_v4", DEFAULT_LOKASI);
+        }
       } else {
         // Check for legacy flat-stock data from older version of the app
         const legacyStocks = await CLOUD.get("pln_stocks_v3");
@@ -624,20 +640,74 @@ export default function PLNWarehouse() {
       }
       setTxns(ct || DEFAULT_TXNS);
       setDocSeq(cseq || 196);
-      setSatpamList(csp);
-      CLOUD.set("pln_satpam_v1", csp);
-      setTimMutuList(ctm);
-      CLOUD.set("pln_tim_mutu_v1", ctm);
-      setUitList(cuit);
-      CLOUD.set("pln_uit_v1", cuit);
-      setUptList(cupt);
-      CLOUD.set("pln_upt_v1", cupt);
-      setUltgList(cultg);
-      CLOUD.set("pln_ultg_v1", cultg);
-      setGudangList(cgdg);
-      CLOUD.set("pln_gudang_v1", cgdg);
-      setSubGudangList(csgdg || []);
-      CLOUD.set("pln_sub_gudang_v1", csgdg || []);
+      // Master data organisasi/gudang (satpam/tim_mutu/uit/upt/ultg/gudang/sub_gudang)
+      // — pola 3-arah eksplisit yang sama seperti katalog/stocks. Fetch GAGAL (=== null)
+      // → JANGAN timpa state (biarkan cache-first tetap tampil) + toast, JANGAN push ke
+      // server. Ada data → pakai + refresh cache. Genuinely kosong → seed sekali dari
+      // DEFAULT_* (persis perilaku seedMasterTableIfEmpty lama). ultg/sub_gudang tidak
+      // punya DEFAULT_* → cukup 2-arah tanpa seeding.
+      if (csp === null) {
+        loadFailures.push("Data Satpam");
+      } else if (csp.length > 0) {
+        setSatpamList(csp);
+        CLOUD.set("pln_satpam_v1", csp);
+      } else if (DEFAULT_SATPAM.length > 0) {
+        setSatpamList(DEFAULT_SATPAM);
+        await syncMasterTable("satpam", DEFAULT_SATPAM);
+        CLOUD.set("pln_satpam_v1", DEFAULT_SATPAM);
+      }
+      if (ctm === null) {
+        loadFailures.push("Data Tim Mutu");
+      } else if (ctm.length > 0) {
+        setTimMutuList(ctm);
+        CLOUD.set("pln_tim_mutu_v1", ctm);
+      } else if (DEFAULT_TIM_MUTU.length > 0) {
+        setTimMutuList(DEFAULT_TIM_MUTU);
+        await syncMasterTable("tim_mutu", DEFAULT_TIM_MUTU);
+        CLOUD.set("pln_tim_mutu_v1", DEFAULT_TIM_MUTU);
+      }
+      if (cuit === null) {
+        loadFailures.push("Struktur Organisasi (UIT)");
+      } else if (cuit.length > 0) {
+        setUitList(cuit);
+        CLOUD.set("pln_uit_v1", cuit);
+      } else if (DEFAULT_UIT.length > 0) {
+        setUitList(DEFAULT_UIT);
+        await syncMasterTable("uit", DEFAULT_UIT);
+        CLOUD.set("pln_uit_v1", DEFAULT_UIT);
+      }
+      if (cupt === null) {
+        loadFailures.push("Struktur Organisasi (UPT)");
+      } else if (cupt.length > 0) {
+        setUptList(cupt);
+        CLOUD.set("pln_upt_v1", cupt);
+      } else if (DEFAULT_UPT_LIST.length > 0) {
+        setUptList(DEFAULT_UPT_LIST);
+        await syncMasterTable("upt", DEFAULT_UPT_LIST, u => ({ uit_id: u.uitId || null }));
+        CLOUD.set("pln_upt_v1", DEFAULT_UPT_LIST);
+      }
+      if (cultg === null) {
+        loadFailures.push("ULTG");
+      } else {
+        setUltgList(cultg);
+        CLOUD.set("pln_ultg_v1", cultg);
+      }
+      if (cgdg === null) {
+        loadFailures.push("Master Gudang");
+      } else if (cgdg.length > 0) {
+        setGudangList(cgdg);
+        CLOUD.set("pln_gudang_v1", cgdg);
+      } else if (DEFAULT_GUDANG.length > 0) {
+        setGudangList(DEFAULT_GUDANG);
+        await syncMasterTable("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null }));
+        CLOUD.set("pln_gudang_v1", DEFAULT_GUDANG);
+      }
+      if (csgdg === null) {
+        loadFailures.push("Sub Gudang");
+      } else {
+        setSubGudangList(csgdg);
+        CLOUD.set("pln_sub_gudang_v1", csgdg);
+      }
       setRencanaKedatanganList(crk || []);
       // Stock Opname & Stock Count — Supabase (stock_opname/stock_count) sekarang sumber
       // utama kalau sudah ada isinya; kalau masih kosong (instalasi lama yang baru upgrade,
