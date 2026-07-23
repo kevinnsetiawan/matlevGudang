@@ -179,6 +179,32 @@ function readCachedProfile() {
   } catch { return null; }
 }
 
+// Reader cache generik (sinkron, langsung localStorage) untuk lazy-initializer
+// useState tabel-tabel Fase 1 — pola PERSIS sama seperti readCachedProfile di atas,
+// supaya render pertama tampil dari cache tanpa menunggu network. Prefix 'warnoto_'
+// mengikuti CLOUD di src/lib/cloud.js (di sini baca langsung getItem yang sinkron,
+// bukan lewat CLOUD.get yang async).
+function readCachedList(key) {
+  try { return JSON.parse(localStorage.getItem('warnoto_' + key) || "null"); } catch { return null; }
+}
+
+// Salinan "lean" stocks untuk cache localStorage SAJA — buang field foto base64
+// (fotoKeseluruhan/fotoNameplate bisa beberapa MB/baris) supaya tidak menembus kuota
+// localStorage (~5-10MB) lalu gagal tersimpan diam-diam (QuotaExceededError yang ditelan
+// CLOUD.set). State React yang dipakai UI TIDAK memakai versi ini — tetap lengkap dgn foto.
+function leanStocks(list) {
+  return (Array.isArray(list) ? list : []).map(s => ({ ...s, fotoKeseluruhan: undefined, fotoNameplate: undefined }));
+}
+
+// Kunci localStorage cache Fase 1 (cache-first render). Dibersihkan saat logout supaya
+// data user A tidak bocor ke sesi user B di device yang sama. Tanpa prefix 'warnoto_'
+// (ditambahkan saat removeItem, konsisten dgn readCachedList/CLOUD).
+const PHASE1_CACHE_KEYS = [
+  "pln_stocks_v4", "pln_katalog_v4", "pln_heavy_equipment_v1", "pln_heavy_equipment_loans_v1",
+  "pln_attb_v1", "pln_opname_v1", "pln_stockcount_v1", "pln_gudang_capacity_v1",
+  "pln_gudang_capacity_imports_v1", "pln_txns_v3", "pln_docseq_v3",
+];
+
 // ════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════
@@ -191,10 +217,10 @@ export default function PLNWarehouse() {
 
   const [users, setUsers] = useState([]); // di-fetch dari tabel "profiles" Supabase setelah login (lihat effect onAuthStateChange)
   const [rolePerms, setRolePerms] = useState({}); // override izin per role dari tabel role_permissions ({role: {key:bool}}); {} = pakai DEFAULT_PERMS
-  const [stocks, setStocks] = useState([]); // junction rows: katalogId + lokasiId + qty/price/jenis
-  const [katalogList, setKatalogList] = useState([]); // Master Katalog Barang
+  const [stocks, setStocks] = useState(() => readCachedList("pln_stocks_v4") ?? []); // junction rows: katalogId + lokasiId + qty/price/jenis
+  const [katalogList, setKatalogList] = useState(() => readCachedList("pln_katalog_v4") ?? []); // Master Katalog Barang
   const [lokasiList, setLokasiList] = useState([]); // Master Lokasi Gudang
-  const [txns, setTxns] = useState([]);
+  const [txns, setTxns] = useState(() => readCachedList("pln_txns_v3") ?? []);
   const [satpamList, setSatpamList] = useState([]);
   const [timMutuList, setTimMutuList] = useState([]);
   const [uitList, setUitList] = useState([]);
@@ -206,13 +232,13 @@ export default function PLNWarehouse() {
   const [importLokasiOpen, setImportLokasiOpen] = useState(false); // modal Import Excel Master Lokasi
   const [showGudangMaintenance, setShowGudangMaintenance] = useState(false); // toggle 2 alat perbaikan (bukan pemakaian rutin) di Master Gudang
   const [rencanaKedatanganList, setRencanaKedatanganList] = useState([]);
-  const [opnameList, setOpnameList] = useState([]);
-  const [stockCountList, setStockCountList] = useState([]); // riwayat sesi Stock Count (banding SAP vs Aplikasi)
+  const [opnameList, setOpnameList] = useState(() => readCachedList("pln_opname_v1") ?? []);
+  const [stockCountList, setStockCountList] = useState(() => readCachedList("pln_stockcount_v1") ?? []); // riwayat sesi Stock Count (banding SAP vs Aplikasi)
   const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
   const [maturityAssessments, setMaturityAssessments] = useState([]); // riwayat asesmen Maturity Level Gudang UPT Surabaya, diisi manual oleh Admin
-  const [heavyEquipmentList, setHeavyEquipmentList] = useState([]);
-  const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState([]);
-  const [attbList, setAttbList] = useState([]);
+  const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
+  const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
+  const [attbList, setAttbList] = useState(() => readCachedList("pln_attb_v1") ?? []);
   const [materialCadangData, setMaterialCadangData] = useState({ imports:[], analyses:[], applyHistory:[] });
   const [materialCadangHealthData, setMaterialCadangHealthData] = useState({ imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
   const [materialCadangAiInsights, setMaterialCadangAiInsights] = useState({ runs:[], materialInsights:[] });
@@ -224,16 +250,20 @@ export default function PLNWarehouse() {
   const [maraUploadLoading, setMaraUploadLoading] = useState(false);
   const [maraUploadProgress, setMaraUploadProgress] = useState(null);
   const [catalogMasterRef, setCatalogMasterRef] = useState(null); // session-only hidden cataloger reference
-  const [gudangCapacityList, setGudangCapacityList] = useState([]);
-  const [gudangCapacityImports, setGudangCapacityImports] = useState([]);
+  const [gudangCapacityList, setGudangCapacityList] = useState(() => readCachedList("pln_gudang_capacity_v1") ?? []);
+  const [gudangCapacityImports, setGudangCapacityImports] = useState(() => readCachedList("pln_gudang_capacity_imports_v1") ?? []);
   const [migratedTug15History, setMigratedTug15History] = useState([]);
   // Antrian item BARU (belum ada di Master Katalog) hasil Migrasi Data SAP —
   // tidak langsung ditambahkan ke katalogList/stocks, menunggu Admin review
   // satu-per-satu (2026-07-04, permintaan user: item matched TIDAK boleh
   // ditimpa diam-diam, item baru WAJIB direview dulu).
   const [migrasiPendingReview, setMigrasiPendingReview] = useState([]);
-  const [docSeq, setDocSeq] = useState(196);
-  const [loading, setLoading] = useState(true);
+  const [docSeq, setDocSeq] = useState(() => readCachedList("pln_docseq_v3") ?? 196);
+  // Cache-first: layar blocking "Memuat data dari cloud..." HANYA tampil kalau benar-benar
+  // tidak ada cache first-screen-critical (device/browser baru). Kalau cache stocks/katalog
+  // ada, app langsung render dari cache & loadCloud refresh di latar belakang.
+  const [loading, setLoading] = useState(() => readCachedList("pln_stocks_v4") == null && readCachedList("pln_katalog_v4") == null);
+  const [dataRefreshing, setDataRefreshing] = useState(true); // true selama loadCloud() menyinkronkan data di latar belakang
   const [cloudSaving, setCloudSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
 
@@ -464,7 +494,12 @@ export default function PLNWarehouse() {
     // dan data remote (termasuk warehouse_capacity) tidak pernah dimuat ulang.
     if (authLoading || !currentUser) return;
     async function loadCloud() {
-      setLoading(true);
+      setDataRefreshing(true);
+      // Cache-first: JANGAN setLoading(true) di sini. `loading` sudah diinisialisasi
+      // true HANYA saat tidak ada cache first-screen-critical (device baru); memaksa
+      // true di sini akan memunculkan lagi layar blocking padahal cache sudah tampil.
+      // Untuk device baru, loading memang sudah true dari initializer; setLoading(false)
+      // di akhir mematikannya setelah 17 query selesai.
       // Kumpulan label tabel yang GAGAL di-fetch dari Supabase (loadMasterTable === null).
       // Untuk tabel-tabel ini kita HANYA menampilkan cache lokal demi UX, TAPI TIDAK PERNAH
       // mendorongnya ke server (mencegah cache basi menimpa data benar di server saat fetch
@@ -527,7 +562,7 @@ export default function PLNWarehouse() {
         if (totalRemoved > 0) {
           showToastRef.current && showToastRef.current(`🧹 Membersihkan ${totalRemoved} data duplikat (id ganda) di Master Katalog/Stok/Lokasi.`, "success");
           CLOUD.set("pln_katalog_v4", dKat.list);
-          CLOUD.set("pln_stocks_v4", dStk.list);
+          CLOUD.set("pln_stocks_v4", leanStocks(dStk.list));
           syncMasterTable("lokasi", dLok.list, l => ({ gudang_id: l.gudangId || null, status: l.status || null }));
         }
 
@@ -547,7 +582,9 @@ export default function PLNWarehouse() {
           // ckatRemote mentah, bukan ckatRemoteReal (yang sudah kehilangan info null lewat `||[]`).
           loadFailures.push("Master Katalog");
         } else if (ckatRemoteReal.length > 0) {
-          setKatalogList(dedupeById(ckatRemoteReal).list);
+          const katFresh = dedupeById(ckatRemoteReal).list;
+          setKatalogList(katFresh);
+          CLOUD.set("pln_katalog_v4", katFresh); // refresh cache dgn data terbaru dari server
         } else if (dKat.list.length > 0) {
           syncMasterTable("katalog", dKat.list);
         }
@@ -556,7 +593,9 @@ export default function PLNWarehouse() {
           // JANGAN push ke server.
           loadFailures.push("Data Stok");
         } else if (csRemote.length > 0) {
-          setStocks(dedupeById(csRemote).list);
+          const stkFresh = dedupeById(csRemote).list;
+          setStocks(stkFresh);
+          CLOUD.set("pln_stocks_v4", leanStocks(stkFresh)); // refresh cache (lean, tanpa foto base64)
         } else if (dStk.list.length > 0) {
           syncMasterTable("stocks", dStk.list, s => ({ katalog_id: s.katalogId || null, lokasi_id: s.lokasiId || null }));
         }
@@ -597,6 +636,7 @@ export default function PLNWarehouse() {
         loadFailures.push("Stock Opname");
       } else if (copnRemote.length > 0) {
         setOpnameList(copnRemote);
+        CLOUD.set("pln_opname_v1", copnRemote); // refresh cache dgn data terbaru dari server
       } else {
         setOpnameList(opnLocal);
         if (opnLocal.length > 0) syncMasterTable("stock_opname", opnLocal, o => ({ status: o.status || null }));
@@ -607,6 +647,7 @@ export default function PLNWarehouse() {
         loadFailures.push("Stock Count");
       } else if (cscRemote.length > 0) {
         setStockCountList(cscRemote);
+        CLOUD.set("pln_stockcount_v1", cscRemote); // refresh cache dgn data terbaru dari server
       } else {
         setStockCountList(scLocal);
         if (scLocal.length > 0) syncMasterTable("stock_count", scLocal);
@@ -625,7 +666,9 @@ export default function PLNWarehouse() {
         setHeavyEquipmentList(heLocal);
         loadFailures.push("Alat Berat");
       } else if (cheRemote.length > 0) {
-        setHeavyEquipmentList(cheRemote.map(normalizeHeavyEquipmentRecord));
+        const heFresh = cheRemote.map(normalizeHeavyEquipmentRecord);
+        setHeavyEquipmentList(heFresh);
+        CLOUD.set("pln_heavy_equipment_v1", heFresh); // refresh cache dgn data terbaru dari server
       } else {
         setHeavyEquipmentList(heLocal);
         if (heLocal.length > 0) syncMasterTable("heavy_equipment", heLocal, e => ({ upt: e.upt || null }));
@@ -636,6 +679,7 @@ export default function PLNWarehouse() {
         loadFailures.push("Peminjaman Alat Berat");
       } else if (chelRemote.length > 0) {
         setHeavyEquipmentLoans(chelRemote);
+        CLOUD.set("pln_heavy_equipment_loans_v1", chelRemote); // refresh cache dgn data terbaru dari server
       } else {
         setHeavyEquipmentLoans(helLocal);
         if (helLocal.length > 0) syncMasterTable("heavy_equipment_loans", helLocal, l => ({
@@ -652,6 +696,7 @@ export default function PLNWarehouse() {
         loadFailures.push("ATTB");
       } else if (cattbRemote.length > 0) {
         setAttbList(cattbRemote);
+        CLOUD.set("pln_attb_v1", cattbRemote); // refresh cache dgn data terbaru dari server
       } else {
         setAttbList(attbLocal);
         if (attbLocal.length > 0) syncMasterTable("attb_list", attbLocal, e => ({ upt: e.upt || null, stage: e.stage || null }));
@@ -671,6 +716,7 @@ export default function PLNWarehouse() {
         loadFailures.push("Kapasitas Gudang");
       } else if (cgcapRemote.length > 0) {
         setGudangCapacityList(cgcapRemote);
+        CLOUD.set("pln_gudang_capacity_v1", cgcapRemote); // refresh cache dgn data terbaru dari server
       } else {
         setGudangCapacityList(gcapLocal);
         if (gcapLocal.length > 0) syncWarehouseCapacity(gcapLocal);
@@ -681,6 +727,7 @@ export default function PLNWarehouse() {
         loadFailures.push("Import Kapasitas Gudang");
       } else if (cgcapiRemote.length > 0) {
         setGudangCapacityImports(cgcapiRemote);
+        CLOUD.set("pln_gudang_capacity_imports_v1", cgcapiRemote); // refresh cache dgn data terbaru dari server
       } else {
         setGudangCapacityImports(gcapiLocal);
         if (gcapiLocal.length > 0) syncWarehouseCapacityImports(gcapiLocal);
@@ -691,6 +738,7 @@ export default function PLNWarehouse() {
         showToastRef.current && showToastRef.current(`⚠️ Gagal memuat sebagian data dari cloud (${loadFailures.join(", ")}). Menampilkan data lokal sementara — JANGAN edit sampai refresh berhasil, untuk menghindari data lama menimpa data server.`, "error");
       }
       setLoading(false);
+      setDataRefreshing(false);
     }
     loadCloud();
   }, [authLoading, currentUser?.id]);
@@ -740,7 +788,7 @@ export default function PLNWarehouse() {
     const mpr = overrides.migrasiPendingReview ?? stateRef.current.migrasiPendingReview;
     setCloudSaving(true);
     await Promise.all([
-      CLOUD.set("pln_stocks_v4", s),
+      CLOUD.set("pln_stocks_v4", leanStocks(s)), // cache lean (tanpa foto base64) — cegah QuotaExceededError
       CLOUD.set("pln_katalog_v4", kat),
       CLOUD.set("pln_txns_v3", t),
       CLOUD.set("pln_docseq_v3", seq),
@@ -1063,6 +1111,7 @@ export default function PLNWarehouse() {
           await supabase.auth.signOut();
           setCurrentUser(null); setUsers([]);
           try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+          try { PHASE1_CACHE_KEYS.forEach(k => localStorage.removeItem('warnoto_' + k)); } catch {} // cegah kebocoran data antar user di device sama
         } else {
           const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
           setCurrentUser(userObj);
@@ -1081,6 +1130,7 @@ export default function PLNWarehouse() {
       } else {
         setCurrentUser(null); setUsers([]);
         try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+        try { PHASE1_CACHE_KEYS.forEach(k => localStorage.removeItem('warnoto_' + k)); } catch {} // cegah kebocoran data antar user di device sama
       }
       setAuthLoading(false);
     }
@@ -4639,9 +4689,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </button>
           </div>
         )}
-        <div className="app-sidebar__cloud" style={{padding:sidebarCompact?"10px":"8px 16px",borderTop:"1px solid rgba(255,255,255,0.1)",fontSize:12,color:"rgba(255,255,255,0.58)"}} title={sidebarCompact?(cloudSaving?"Menyimpan...":lastSaved?"Tersimpan":"Cloud Storage Aktif"):undefined}>
+        <div className="app-sidebar__cloud" style={{padding:sidebarCompact?"10px":"8px 16px",borderTop:"1px solid rgba(255,255,255,0.1)",fontSize:12,color:"rgba(255,255,255,0.58)"}} title={sidebarCompact?(cloudSaving?"Menyimpan...":dataRefreshing?"Menyinkronkan data...":lastSaved?"Tersimpan":"Cloud Storage Aktif"):undefined}>
           <SidebarIcon name="cloud" size={16}/>
-          {!sidebarCompact && <span>{cloudSaving ? "Menyimpan..." : lastSaved ? "Tersimpan" : "Cloud Storage Aktif"}</span>}
+          {!sidebarCompact && <span>{cloudSaving ? "Menyimpan..." : dataRefreshing ? "Menyinkronkan data..." : lastSaved ? "Tersimpan" : "Cloud Storage Aktif"}</span>}
         </div>
 
       </aside>
