@@ -1,14 +1,13 @@
 // Komponen HeavyEquipmentTabV2 — dipindah dari App.jsx (refactor Fase 5b).
 import { useState } from "react";
-import { UIT, UPT } from "../constants.js";
-import { hasRole } from "../lib/roles.js";
+import { UIT } from "../constants.js";
+import { hasRole, getUserUptScope } from "../lib/roles.js";
 import { downloadHeavyEquipmentLoanHTML } from "../lib/docBuilders.js";
 import { canApproveHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanJobName, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanRuntimeStatus, getHeavyEquipmentLoanStartDate, isPendingHeavyEquipmentLoan, normalizeHeavyEquipmentLoanStatus } from "../lib/heavyEquipment.js";
 import { OperationsHero } from "./OperationsHero.jsx";
 
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, saveEdit, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
-  const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
-  const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
+  const myUpt = getUserUptScope(currentUser);
   const isMSB = hasRole(currentUser, "MSB","Manager UIT");
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
@@ -57,9 +56,12 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
   const pendingCount = scopedLoans.filter(isPendingHeavyEquipmentLoan).length;
   const dipinjamCount = scopedLoans.filter(l=>l.runtimeStatus==="DIPINJAM").length;
   const overdueCount = scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").length;
-  const issueCount = equipmentList.filter(e=>["PERLU_SERVICE","RUSAK"].includes(e.statusAlat)).length;
-  const availableCount = equipmentList.filter(e=>e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
-  const maintenanceCount = equipmentList.filter(e=>e.statusAlat==="MAINTENANCE").length;
+  // Alat yang ter-scope ke UPT aktif (non-MSB dikunci ke UPT sendiri) — dipakai KPI di bawah &
+  // status grid. Dulu 3 count ini dihitung dari equipmentList mentah tanpa filter UPT.
+  const scopedEquipment = equipmentList.filter(e=>!effectiveUptFilter||e.upt===effectiveUptFilter);
+  const issueCount = scopedEquipment.filter(e=>["PERLU_SERVICE","RUSAK"].includes(e.statusAlat)).length;
+  const availableCount = scopedEquipment.filter(e=>e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
+  const maintenanceCount = scopedEquipment.filter(e=>e.statusAlat==="MAINTENANCE").length;
 
   // 5 status alat yang bisa dipilih Admin/TL lewat tombol Edit Alat
   const STATUS_ALAT_OPTIONS = [
@@ -194,7 +196,6 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
     {id:"PERLU_SERVICE", label:"Perlu Servis", color:"#f59e0b", count:equipmentList.filter(e=>(!effectiveUptFilter||e.upt===effectiveUptFilter)&&e.statusAlat==="PERLU_SERVICE").length},
     {id:"RUSAK",    label:"Rusak",          color:C.red,      count:equipmentList.filter(e=>(!effectiveUptFilter||e.upt===effectiveUptFilter)&&e.statusAlat==="RUSAK").length},
   ].filter(g=>g.id==="ALL"||g.count>0);
-  const scopedEquipment = equipmentList.filter(e=>!effectiveUptFilter||e.upt===effectiveUptFilter);
   const scopedMaintenance = scopedEquipment.filter(e=>["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
   const scopedAvailable = scopedEquipment.filter(e=>!activeLoanForEquipment(e.id) && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
   const scopedBorrowed = scopedEquipment.filter(e=>activeLoanForEquipment(e.id)?.runtimeStatus==="DIPINJAM").length;
