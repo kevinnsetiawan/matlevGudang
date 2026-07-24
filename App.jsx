@@ -1338,7 +1338,11 @@ export default function PLNWarehouse() {
           await supabase.auth.signOut();
           clearLocalAuthState();
         } else {
-          const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
+          // Resolusi upt_id (FK ke tabel upt) jadi nama pendek UPT (mis. "Malang") supaya scoping
+          // Alat Berat mengunci user ke UPT-nya sendiri. Tanpa ini semua fallback jatuh ke const
+          // UPT "Surabaya" hardcoded. uptList bisa belum ke-load saat login pertama → pakai DEFAULT.
+          const uptMatch = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === profile.upt_id);
+          const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, upt: uptMatch ? uptMatch.nama.replace(/^UPT\s+/i, "").trim() : undefined, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
           setCurrentUser(userObj);
           writeCachedProfile(userObj);
           // LOGIN dicatat cuma untuk login manual (SIGNED_IN) — bukan INITIAL_SESSION

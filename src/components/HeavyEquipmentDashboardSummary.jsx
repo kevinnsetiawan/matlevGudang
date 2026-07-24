@@ -1,12 +1,10 @@
 // Komponen HeavyEquipmentDashboardSummary — dipindah dari App.jsx (refactor Fase 4e).
-import { UPT } from "../constants.js";
-import { hasRole } from "../lib/roles.js";
+import { hasRole, getUserUptScope } from "../lib/roles.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanRuntimeStatus, isPendingHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName } from "../lib/heavyEquipment.js";
 import { Tractor, Warning, PushPin } from "@phosphor-icons/react";
 
 export function HeavyEquipmentDashboardSummary({ equipmentList = [], loans = [], C, sty, setTab, currentUser }) {
-  const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
-  const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
+  const myUpt = getUserUptScope(currentUser);
   const isMSB = hasRole(currentUser, "MSB","Manager UIT");
   const scopedEquipment = isMSB ? equipmentList : equipmentList.filter(e=>e.upt===myUpt);
   const scopedLoans = isMSB ? loans : loans.filter(l=>
