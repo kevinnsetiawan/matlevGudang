@@ -1621,6 +1621,17 @@ export default function PLNWarehouse() {
     return 4;
   }
   function createMaturityAudit() {
+    // Batasi 1 audit baru per bulan kalender per UPT
+    const nowD = new Date();
+    const existingAudit = maturityAudits.find(a => {
+      if ((a.upt || "UPT Surabaya") !== selectedMaturityUpt) return false;
+      const d = new Date(a.createdAt);
+      return d.getMonth() === nowD.getMonth() && d.getFullYear() === nowD.getFullYear();
+    });
+    if (existingAudit) {
+      showToast(`⚠️ UPT ini sudah punya audit bulan ini (dibuat ${fmtDateOnly(existingAudit.createdAt)}). Audit baru cuma bisa dibuat 1x per bulan.`, "error");
+      return;
+    }
     const scores = {};
     AUDIT_ASPECTS.forEach(a => { scores[a.id] = { upt:0, uit:0, pusat:0 }; });
     setMaturityAuditForm({ aspekScores: scores, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
@@ -2178,7 +2189,11 @@ export default function PLNWarehouse() {
   const [maturityForm, setMaturityForm] = useState({ level:3, catatan:"", tanggalAsesmen:Date.now() });
   // ─── Penilaian Maturity (audit workflow) — UI state ───────────────────
   const [maturitySubTab, setMaturitySubTab] = useState("dashboard"); // dashboard | pelaksanaan | history | 5s
-  const [selectedMaturityUpt, setSelectedMaturityUpt] = useState("UPT Surabaya");
+  const canSwitchMaturityUpt = hasRole(currentUser, "ADMIN_UIT","MGR_LOGISTIK_UIT","SUPERADMIN","MANAGER");
+  const [selectedMaturityUpt, setSelectedMaturityUpt] = useState(() => {
+    const match = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId);
+    return match?.nama || "UPT Surabaya";
+  });
   const [maturityAuditModal, setMaturityAuditModal] = useState(null); // null | {isNew:true,...} (new) | auditObj (edit/review)
   const [maturityAuditForm, setMaturityAuditForm] = useState({ aspekScores:{}, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
   const [maturityAuditSaving, setMaturityAuditSaving] = useState(false);
@@ -2186,6 +2201,8 @@ export default function PLNWarehouse() {
   const [expandedAspek, setExpandedAspek] = useState(null); // kategori aktif di editor
   const [activeAspectId, setActiveAspectId] = useState(null);
   const [aspectPage, setAspectPage] = useState(1);
+  const [auditListPage, setAuditListPage] = useState(1); // pagination "Daftar Audit Aktif" (5/hal)
+  useEffect(() => { setAuditListPage(1); }, [selectedMaturityUpt]);
   const [gudangForm, setGudangForm] = useState({});
   const [denahLoading, setDenahLoading] = useState(false);
   const [mapConfigMode, setMapConfigMode] = useState(false);
@@ -6587,80 +6604,80 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
           {tab === "maturity" && (() => {
             const is3D = false;
+            const uptAudits = maturityAudits.filter(a => (a.upt || "UPT Surabaya") === selectedMaturityUpt);
+            const latestAudit = uptAudits[0] || null;
+            const calcResult = latestAudit ? calcMaturityScore(latestAudit.aspekScores || {}, latestAudit.evidence || {}) : { itemA: 0, itemB: 0, total: 0, level: 1 };
+            const currentLevel = latestAudit ? calcResult.level : 1;
+            const evidenceCount = latestAudit?.evidence ? Object.values(latestAudit.evidence).flat().length : 0;
+            const statusLabel = latestAudit ? (MATURITY_WORKFLOW_LABEL[latestAudit.status] || latestAudit.status) : "Belum Ada Audit";
+            const statusColor = latestAudit ? (MATURITY_WORKFLOW_COLOR[latestAudit.status] || "#64748b") : "#64748b";
             return (
-              <div style={{ maxWidth: 960, margin: "0 auto" }}>
-              <div style={{
-                display: "flex",
-                alignItems: "center",
+              <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+              <div className="kpi-banner" style={{
                 justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: 16,
-                marginBottom: 24,
-                background: "linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)",
                 padding: "18px 24px",
-                borderRadius: 16,
-                boxShadow: "0 10px 25px -5px rgba(15, 23, 42, 0.3), 0 8px 16px -6px rgba(15, 23, 42, 0.3)",
-                color: "white",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                transition: "all 0.3s ease"
+                marginBottom: 24,
+                flexWrap: "wrap",
+                gap: 16
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 12,
-                    background: "rgba(255, 255, 255, 0.1)",
-                    backdropFilter: "blur(8px)",
-                    color: "white",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 13,
-                    fontWeight: 900,
-                    border: "1px solid rgba(255, 255, 255, 0.2)",
-                    letterSpacing: "1px",
-                    boxShadow: "inset 0 1px 1px rgba(255,255,255,0.2)"
-                  }}>
-                    UPT
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "1.5px" }}>WILAYAH AUDIT</span>
+                    <span style={{ padding: "2px 10px", borderRadius: 20, background: "rgba(255,255,255,0.12)", color: "#fff", fontSize: 11, fontWeight: 800, border: "1px solid rgba(255,255,255,0.25)" }}>{statusLabel}</span>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 9, fontWeight: 800, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "1.5px" }}>Wilayah Kerja Audit</div>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: "white", letterSpacing: "-0.5px", marginTop: 2 }}>{selectedMaturityUpt}</div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: "white", letterSpacing: "-0.4px" }}>{selectedMaturityUpt}</div>
+                  <div style={{ fontSize: 12, color: "rgba(219,234,254,.82)", fontWeight: 500, marginTop: 4 }}>
+                    Terakhir diperbarui: {latestAudit ? fmtDate(latestAudit.updatedAt || latestAudit.createdAt) : "—"}
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  {DEFAULT_UPT_LIST.map(u => {
-                    const isSelected = selectedMaturityUpt === u.nama;
-                    return (
-                      <button
-                        key={u.id}
-                        onClick={() => setSelectedMaturityUpt(u.nama)}
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: 20,
-                          border: "1px solid transparent",
-                          background: isSelected ? "#ffffff" : "rgba(255, 255, 255, 0.08)",
-                          color: isSelected ? "#1e3a8a" : "#f1f5f9",
-                          fontSize: 12,
-                          fontWeight: isSelected ? 800 : 600,
-                          cursor: "pointer",
-                          transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                          boxShadow: isSelected ? "0 4px 12px rgba(255, 255, 255, 0.25)" : "none",
-                          backdropFilter: "blur(4px)",
-                          outline: "none"
-                        }}
-                      >
-                        {u.nama}
-                      </button>
-                    );
-                  })}
+                <div style={{
+                  background: "rgba(255,255,255,0.1)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  borderRadius: 14,
+                  padding: "12px 20px",
+                  textAlign: "right"
+                }}>
+                  <div style={{ fontSize: 9, color: "#93c5fd", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px" }}>Level Maturity</div>
+                  <div style={{ fontSize: 28, fontWeight: 950, color: "white", margin: "2px 0", lineHeight: 1.1, letterSpacing: "-1px" }}>Level {currentLevel}</div>
+                  <div style={{ fontSize: 11, color: "#93c5fd", fontWeight: 700 }}>{MATURITY_LEVELS[currentLevel] || "Basic"}</div>
                 </div>
+
+                {canSwitchMaturityUpt && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {DEFAULT_UPT_LIST.map(u => {
+                      const isSelected = selectedMaturityUpt === u.nama;
+                      return (
+                        <button
+                          key={u.id}
+                          onClick={() => setSelectedMaturityUpt(u.nama)}
+                          style={{
+                            padding: "6px 14px",
+                            borderRadius: 20,
+                            border: "1px solid transparent",
+                            background: isSelected ? "#ffffff" : "rgba(255, 255, 255, 0.08)",
+                            color: isSelected ? "#1e3a8a" : "#f1f5f9",
+                            fontSize: 12,
+                            fontWeight: isSelected ? 800 : 600,
+                            cursor: "pointer",
+                            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                            boxShadow: isSelected ? "0 4px 12px rgba(255, 255, 255, 0.25)" : "none",
+                            backdropFilter: "blur(4px)",
+                            outline: "none"
+                          }}
+                        >
+                          {u.nama}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Sub-tab navigation */}
               <div style={{
                 display: "flex",
+                flexDirection: isMobile ? "column" : "row",
                 gap: 4,
                 marginBottom: 24,
                 background: "#f1f5f9",
@@ -6668,7 +6685,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 padding: 4,
                 border: "1px solid #e2e8f0",
                 boxShadow: "inset 0 1px 2px rgba(0,0,0,0.05)",
-                overflowX: "auto",
+                overflowX: isMobile ? "visible" : "auto",
                 WebkitOverflowScrolling: "touch"
               }}>
                 {[
@@ -6678,7 +6695,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   { id: "5s", label: "Form Pengisian 5S" },
                 ].map(s => (
                   <button key={s.id} onClick={() => setMaturitySubTab(s.id)} style={{
-                    flex: 1,
+                    ...(isMobile ? {} : { flex: 1 }),
                     padding: "8px 16px",
                     borderRadius: 8,
                     border: "none",
@@ -6696,68 +6713,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
               {/*  DASHBOARD AUDIT  */}
               {maturitySubTab === "dashboard" && (() => {
-                const uptAudits = maturityAudits.filter(a => (a.upt || "UPT Surabaya") === selectedMaturityUpt);
-                const latestAudit = uptAudits[0] || null;
-                const calcResult = latestAudit ? calcMaturityScore(latestAudit.aspekScores || {}, latestAudit.evidence || {}) : { itemA: 0, itemB: 0, total: 0, level: 1 };
-                const currentLevel = latestAudit ? calcResult.level : 1;
-                const evidenceCount = latestAudit?.evidence ? Object.values(latestAudit.evidence).flat().length : 0;
-                const statusLabel = latestAudit ? (MATURITY_WORKFLOW_LABEL[latestAudit.status] || latestAudit.status) : "Belum Ada Audit";
-                const statusColor = latestAudit ? (MATURITY_WORKFLOW_COLOR[latestAudit.status] || "#64748b") : "#64748b";
-
                 return (
                   <div>
-                    {/* Title and Sub-headline */}
-                    <div style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 10, color: "#2563eb", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1.5px" }}>DASHBOARD AUDIT MATURITY</div>
-                      <h1 style={{ fontSize: 24, fontWeight: 950, color: "#0f172a", margin: "4px 0 2px 0", letterSpacing: "-0.5px" }}>Rangkuman Audit {selectedMaturityUpt}</h1>
-                      <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>Ringkasan pencapaian level kematangan gudang, kelengkapan berkas evidence, dan riwayat asesmen.</p>
-                    </div>
-
-                    {/* Main Card */}
-                    <div style={{
-                      background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 16,
-                      padding: 24,
-                      marginBottom: 20,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 16,
-                      boxShadow: "0 10px 25px -5px rgba(15, 23, 42, 0.05), 0 8px 16px -6px rgba(15, 23, 42, 0.05)",
-                      transition: "all 0.3s ease"
-                    }}>
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                          <span style={{ fontSize: 9, color: "#2563eb", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1.5px" }}>WILAYAH AUDIT</span>
-                          <span style={{ padding: "2px 10px", borderRadius: 20, background: `${statusColor}12`, color: statusColor, fontSize: 11, fontWeight: 800, border: `1px solid ${statusColor}22` }}>{statusLabel}</span>
-                        </div>
-                        <h2 style={{ fontSize: 22, fontWeight: 900, color: "#0f172a", margin: "2px 0 6px 0", letterSpacing: "-0.3px" }}>{selectedMaturityUpt}</h2>
-                        <div style={{ fontSize: 12, color: "#64748b", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ color: "#3b82f6", display: "inline-flex" }}>
-                            <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          </span>
-                          Terakhir diperbarui: {latestAudit ? fmtDate(latestAudit.updatedAt || latestAudit.createdAt) : "—"}
-                        </div>
-                      </div>
-                      <div style={{
-                        background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)",
-                        border: "1px solid #bfdbfe",
-                        borderRadius: 16,
-                        padding: "16px 24px",
-                        textAlign: "right",
-                        minWidth: 180,
-                        boxShadow: "0 4px 12px rgba(37,99,235,0.08)"
-                      }}>
-                        <div style={{ fontSize: 9, color: "#1d4ed8", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px" }}>Level Maturity</div>
-                        <div style={{ fontSize: 34, fontWeight: 950, color: "#1e3a8a", margin: "2px 0", lineHeight: 1.1, letterSpacing: "-1px" }}>Level {currentLevel}</div>
-                        <div style={{ fontSize: 11, color: "#2563eb", fontWeight: 700 }}>{MATURITY_LEVELS[currentLevel] || "Basic"}</div>
-                      </div>
-                    </div>
-
                     {/* Three Cards Row */}
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
                       {[
@@ -7104,7 +7061,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   })()}
 
                   {/*  DAFTAR AUDIT (bila tidak sedang input/edit)  */}
-                  {!maturityAuditModal && (
+                  {!maturityAuditModal && (() => {
+                    const _nowD = new Date();
+                    const auditHasThisMonth = maturityAudits.some(a => {
+                      if ((a.upt || "UPT Surabaya") !== selectedMaturityUpt) return false;
+                      const d = new Date(a.createdAt);
+                      return d.getMonth() === _nowD.getMonth() && d.getFullYear() === _nowD.getFullYear();
+                    });
+                    const auditTotal = maturityAudits.length;
+                    const auditPageItems = maturityAudits.slice((auditListPage - 1) * 5, auditListPage * 5);
+                    return (
                     <>
 
 
@@ -7117,7 +7083,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                       }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
                           <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>Daftar Audit Aktif</div>
-                          <button style={{ ...sty.btn("primary"), padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 800 }} onClick={createMaturityAudit}>
+                          <button
+                            style={{ ...sty.btn("primary"), padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 800, opacity: auditHasThisMonth ? 0.5 : 1, cursor: auditHasThisMonth ? "not-allowed" : "pointer" }}
+                            onClick={createMaturityAudit}
+                            disabled={auditHasThisMonth}
+                            title={auditHasThisMonth ? "UPT ini sudah punya audit bulan ini — audit baru hanya 1x per bulan." : "Buat audit maturity baru"}
+                          >
                             + Audit Baru
                           </button>
                         </div>
@@ -7131,7 +7102,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                           </div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                            {maturityAudits.map(a => {
+                            {auditPageItems.map(a => {
                               const canEditUPT = hasRole(currentUser, "ADMIN", "TL", "ASMAN", "MANAGER") && (a.status === "DRAFT" || a.status === "SELF_ASSESSMENT" || a.status === "REVISION");
                               const canEditUIT = hasRole(currentUser, "ADMIN_UIT", "MGR_LOGISTIK_UIT") && a.status === "REVIEW_UIT";
                               const canEditPusat = hasRole(currentUser, "SUPERADMIN", "MANAGER") && a.status === "FINAL";
@@ -7163,6 +7134,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                                       <div>
                                         <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Level {a.level || "?"} — {MATURITY_LEVELS[a.level] || "Proses"}</div>
                                         <div style={{ fontSize: 11, color: MATURITY_WORKFLOW_COLOR[a.status], fontWeight: 600, marginTop: 2 }}>{MATURITY_WORKFLOW_LABEL[a.status]}</div>
+                                        {a.createdAt && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Dibuat: {fmtDateOnly(a.createdAt)}</div>}
                                       </div>
                                     </div>
                                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", position: "relative", zIndex: 20 }}>
@@ -7201,9 +7173,23 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                             })}
                           </div>
                         )}
+                        {auditTotal > 5 && (
+                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, marginTop: 16 }}>
+                            {auditListPage > 1 && (
+                              <button className="approval-btn--cancel" onClick={() => setAuditListPage(p => Math.max(1, p - 1))}>‹ Sebelumnya</button>
+                            )}
+                            <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>
+                              Hal {auditListPage} / {Math.ceil(auditTotal / 5)}
+                            </span>
+                            {auditListPage * 5 < auditTotal && (
+                              <button className="approval-btn--cancel" onClick={() => setAuditListPage(p => p + 1)}>Berikutnya ›</button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
 
@@ -7215,11 +7201,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     <button style={sty.btn("ghost")} onClick={() => setMaturitySubTab("pelaksanaan")}>← Kembali</button>
                   </div>
                   <div style={{ ...sty.card }}>
-                    {maturityAudits.length === 0 ? (
-                      <div style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: 32 }}>Belum ada riwayat audit.</div>
+                    {maturityAudits.filter(a => a.status === "FINAL").length === 0 ? (
+                      <div style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: 32 }}>Belum ada audit yang final dinilai Pusat.</div>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {maturityAudits.map(a => (
+                        {maturityAudits.filter(a => a.status === "FINAL").map(a => (
                           <div key={a.id} onClick={() => { openMaturityAudit(a); setMaturitySubTab("pelaksanaan"); }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: 10, border: `1px solid ${C.border}`, cursor: "pointer", transition: "background .15s" }} onMouseEnter={e => e.currentTarget.style.background = C.border} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                               <div style={{ width: 40, height: 40, borderRadius: 10, background: MATURITY_WORKFLOW_COLOR[a.status], color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 17, flexShrink: 0 }}>{a.level || "—"}</div>
@@ -7249,7 +7235,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {/*  FORM PENGISIAN 5S  */}
               {maturitySubTab === "5s" && (
                 <Form5STab C={C} sty={sty} currentUser={currentUser} lokasiList={lokasiList}
-                  setMaturityAuditEvidence={setMaturityAuditEvidence} isMobile={isMobile} selectedUpt={selectedMaturityUpt} />
+                  setMaturityAuditEvidence={setMaturityAuditEvidence} isMobile={isMobile} selectedUpt={selectedMaturityUpt}
+                  askConfirmDelete={askConfirmDelete} />
               )}
             </div>
             );

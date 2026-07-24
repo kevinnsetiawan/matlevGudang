@@ -816,11 +816,6 @@
   min-height: 104px;
   margin-bottom: 20px;
   padding: 18px 22px;
-  border: 1px solid rgba(147,197,253,.2);
-  border-radius: 14px;
-  background: linear-gradient(135deg, #0b2559 0%, #123a7a 58%, #1d4ed8 100%);
-  color: #fff;
-  box-shadow: 0 12px 28px -20px rgba(15,23,42,.7);
 }
 .maturity-aspect-row {
   border-top: 1px solid transparent;

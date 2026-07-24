@@ -8,7 +8,7 @@ import { OperationsHero } from "./OperationsHero.jsx";
 
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, saveEdit, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const myUpt = getUserUptScope(currentUser);
-  const isMSB = hasRole(currentUser, "MSB","Manager UIT");
+  const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
   // padahal unifiedLoans-nya sendiri tidak pernah benar-benar difilter UPT) — digabung jadi 1

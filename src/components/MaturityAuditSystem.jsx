@@ -88,6 +88,10 @@ export function MaturityAuditEditor({
   const canScoreUPT = isUPT && (status === "DRAFT" || status === "SELF_ASSESSMENT" || status === "REVISION");
   const canScoreUIT = isUIT && status === "REVIEW_UIT";
   const canScorePusat = isPusat && status === "FINAL";
+  // Gate "Kirim Hasil ke UIT": wajib Form 5S sudah disimpan pada bulan berjalan
+  const chk5S = maturityAuditEvidence?.["4.5"]?.find(f => f.id === "k3_5s_chk");
+  const now = new Date();
+  const form5SSavedThisMonth = chk5S?.savedAt && new Date(chk5S.savedAt).getMonth() === now.getMonth() && new Date(chk5S.savedAt).getFullYear() === now.getFullYear();
 
   const scoreBtn = (active, color) => ({
     width: 36,
@@ -161,9 +165,9 @@ export function MaturityAuditEditor({
   const activeAspect = AUDIT_ASPECTS.find(a => a.id === activeAspectId);
 
   return (
-    <div style={{ maxWidth: 1040, margin: "0 auto", paddingBottom: 40 }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40 }}>
       {/* Main Header — banner navy korporat selaras .kpi-banner / .operations-hero--summary-only */}
-      <div className="maturity-hero">
+      <div className="maturity-hero kpi-banner">
         <div style={{ minWidth: 0 }}>
           <span style={{ fontSize: 12, fontWeight: 800, color: "rgba(219,234,254,.85)", textTransform: "uppercase", letterSpacing: "1px" }}>MATLEV AUDIT SYSTEM</span>
           <h2 style={{ fontSize: 18, fontWeight: 900, color: "#fff", margin: "3px 0 0", letterSpacing: "-0.2px" }}>Input Evidence Audit {currentUptName}</h2>
@@ -223,13 +227,13 @@ export function MaturityAuditEditor({
 
           return (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 12, transform: is3D ? "translateZ(8px)" : "none" }}>
+              <div className="approval-actions" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 12, transform: is3D ? "translateZ(8px)" : "none" }}>
                 <div>
                   <span style={{ fontSize: 12, color: C.accent, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>Upload Evidence Wajib</span>
                   <h3 style={{ fontSize: 15, fontWeight: 800, color: C.text, margin: "2px 0" }}>{activeAspect.id} {activeAspect.title}</h3>
                   <span style={{ fontSize: 12, color: C.muted }}>Lengkapi dokumen bukti untuk penentuan level akhir.</span>
                 </div>
-                <button style={{ ...sty.btn("ghost", "sm"), border: `1.5px solid ${C.border}`, borderRadius: 8, background: C.surface, padding: "6px 12px", display: "flex", alignItems: "center", gap: 6, color: C.text }} onClick={() => setActiveAspectId(null)}>
+                <button className="approval-btn--cancel" onClick={() => setActiveAspectId(null)}>
                   <Icons.ChevronLeft /> Kembali ke Daftar Aspek
                 </button>
               </div>
@@ -339,10 +343,10 @@ export function MaturityAuditEditor({
                                 <span style={{ fontWeight: 800, fontSize: 12, color: C.accent, flexShrink: 0 }}>📍 Sub-Bagian Target:</span>
                                 <span style={{ fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{targetFolderPath}</span>
                               </div>
+                              {canScoreUPT && !isAutoFilled && <span style={{ display: "block", marginTop: 6, fontSize: 12, color: C.muted, fontWeight: 800 }}>Upload bukti sementara nonaktif</span>}
                             </div>
                           </div>
 
-                          {canScoreUPT && !isAutoFilled && <span style={{ fontSize: 12, color: C.muted, fontWeight: 800 }}>Upload bukti sementara nonaktif</span>}
                           {canScoreUPT && !isAutoFilled && (
                             <label style={{
                               padding: "8px 18px",
@@ -629,7 +633,7 @@ export function MaturityAuditEditor({
                     key={cat.id}
                     className={isActive ? "is-active" : ""}
                     onClick={() => { setExpandedAspek(cat.id); setAspectPage(1); }}
-                    style={{ "--segment-color": C.accent, flex: 1, justifyContent: "center", whiteSpace: "nowrap" }}
+                    style={{ "--segment-color": C.accent, justifyContent: "center", ...(isMobile ? { flex: "1 1 45%", whiteSpace: "normal" } : { flex: 1, whiteSpace: "nowrap" }) }}
                   >{cat.label}</button>
                 );
               })}
@@ -727,6 +731,7 @@ export function MaturityAuditEditor({
                           display: "flex",
                           alignItems: "center",
                           justifyContent: isMobile ? "space-between" : "flex-end",
+                          flexWrap: isMobile ? "wrap" : "nowrap",
                           gap: 10,
                           marginLeft: isMobile ? 0 : 16,
                           marginTop: isMobile ? 4 : 0,
@@ -782,14 +787,14 @@ export function MaturityAuditEditor({
 
                 <div style={{ padding: "10px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", background: C.bg, borderTop: `1px solid ${C.border}` }}>
                   <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Halaman {aspectPage} dari {totalPages}</span>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div className="approval-actions" style={{ gap: 6 }}>
                     {aspectPage > 1 && (
-                      <button style={{ ...sty.btn("ghost", "sm"), padding: "4px 10px", border: `1.5px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.text, display: "flex", alignItems: "center", gap: 4 }} onClick={() => setAspectPage(p => p - 1)}>
+                      <button className="approval-btn--cancel" onClick={() => setAspectPage(p => p - 1)}>
                         <Icons.ChevronLeft /> Sebelum
                       </button>
                     )}
                     {aspectPage < totalPages && (
-                      <button style={{ ...sty.btn("ghost", "sm"), padding: "4px 10px", border: `1.5px solid ${C.border}`, borderRadius: 6, background: C.surface, color: C.text, display: "flex", alignItems: "center", gap: 4 }} onClick={() => setAspectPage(p => p + 1)}>
+                      <button className="approval-btn--cancel" onClick={() => setAspectPage(p => p + 1)}>
                         Berikut <Icons.ChevronRight />
                       </button>
                     )}
@@ -871,7 +876,8 @@ export function MaturityAuditEditor({
               {canScoreUPT && (
                 <>
                   <button className="approval-btn--cancel" disabled={maturityAuditSaving} onClick={() => saveMaturityAudit(audit, "DRAFT")}>Simpan Draft</button>
-                  <button className="approval-btn--primary" disabled={maturityAuditSaving} onClick={() => saveMaturityAudit(audit, "SELF_ASSESSMENT")}>Kirim Hasil ke UIT</button>
+                  {!form5SSavedThisMonth && <span style={{ fontSize: 11, color: "#dc2626", alignSelf: "center" }}>Isi & simpan Form Pengisian 5S bulan ini dulu sebelum kirim ke UIT.</span>}
+                  <button className="approval-btn--primary" disabled={maturityAuditSaving || !form5SSavedThisMonth} onClick={() => saveMaturityAudit(audit, "SELF_ASSESSMENT")}>Kirim Hasil ke UIT</button>
                 </>
               )}
               {canScoreUIT && (
@@ -975,7 +981,7 @@ const SUBHDR_BG = "#f8fafc";
 const ROW_ALT = "#f8fafc";
 const BORDER_CLR = "#e2e8f0";
 
-export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAuditEvidence, onBack, isMobile, selectedUpt }) {
+export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAuditEvidence, onBack, isMobile, selectedUpt, askConfirmDelete }) {
   const now = new Date();
   const [bulan, setBulan] = useState(now.getMonth());
   const [tahun, setTahun] = useState(now.getFullYear());
@@ -1056,6 +1062,7 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
         auto: true,
         source: "Form Pengisian 5S",
         meta: `Diisi oleh: ${user} | Skor: ${scorePct.toFixed(2)}% (${totalChecked}/${totalItems}) | Disimpan: ${ts}`,
+        savedAt: Date.now(),
       };
 
       const fotoEntries = samplePhotos.map((p, i) => ({
@@ -1103,24 +1110,11 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
   return (
     <div style={{ paddingBottom: 48, fontFamily: "inherit" }}>
       {onBack && (
-        <button
-          onClick={onBack}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "8px 12px",
-            marginBottom: "16px",
-            border: "none",
-            backgroundColor: "transparent",
-            color: C.accent,
-            cursor: "pointer",
-            fontSize: "14px",
-            fontWeight: "600"
-          }}
-        >
-          <Icons.ChevronLeft /> Kembali ke Menu Asesmen
-        </button>
+        <div className="approval-actions" style={{ justifyContent: "flex-start", marginBottom: 16 }}>
+          <button className="approval-btn--cancel" onClick={onBack}>
+            <Icons.ChevronLeft /> Kembali ke Menu Asesmen
+          </button>
+        </div>
       )}
 
       {/* ── Metadata ── */}
@@ -1166,10 +1160,10 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
 
       {/* ── Main Table ── */}
       <div style={{ ...sty.card, padding: 0, overflowX: "auto", marginBottom: 20 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 680, background: C.surface }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 0 : 680, background: C.surface }}>
           <thead>
             <tr>
-              <td colSpan={4} style={{
+              <td colSpan={isMobile ? 3 : 4} style={{
                 background: HEADER_BG, color: "white", textAlign: "center",
                 fontWeight: 900, fontSize: 15, padding: "14px 16px",
                 letterSpacing: "1px", textTransform: "uppercase"
@@ -1179,7 +1173,7 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
             </tr>
             <tr>
               <th style={{ ...thBase, width: 110 }}>5S</th>
-              <th style={{ ...thBase, width: 220 }}>Definition</th>
+              {!isMobile && <th style={{ ...thBase, width: 220 }}>Definition</th>}
               <th style={{ ...thBase }}>Indikator</th>
               <th style={{ ...thBase, width: 90 }}>Checklist</th>
             </tr>
@@ -1209,7 +1203,7 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
                       </div>
                     </td>
                   )}
-                  {ii === 0 && (
+                  {ii === 0 && !isMobile && (
                     <td rowSpan={rows} style={{
                       ...tdBase,
                       fontSize: 12,
@@ -1222,7 +1216,15 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
                       {cat.definition}
                     </td>
                   )}
-                  <td style={{ ...tdBase, color: C.text }}>{ind}</td>
+                  <td style={{ ...tdBase, color: C.text }}>
+                    {ind}
+                    {isMobile && ii === 0 && (
+                      <details style={{ marginTop: 6, fontSize: 12, color: C.muted }}>
+                        <summary style={{ cursor: "pointer", fontWeight: 700 }}>Definisi</summary>
+                        <div style={{ marginTop: 4, fontStyle: "italic" }}>{cat.definition}</div>
+                      </details>
+                    )}
+                  </td>
                   <td style={{ ...tdBase, textAlign: "center" }}>
                     <button
                       onClick={() => toggle(cat.id, ii)}
@@ -1254,7 +1256,7 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
             })}
 
             <tr>
-              <td colSpan={3} style={{
+              <td colSpan={isMobile ? 2 : 3} style={{
                 ...tdBase,
                 textAlign: "center",
                 fontWeight: 800,
@@ -1301,7 +1303,7 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
             background: scorePct >= 80 ? "linear-gradient(90deg, #10b981, #34d399)" : scorePct >= 60 ? "linear-gradient(90deg, #3b82f6, #60a5fa)" : scorePct >= 40 ? "linear-gradient(90deg, #f59e0b, #fbbf24)" : "linear-gradient(90deg, #ef4444, #f87171)",
           }} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
           {FORM_5S.map(cat => {
             const n = cat.indicators.length;
             const c = checks[cat.id].filter(Boolean).length;
@@ -1509,54 +1511,23 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
       )}
 
       {/* ── Action Buttons ── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
-        <button
-          onClick={handleReset}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "1px solid #cbd5e1",
-            background: "white",
-            color: "#475569",
-            fontSize: 12,
-            fontWeight: 800,
-            cursor: "pointer",
-            transition: "all 0.2s ease"
-          }}
-        >
+      <div className="approval-actions" style={{ marginTop: 20 }}>
+        <button className="approval-btn--cancel" onClick={handleReset}>
           ↺ Reset Form
         </button>
-        <button
-          onClick={handlePrint}
-          style={{
-            padding: "8px 16px",
-            borderRadius: 8,
-            border: "1px solid #bfdbfe",
-            background: "#eff6ff",
-            color: "#1d4ed8",
-            fontSize: 12,
-            fontWeight: 800,
-            cursor: "pointer",
-            transition: "all 0.2s ease"
-          }}
-        >
+        <button className="approval-btn--cancel" onClick={handlePrint}>
           🖨️ Cetak / PDF
         </button>
         <button
-          onClick={handleSave}
+          className="approval-btn--primary"
+          onClick={() => (askConfirmDelete ? askConfirmDelete({
+            title: "Simpan Checklist 5S?",
+            message: `Skor checklist saat ini: ${scorePct.toFixed(1)}% (${totalChecked}/${totalItems} indikator). Yakin ingin menyimpan?`,
+            confirmLabel: "Ya, Simpan",
+            onConfirm: handleSave,
+          }) : handleSave())}
           disabled={saved}
-          style={{
-            padding: "8px 20px",
-            borderRadius: 8,
-            border: "none",
-            background: saved ? "#10b981" : "linear-gradient(135deg, #2563eb, #1d4ed8)",
-            color: "white",
-            fontSize: 12,
-            fontWeight: 800,
-            cursor: saved ? "default" : "pointer",
-            boxShadow: saved ? "none" : "0 4px 12px rgba(37,99,235,0.25)",
-            transition: "all 0.2s ease"
-          }}
+          style={saved ? { background: "#10b981", borderColor: "#10b981", boxShadow: "none", cursor: "default" } : undefined}
         >
           {saved ? "✓ Tersimpan!" : "💾 Simpan Checklist"}
         </button>

@@ -1,7 +1,7 @@
 // Komponen AttbTab — dipindah dari App.jsx (refactor Fase 5b).
 import { useState, useEffect, Fragment } from "react";
-import { UIT, UPT } from "../constants.js";
-import { hasRole } from "../lib/roles.js";
+import { UIT } from "../constants.js";
+import { hasRole, getUserUptScope } from "../lib/roles.js";
 import { getLokasiPetaInfo, subGudangKodeMap } from "../lib/masterSync.js";
 import { ATTB_CORE_FIELDS, ATTB_FIELDS_BY_JENIS, ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "../lib/attb.js";
 import * as XLSX from "xlsx";
@@ -63,9 +63,8 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
   async function setAttbLokasi(item, newLokasiId) {
     await saveEdit(item.id, { lokasiId: newLokasiId || null });
   }
-  const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
-  const myUpt = currentUser?.upt || currentUser?.uptName || appUptShort || "";
-  const isMSB = hasRole(currentUser, "MSB","Manager UIT");
+  const myUpt = getUserUptScope(currentUser);
+  const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
   const effectiveUptFilter = isMSB ? myUptSelected : (myUpt || "");
   const canManage = hasRole(currentUser, "ADMIN","TL");
