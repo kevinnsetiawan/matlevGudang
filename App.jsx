@@ -365,8 +365,8 @@ export default function PLNWarehouse() {
   const [lokasiForm, setLokasiForm] = useState({});
   const [lokasiDeleteConfirm, setLokasiDeleteConfirm] = useState(null); // blok gudang (lokasi) yang sedang dikonfirmasi hapus
   const [confirmDialog, setConfirmDialog] = useState(null); // popup konfirmasi hapus generik untuk Master Data lain (Katalog, Satpam, UIT, ULTG, UPT, Gudang): {title, message, warning, confirmLabel, onConfirm}
-  function askConfirmDelete({ title, message, warning, confirmLabel, onConfirm }) {
-    setConfirmDialog({ title: title||"Hapus Data?", message, warning, confirmLabel: confirmLabel||"🗑️ Ya, Hapus", onConfirm });
+  function askConfirmDelete({ title, message, warning, confirmLabel, onConfirm, variant }) {
+    setConfirmDialog({ title: title||"Hapus Data?", message, warning, confirmLabel: confirmLabel||(variant==="warning"?"Mengerti":"🗑️ Ya, Hapus"), onConfirm, variant });
   }
   const [timMutuModal, setTimMutuModal] = useState(null);
   const [timMutuForm, setTimMutuForm] = useState({});
