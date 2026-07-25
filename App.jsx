@@ -49,14 +49,11 @@ import { DataStokTab } from "./src/components/DataStokTab.jsx";
 import { MasterDataTab } from "./src/components/MasterDataTab.jsx";
 import { MaturityAuditEditor, Form5STab } from "./src/components/MaturityAuditSystem.jsx";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "./src/data/auditAspects.js";
-import { TUG5Tab } from "./src/components/TUG5Tab.jsx";
-import { TUG3Tab } from "./src/components/TUG3Tab.jsx";
 import { StockOpnameTab } from "./src/components/StockOpnameTab.jsx";
 import { MigrasiDataTab } from "./src/components/MigrasiDataTab.jsx";
 import { KapasitasGudangImportTab } from "./src/components/KapasitasGudangImportTab.jsx";
 import { BarcodePrintModal } from "./src/components/BarcodePrintModal.jsx";
 import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
-import { TUG15Tab } from "./src/components/TUG15Tab.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
@@ -70,6 +67,8 @@ import { AkunModal, GantiPasswordModal } from "./src/components/AkunModals.jsx";
 import { StockDetailModal, MaturityAssessmentModal, DocPreviewModal } from "./src/components/StockModals.jsx";
 import { Tug5FormModal, Tug98FormModal, Tug10FormModal, Tug3FormModal } from "./src/components/TugFormModals.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
+import { DashboardRingkasanBlock } from "./src/components/DashboardRingkasanBlock.jsx";
+import { TransactionHubTab } from "./src/components/TransactionHubTab.jsx";
 import { DEFAULT_UIT } from "./src/data/masterUit.js";
 import { DEFAULT_UPT_LIST } from "./src/data/masterUpt.js";
 import { DEFAULT_GUDANG, DEFAULT_SATPAM } from "./src/data/masterGudang.js";
@@ -5277,54 +5276,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
 
         {tab==="dashboard" && dashTab==="ringkasan" && (
-          <div className="dashboard-insight-grid">
-            <section className="dashboard-insight-card dashboard-map-card">
-              <div className="dashboard-insight-card__header">
-                <div>
-                  <strong>Peta Wilayah Gudang UPT Surabaya</strong>
-                  <span>{gudangList.filter(g=>g.lat!=null&&g.lng!=null).length} dari {gudangList.length} gudang memiliki koordinat GPS</span>
-                </div>
-                <span className="dashboard-insight-card__badge">Peta operasional</span>
-              </div>
-              <div ref={petaWilayahDivRef} className="dashboard-map-canvas"/>
-              {gudangList.filter(g=>g.lat==null||g.lng==null).length>0 && hasRole(currentUser, "ADMIN") && (
-                <div className="dashboard-insight-card__notice">Ada gudang yang belum memiliki koordinat GPS. Lengkapi melalui Master Data.</div>
-              )}
-            </section>
-
-            {(()=>{
-              const latest = stockCountList[0];
-              return (
-                <section className="dashboard-insight-card dashboard-performance-card">
-                  <div className="dashboard-insight-card__header">
-                    <div>
-                      <strong>Kinerja Stock Count</strong>
-                      <span>Perbandingan SAP dan stok aplikasi</span>
-                    </div>
-                    <button className="dashboard-text-action" onClick={()=>{setTab("opname");setOpnameSubTab("stockCount");}}>Lihat detail</button>
-                  </div>
-                  {!latest ? (
-                    <div className="dashboard-performance-empty">Belum ada sesi Stock Count. Jalankan unggah CSV SAP dari menu Stock Count.</div>
-                  ) : (
-                    <>
-                      <div className="dashboard-performance-score">
-                        <strong style={{color:latest.summary.akuratPct>=90?C.green:latest.summary.akuratPct>=70?C.yellow:C.red}}>{latest.summary.akuratPct}%</strong>
-                        <span>Akurasi sesi terakhir</span>
-                      </div>
-                      <div className="dashboard-performance-meta">
-                        <div><strong>{latest.summary.akuratCount}</strong><span>Item akurat</span></div>
-                        <div><strong>{latest.summary.totalItem}</strong><span>Total item</span></div>
-                        <div><strong>{fmtDate(latest.uploadedAt)}</strong><span>Tanggal sesi</span></div>
-                      </div>
-                      {latest.items.some(i=>i.approval==="PENDING") && (
-                        <div className="dashboard-insight-card__notice">{latest.items.filter(i=>i.approval==="PENDING").length} temuan menunggu approval Asman.</div>
-                      )}
-                    </>
-                  )}
-                </section>
-              );
-            })()}
-          </div>
+          <DashboardRingkasanBlock
+            C={C} currentUser={currentUser} gudangList={gudangList}
+            petaWilayahDivRef={petaWilayahDivRef} stockCountList={stockCountList}
+            setTab={setTab} setOpnameSubTab={setOpnameSubTab}
+          />
         )}
 
                 {/* STOCK OPNAME & STOCK COUNT (digabung 1 menu, dipilih lewat sub-tab sidebar) */}
@@ -5427,144 +5383,25 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* MASTER DATA — Master Katalog, Master Lokasi, Satpam (identity/reference data) */}
         {tab==="master" && <MasterDataTab C={C} sty={sty} currentUser={currentUser} isMobile={isMobile} rolePerms={rolePerms} stockSubTab={stockSubTab} filteredKatalog={filteredKatalog} satpamList={satpamList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList} users={users} gudangList={gudangList} lokasiList={lokasiList} subGudangList={subGudangList} visibleGudangList={visibleGudangList} openAddKatalog={openAddKatalog} openAddSatpam={openAddSatpam} openAddUIT={openAddUIT} openAddGudang={openAddGudang} openAddAkun={openAddAkun} importGudangOpen={importGudangOpen} setImportGudangOpen={setImportGudangOpen} showGudangMaintenance={showGudangMaintenance} setShowGudangMaintenance={setShowGudangMaintenance} importLokasiOpen={importLokasiOpen} setImportLokasiOpen={setImportLokasiOpen} gudangCapacityImports={gudangCapacityImports} setGudangCapacityImports={setGudangCapacityImports} saveToCloud={saveToCloud} showToast={showToast} backfillGudangCoordFromCapacity={backfillGudangCoordFromCapacity} dedupeGudangDanSubGudang={dedupeGudangDanSubGudang} isKodeDuplicateInSubGudang={isKodeDuplicateInSubGudang} setLokasiList={setLokasiList} syncLokasi={syncLokasi} maraUploadProgress={maraUploadProgress} maraUploadLoading={maraUploadLoading} uploadMaraToDB={uploadMaraToDB} katalogList={katalogList} katalogSearch={katalogSearch} setKatalogSearch={setKatalogSearch} katalogFilterBelumMara={katalogFilterBelumMara} setKatalogFilterBelumMara={setKatalogFilterBelumMara} setBarcodePrintOpen={setBarcodePrintOpen} pagedKatalog={pagedKatalog} stocks={stocks} openEditKatalog={openEditKatalog} deleteKatalog={deleteKatalog} katalogPageSize={katalogPageSize} setKatalogPageSize={setKatalogPageSize} katalogPageClamped={katalogPageClamped} setKatalogPage={setKatalogPage} katalogTotalPages={katalogTotalPages} openEditSatpam={openEditSatpam} deleteSatpam={deleteSatpam} openEditTimMutu={openEditTimMutu} orgSearch={orgSearch} setOrgSearch={setOrgSearch} collapsedUitIds={collapsedUitIds} setCollapsedUitIds={setCollapsedUitIds} openAddUPT={openAddUPT} openEditUIT={openEditUIT} deleteUIT={deleteUIT} openAddULTG={openAddULTG} openEditUPT={openEditUPT} deleteUPT={deleteUPT} openEditULTG={openEditULTG} deleteULTG={deleteULTG} expandedGudangId={expandedGudangId} setExpandedGudangId={setExpandedGudangId} openEditGudang={openEditGudang} deleteGudang={deleteGudang} showGudangDenahTools={showGudangDenahTools} setShowGudangDenahTools={setShowGudangDenahTools} uploadDenahGudang={uploadDenahGudang} denahLoading={denahLoading} mapConfigGudangId={mapConfigGudangId} setMapConfigGudangId={setMapConfigGudangId} pendingMapLokasi={pendingMapLokasi} setPendingMapLokasi={setPendingMapLokasi} manualAddMode={manualAddMode} setManualAddMode={setManualAddMode} ocrSuggestGudangId={ocrSuggestGudangId} setOcrSuggestGudangId={setOcrSuggestGudangId} ocrSuggestSubGudangId={ocrSuggestSubGudangId} setOcrSuggestSubGudangId={setOcrSuggestSubGudangId} ocrSuggestions={ocrSuggestions} setOcrSuggestions={setOcrSuggestions} assignLokasiKoordinat={assignLokasiKoordinat} suggestKodeFromOcr={suggestKodeFromOcr} expandedSubGudangToolsIds={expandedSubGudangToolsIds} setExpandedSubGudangToolsIds={setExpandedSubGudangToolsIds} uploadDenahSubGudang={uploadDenahSubGudang} denahSubLoading={denahSubLoading} mapConfigSubGudangId={mapConfigSubGudangId} setMapConfigSubGudangId={setMapConfigSubGudangId} pendingMapLokasiSub={pendingMapLokasiSub} setPendingMapLokasiSub={setPendingMapLokasiSub} manualAddModeSub={manualAddModeSub} setManualAddModeSub={setManualAddModeSub} assignLokasiKoordinatSub={assignLokasiKoordinatSub} openEditLokasi={openEditLokasi} requestDeleteLokasi={requestDeleteLokasi} selectedSubGudangId={selectedSubGudangId} setSelectedSubGudangId={setSelectedSubGudangId} openEditAkun={openEditAkun} txns={txns} migratedTug15History={migratedTug15History} setMigratedTug15History={setMigratedTug15History} migrasiPendingReview={migrasiPendingReview} setMigrasiPendingReview={setMigrasiPendingReview} maraReference={maraReference} setMaraReference={setMaraReference} setStocks={setStocks} setKatalogList={setKatalogList} setTxns={setTxns} reloadRolePerms={reloadRolePerms} />}
         {tab==="transaction" && (
-          <div className="workspace-page tug-page">
-            <section className={`kpi-banner tug-summary-banner${tugSubTab==="TUG15"?" is-context-only":""}`} aria-label="Ringkasan transaksi TUG">
-              <div className="tug-summary-banner__context">
-                <div className="tug-summary-banner__copy">
-                  <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
-                  <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
-                  <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
-                </div>
-              </div>
-              {tugSubTab!=="TUG15" && (
-                <div className="tug-summary-banner__metrics">
-                  {activeTugSummary.map(metric=>(
-                    <div key={metric.label} className={`kpi-banner__item${metric.cls?" "+metric.cls:""}`}>
-                      <strong>{metric.val}</strong><span>{metric.label}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
-              <div className="tug-process-tabs__header">
-                <strong>Pilih jenis transaksi</strong>
-                <span>Klik kartu untuk membuka proses yang dibutuhkan</span>
-              </div>
-              <div className="tug-process-tabs__options" role="tablist" aria-label="Pilih proses TUG">
-                {(tugGroup==="penerimaan" ? ["TUG3","TUG10"]
-                  : tugGroup==="pengeluaran" ? ["TUG9","TUG8"]
-                  : tugGroup==="laporan" ? ["TUG15"]
-                  : ["TUG5"]
-                ).map(id=>{
-                  const u = TUG_UI[id]||{}; const on = tugSubTab===id;
-                  return (
-                  <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
-                    <span>{u.code||id}</span>
-                    <strong>{u.chip||id}</strong>
-                    <small>{on?"Sedang dibuka":"Klik untuk buka"}</small>
-                  </button>
-                  );
-                })}
-              </div>
-            </section>
-            {(can(currentUser, "aksi.buatTransaksi", rolePerms) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
-              <div className="tug-action-row">
-                <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong></div>
-                <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>
-              </div>
-            )}
-            <div className="tug-status-filter">
-              <span>Status dokumen</span>
-              {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
-                <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
-              ))}
-            </div>
-
-            {tugSubTab==="TUG3" ? (
-              <TUG3Tab
-                txns={txns.filter(t=>t.docType==="TUG3")}
-                filterStatus={filterStatus}
-                users={users} sty={sty} C={C} currentUser={currentUser}
-                katalogList={katalogList} lokasiList={lokasiList} timMutuList={timMutuList}
-                approveTUG3_TL={approveTUG3_TL} rejectTUG3_TL={rejectTUG3_TL}
-                submitTUG4Form={submitTUG4Form} approveTUG4_Manager={approveTUG4_Manager} rejectTUG4_Manager={rejectTUG4_Manager}
-                submitTUG3FinalLampiran={submitTUG3FinalLampiran} approveTUG3Final_Asman={approveTUG3Final_Asman} rejectTUG3Final_Asman={rejectTUG3Final_Asman}
-                handleImg={handleImg} setDocPreview={setDocPreview}
-              />
-            ) : tugSubTab==="TUG5" ? (
-              <TUG5Tab
-                txns={txns}
-                filterStatus={filterStatus}
-                users={users} sty={sty} C={C} currentUser={currentUser}
-                katalogList={katalogList} uitList={uitList} uptList={uptList}
-                approveTUG5_Asman={approveTUG5_Asman} rejectTUG5_Asman={rejectTUG5_Asman}
-                approveTUG5_Manager={approveTUG5_Manager} rejectTUG5_Manager={rejectTUG5_Manager}
-                submitTUG7_AdminUIT={submitTUG7_AdminUIT}
-                approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik}
-                konfirmasiDraftTUG8={konfirmasiDraftTUG8}
-                setDocPreview={setDocPreview}
-                ultgList={ultgList}
-                approveTUG5_MgrULTG={approveTUG5_MgrULTG} rejectTUG5_MgrULTG={rejectTUG5_MgrULTG}
-                adoptTUG5ULTG={adoptTUG5ULTG} openDraftTug9={openDraftTug9}
-                isMobile={isMobile}
-              />
-            ) : tugSubTab==="TUG15" ? (
-              <TUG15Tab
-                txns={txns} katalogList={katalogList} stocks={stocks}
-                sty={sty} C={C}
-                filter={tug15Filter} setFilter={setTug15Filter}
-                lokasiList={lokasiList}
-              />
-            ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {filteredTxns.filter(t=>t.docType===tugSubTab).length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada transaksi {tugSubTab.replace("TUG","TUG-")}</div>}
-              {filteredTxns.filter(t=>t.docType===tugSubTab).map(t=>{
-                const creator = users.find(u=>u.id===t.createdBy)||{};
-                const approver = users.find(u=>u.id===t.approvedBy)||{};
-                const dKey = t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":"tug10";
-                const lokTujuan = lokasiList.find(l=>l.id===t.lokasiTujuanId);
-                return (
-                  <div key={t.id} style={{...sty.card}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                      <div>
-                        <div style={{fontWeight:800,fontSize:14}}>{t.namaPekerjaan}</div>
-                        <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>{t.docNumbers[dKey]}</div>
-                      </div>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        {t.legacyImport && <span title="Diimpor dari histori lama" style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#ede9fe",color:"#6d28d9"}}>🕘 Legacy</span>}
-                        <span style={sty.statusBadge(t.status)}>{t.status}</span>
-                      </div>
-                    </div>
-                    <div style={{fontSize:12,color:C.muted,display:"flex",gap:16,flexWrap:"wrap",marginBottom:8}}>
-                      <span>📍 {t.lokasiPekerjaan}</span>
-                      <span>📅 {fmtDate(t.createdAt)}</span>
-                      <span>👷 {creator.name||"-"} ({ROLES[creator.role]})</span>
-                      {t.docType==="TUG8" && <span>🏭 Unit Tujuan: {t.unitTujuan}</span>}
-                      {(t.docType==="TUG9"||t.docType==="TUG8") && <span>🏢 Penerima: {t.penerimaNama} ({t.penerimaUnit})</span>}
-                      {t.docType==="TUG10" && <span>📍 Disimpan di: {lokTujuan?.kode||"-"}</span>}
-                      {t.docType==="TUG10" && <span>📤 Menyerahkan: {t.menyerahkanNama}</span>}
-                    </div>
-                    <div style={{background:"#f9fafb",borderRadius:8,padding:8,marginBottom:8}}>
-                      {t.docType!=="TUG10" ? t.stockItems.map((si,idx)=>{
-                        const stock = enrichedStocks.find(s=>s.id===si.stockId);
-                        return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {stock?.name||"?"} <b>x{si.qty}</b> {stock?.unit} <span style={{fontSize:12,color:C.muted}}>@ {stock?.lokasi}</span> <span style={sty.jenisBadge(stock?.jenisBarang)}>{stock?.jenisBarang}</span></div>;
-                      }) : t.stockItems.map((si,idx)=>{
-                        const namaBarang = si.katalogMode==="existing" ? (katalogList.find(k=>k.id===si.katalogId)?.name||"?") : si.namaBaru;
-                        const bs = statusMaterialBadgeStyle(si.statusMaterial);
-                        return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {namaBarang} <b>x{si.qty}</b> <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:bs.bg,color:bs.fg,fontWeight:700}}>{si.statusMaterial}</span>{si.noSeri && <span style={{fontSize:12,color:C.muted}}> • SN: {si.noSeri}</span>}</div>;
-                      })}
-                    </div>
-                    {t.status==="APPROVED" && <div style={{fontSize:12,color:C.green,marginBottom:8}}>✅ Disetujui oleh {approver.name} ({ROLES[approver.role]}) • {fmtDate(t.approvedAt)} {t.asmanAutoApproved && "• Asman Konstruksi otomatis ikut menyetujui"}</div>}
-                    {t.status==="REJECTED" && <div style={{fontSize:12,color:C.red,marginBottom:8}}>❌ Ditolak: {t.rejectReason}</div>}
-                    {t.status==="APPROVED" && <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat & Unduh Dokumen {t.docType.replace("TUG","TUG-")}</button>}
-                  </div>
-                );
-              })}
-            </div>
-            )}
-          </div>
+          <TransactionHubTab
+            C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
+            TUG_UI={TUG_UI} TUG_GROUP_UI={TUG_GROUP_UI}
+            tugGroup={tugGroup} tugSubTab={tugSubTab} setTugSubTab={setTugSubTab}
+            activeTugSummary={activeTugSummary} rolePerms={rolePerms}
+            filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+            openNewTxn={openNewTxn}
+            txns={txns} filteredTxns={filteredTxns} users={users} enrichedStocks={enrichedStocks} stocks={stocks}
+            katalogList={katalogList} lokasiList={lokasiList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
+            tug15Filter={tug15Filter} setTug15Filter={setTug15Filter}
+            setDocPreview={setDocPreview} handleImg={handleImg}
+            approveTUG3_TL={approveTUG3_TL} rejectTUG3_TL={rejectTUG3_TL}
+            submitTUG4Form={submitTUG4Form} approveTUG4_Manager={approveTUG4_Manager} rejectTUG4_Manager={rejectTUG4_Manager}
+            submitTUG3FinalLampiran={submitTUG3FinalLampiran} approveTUG3Final_Asman={approveTUG3Final_Asman} rejectTUG3Final_Asman={rejectTUG3Final_Asman}
+            approveTUG5_Asman={approveTUG5_Asman} rejectTUG5_Asman={rejectTUG5_Asman} approveTUG5_Manager={approveTUG5_Manager} rejectTUG5_Manager={rejectTUG5_Manager}
+            submitTUG7_AdminUIT={submitTUG7_AdminUIT} approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik}
+            konfirmasiDraftTUG8={konfirmasiDraftTUG8} approveTUG5_MgrULTG={approveTUG5_MgrULTG} rejectTUG5_MgrULTG={rejectTUG5_MgrULTG}
+            adoptTUG5ULTG={adoptTUG5ULTG} openDraftTug9={openDraftTug9}
+          />
         )}
 
         {tab==="heavyEquipment" && (
