@@ -13,7 +13,7 @@ Aplikasi manajemen gudang PLN (React + Vite 4 + Supabase, deploy Vercel).
 - Supabase project `tadxodrzoquugnsyejld`. Perubahan skema = proposal dulu, eksekusi hanya setelah konfirmasi user.
 - Tabel `wa_sync_status` MASIH dipakai bot Telegram — jangan di-drop meski fitur WA sudah dihapus.
 - Tailwind v4 via `@tailwindcss/postcss` (bukan plugin Vite), preflight OFF; interaktivitas via CSS global element-selector, bukan className.
-- `App.jsx` masih besar (~7.800 baris); split internal `PLNWarehouse` DITUNDA menunggu keputusan user.
+- `App.jsx` sudah di-refactor (2026-07-25, ~9.320→~5.539 baris) — semua JSX per-tab/modal yang aman dipisah sudah diekstrak ke `src/components/*.jsx` (murni relokasi, prop-drilling dari `PLNWarehouse()`, tidak ada logic yang berubah). Sisa ~5.000 baris di `PLNWarehouse()` adalah state (`useState`) + handler function — user MEMUTUSKAN CUKUP di titik ini, TIDAK melanjutkan ke ekstraksi logic/handler (custom hooks) karena risikonya lebih tinggi tanpa verifikasi visual browser. Kalau nanti mau lanjut ke situ, itu keputusan terpisah, bukan otomatis lanjutan dari sesi ini.
 - Alur produk review-first / persetujuan manual; jangan auto-membuat aksi turunan.
 
 ## Status pekerjaan
