@@ -2,12 +2,12 @@
     "claudeCode.useTerminal": true,
     "sqltools.connections": [
         {
-            "name": "Supabase WARNOTO (pooler)",
+            "name": "WARNOTO self-host (via SSH tunnel)",
             "driver": "PostgreSQL",
-            "server": "aws-0-<region>.pooler.supabase.com",
-            "port": 6543,
+            "server": "localhost",
+            "port": 5432,
             "database": "postgres",
-            "username": "postgres.tadxodrzoquugnsyejld",
+            "username": "postgres",
             "askForPassword": true
         }
     ]
