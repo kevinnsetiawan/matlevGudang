@@ -25,8 +25,11 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 
 Rules:
 - **Awal sesi/project**: sebelum mulai kerja, baca dulu graphify (mis. `graphify query "<ringkasan project>"` atau GRAPH_REPORT.md) supaya orientasi konsisten dan terstruktur, apapun model/vendor yang sedang dipakai (Fable/Opus/Sonnet/Codex).
-- Nanya soal codebase → `graphify query "<pertanyaan>"` — lebih hemat daripada grep manual, hasilnya subgraph relevan saja.
-- Nanya relasi antar dua bagian kode → `graphify path "<A>" "<B>"`. Untuk konsep spesifik → `graphify explain "<concept>"`.
-- Jika graphify-out/wiki/index.md ada, pakai itu untuk navigasi luas alih-alih baca source mentah.
-- Baca graphify-out/GRAPH_REPORT.md hanya untuk review arsitektur luas atau saat query/path/explain belum cukup.
 - **Setelah edit kode** → jalankan `graphify update .` supaya graph tetap sinkron (AST-only, tidak kena biaya API).
+
+Untuk pertanyaan tentang WARNOTO project, pilih sesuai skala:
+- **Relasi antar dua bagian kode** → `graphify path "<A>" "<B>"`.
+- **Pahami satu konsep/modul** → `graphify explain "<konsep>"`.
+- **Pertanyaan codebase umum** → `graphify query "<pertanyaan>"` — lebih hemat daripada grep manual, hasilnya subgraph relevan saja.
+- **Navigasi arsitektur luas** → buka `graphify-out/wiki/index.md` dulu (kalau ada) sebelum baca source mentah.
+- **Review arsitektur menyeluruh** → baca `graphify-out/GRAPH_REPORT.md`, dipakai kalau query/path/explain belum cukup.
