@@ -45,6 +45,7 @@ import { ImportLokasiModal, downloadLokasiTemplate } from "./src/components/Impo
 import { PermMatrixPage } from "./src/components/PermMatrixPage.jsx";
 import { HeavyEquipmentTabV2 } from "./src/components/HeavyEquipmentTabV2.jsx";
 import { AttbTab } from "./src/components/AttbTab.jsx";
+import { DataStokTab } from "./src/components/DataStokTab.jsx";
 import { MaturityAuditEditor, Form5STab } from "./src/components/MaturityAuditSystem.jsx";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "./src/data/auditAspects.js";
 import { TUG5Tab } from "./src/components/TUG5Tab.jsx";
@@ -5400,281 +5401,26 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* STOCK */}
         {/* DATA STOK — view of operational stock (read-focused, with admin edit) */}
         {tab==="stock" && (
-          <div className="workspace-page stock-page">
-            <div className="workspace-filter-panel">
-              <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
-                <div style={{position:"relative",flex:1}}>
-                  <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama, kode, no. katalog, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
-                  {search && (
-                    <button
-                      onClick={()=>setSearch("")}
-                      title="Hapus pencarian"
-                      style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
-                    >✕</button>
-                  )}
-                </div>
-                <button type="button" title="Cari barang berdasarkan foto" onClick={()=>{setPhotoSearchImg(null);setPhotoSearchOpen(true);}}
-                  style={{...sty.btn("primary"),whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
-                  📷{!isMobile && <span>Cari Foto</span>}
-                </button>
-              </div>
-              <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
-                <option value="ALL">Semua Jenis</option>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}
-              </select>
-              <div className="workspace-context-row">
-                <span><strong>{filteredStocks.length}</strong> baris stok</span>
-                <span>Barang × lokasi</span>
-                {stocks.filter(s=>!s.lokasiId).length>0 && <span className="is-warning">{stocks.filter(s=>!s.lokasiId).length} material belum memiliki lokasi</span>}
-              </div>
-              {photoSearchResults && (
-                <div style={{...sty.card,padding:12}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:800,fontSize:13}}>{photoSearchResultMode==="nameplate"?"🔖":"📷"} Hasil pencarian foto — {photoSearchResults.length} barang {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
-                    <button style={sty.btn("ghost","sm")} onClick={()=>setPhotoSearchResults(null)}>✕ Reset</button>
-                  </div>
-                  {photoSearchResultMode==="nameplate" && photoSearchOcrText && (
-                    <div style={{fontSize:12,color:C.muted,background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 8px",marginBottom:10,whiteSpace:"pre-wrap",maxHeight:60,overflowY:"auto"}}>
-                      <b>Teks nameplate terbaca:</b> {photoSearchOcrText}
-                    </div>
-                  )}
-                  {photoSearchResults.length===0 ? (
-                    <div style={{fontSize:12,color:C.muted}}>{photoSearchResultMode==="nameplate"?"Tidak ada katalog yang cocok dengan teks nameplate. Pastikan nomor katalog/type terbaca jelas, atau coba foto lebih dekat & fokus.":"Tidak ada barang dengan kemiripan ≥75%. Coba foto lain atau sudut/pencahayaan berbeda."}</div>
-                  ) : (
-                    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
-                      {photoSearchResults.map(r=>{
-                        const est = enrichedStocks.find(s=>String(s.katalog)===String(r.katalog));
-                        const thumb = resolveStockPhotoUrl(est?.fotoKeseluruhan || est?.img);
-                        const pct = Math.round((r.similarity||0)*100);
-                        return (
-                          <div key={r.katalog} onClick={()=>est&&setStockDetailId(est.id)} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:10,cursor:est?"pointer":"default",display:"flex",gap:10,alignItems:"center",background:C.surface}}>
-                            {thumb ? <img src={thumb} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0,border:`1px solid ${C.border}`}}/> : <div style={{width:54,height:54,borderRadius:8,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>📦</div>}
-                            <div style={{minWidth:0,flex:1}}>
-                              <div style={{fontWeight:700,fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{est?.name||"(tidak ada di Data Stok)"}</div>
-                              <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>📑 {r.katalog}</div>
-                              <div style={{fontSize:12,fontWeight:800,color:pct>=80?C.green:pct>=70?"#d97706":C.muted,marginTop:2}}>{pct}% {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            {katalogList.length===0 && (
-              <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,marginBottom:16}}>
-                ℹ️ Belum ada Master Katalog. Tambahkan jenis barang dulu di menu "Master Data" → "Master Katalog" sebelum membuat Data Stok.
-              </div>
-            )}
-            {/* Tampilan tabel horizontal (data & fungsi tidak berubah, cuma cara
-                merendernya — semua handler/state sama persis dengan versi kartu
-                sebelumnya). */}
-            <div className="mobile-card-table stock-card-table" style={{...sty.card,padding:0,overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:980}}>
-                <thead>
-                  <tr style={{background:C.sidebar,color:"white"}}>
-                    {["Foto","Nama Barang","Kategori","Qty","Gudang","Blok","Harga","Status","Aksi"].map(h=>(
-                      <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"||h==="Foto"?"center":"left",whiteSpace:"nowrap",fontSize:12}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedStocks.map(st=>{
-                    const isLow = st.jenisBarang!=="Non-Stock" && st.qty<=st.minQty;
-                    const noLokasi = !st.lokasiId;
-                    const lok = lokasiList.find(l=>l.id===st.lokasiId);
-                    // Fallback ke st.gudangId (declared, independen dari Blok) kalau belum ada Blok
-                    // tersimpan — ditemukan 2026-07-10 (sama seperti bug ATTB): kalau Gudang yang
-                    // dipilih ternyata tidak punya Blok terdaftar sama sekali, dropdown Blok kosong dan
-                    // pilihan Gudang (yang tadinya cuma filter lokal, tidak pernah disimpan) hilang lagi
-                    // tiap render ulang. Sekarang gudangId disimpan langsung ke stok begitu dipilih.
-                    const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : (st.gudangId ? gudangList.find(g=>g.id===st.gudangId) : null);
-                    const effGudangIdForBlok = stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? "";
-                    const blokOptionsForStock = lokasiList.filter(l=>l.gudangId===effGudangIdForBlok);
-                    const petaInfo = getLokasiPetaInfo(lok, gdg, subGudangList);
-                    const canLihatPeta = !!petaInfo;
-                    const hasDenah = !!(gdg?.denahImageData || (lok?.subGudangId && subGudangList.find(s=>s.id===lok.subGudangId)?.denahImageData));
-                    return (
-                      <tr className="mobile-card-table__row" key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
-                        <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.fotoKeseluruhan){e.stopPropagation(); setLightboxImg(resolveStockPhotoUrl(st.fotoKeseluruhan));} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.fotoKeseluruhan?"zoom-in":"default"}}>
-                          {st.fotoKeseluruhan ? <img src={resolveStockPhotoUrl(st.fotoKeseluruhan)} alt={st.name} style={{width:48,height:48,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
-                            : <div style={{width:48,height:48,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
-                        </td>
-                        <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200}}>
-                          <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
-                          <div style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:1}}>📑 {st.katalog||"-"}</div>
-                          {st.deletePending && <div style={{fontSize:12,color:"#dc2626",fontWeight:700,marginTop:2}}>⏳ Menunggu approval Hapus</div>}
-                          {st.editPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Ada perubahan menunggu approval TL</div>}
-                        </td>
-                        <td data-label="Kategori" style={{padding:"8px 10px"}}>
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap",maxWidth:160}}>
-                            <span style={sty.jenisBadge(st.jenisBarang)}>{st.jenisBarang}</span>
-                            <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:"#f3f4f6",color:C.muted}}>{st.category}</span>
-                          </div>
-                        </td>
-                        <td data-label="Qty" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
-                          {st.jenisBarang==="Non-Stock"
-                            ? <span style={{color:C.muted}}>Project-Based</span>
-                            : <div>
-                                <span style={{fontWeight:700,color:isLow?C.red:C.green}}>{fmtNum(st.qty)} {st.unit}</span>
-                                <div style={{fontSize:12,color:C.muted}}>Min {fmtNum(st.minQty)} {st.unit}</div>
-                              </div>}
-                          {isLow && <div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
-                        </td>
-                        <td data-label="Gudang" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
-                          {hasRole(currentUser, "ADMIN","TL") ? (
-                            <select
-                              value={stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? ""}
-                              style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8}}
-                              onChange={async e=>{
-                                const v = e.target.value;
-                                setStockGudangFilter(prev=>({...prev,[st.id]:v}));
-                                // Simpan langsung (bukan cuma filter lokal) supaya tidak hilang kalau
-                                // Gudang ini ternyata tidak punya Blok terdaftar sama sekali.
-                                const ns = stocks.map(s=>s.id===st.id?{...s, gudangId: v||null}:s);
-                                setStocks(ns);
-                                await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===st.id)});
-                              }}>
-                              <option value="">-- Pilih Gudang --</option>
-                              {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
-                            </select>
-                          ) : (
-                            <span style={{color:C.text}}>{gdg?.kode||gdg?.nama||"—"}</span>
-                          )}
-                        </td>
-                        <td data-label="Blok" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:150}}>
-                          {hasRole(currentUser, "ADMIN") ? (
-                            <>
-                              <select
-                                value={st.lokasiId||""}
-                                disabled={st.lokasiMovePending}
-                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:st.lokasiMovePending?"#f3f4f6":noLokasi?"#fffbeb":"#f9fafb"}}
-                                onChange={async e=>{
-                                  const newLokasiId = e.target.value;
-                                  const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  // BUG DITEMUKAN 2026-07-04: kalau baris ini belum punya lokasi sama
-                                  // sekali (lok undefined, mis. baris hasil "Kosongkan" dari Migrasi
-                                  // Data), lok?.gudangId jadi undefined -> null, dan gudangId lokasi
-                                  // manapun yang dipilih Admin PASTI beda dari null -> pindahGudang
-                                  // SELALU true, jadi pengisian PERTAMA KALI ke baris kosong dianggap
-                                  // "pindah gudang" dan wajib approval TL — padahal tidak ada gudang
-                                  // lama yang benar-benar dipindah dari mana pun. Fix: hanya anggap
-                                  // "pindah gudang" (butuh approval) kalau memang SUDAH ada lokasi
-                                  // sebelumnya (lok ada isinya).
-                                  const pindahGudang = !!lok && (lokSel?.gudangId||null) !== (lok?.gudangId||null);
-                                  let updated, msg;
-                                  if (pindahGudang) {
-                                    // Pindah ke Gudang lain wajib approval TL.
-                                    updated = {...st, lokasiMovePending:true, lokasiMoveApprover:"TL", pendingLokasiId:newLokasiId, pendingLokasiKode:lokSel?.kode||"-", moveRequestedBy:currentUser.id, moveRequestedAt:Date.now()};
-                                    msg = `📨 Pemindahan ${st.name} ke Gudang lain (${lokSel?.kode||"-"}) diajukan! Menunggu approval TL.`;
-                                  } else {
-                                    // Pindah blok dalam Gudang yang sama: Admin langsung, tanpa approval.
-                                    updated = {...st, lokasiId:newLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, lokasiMoveApprover:null, pendingLokasiId:null, pendingLokasiKode:null};
-                                    msg = `📍 Blok ${st.name} → ${lokSel?.kode||"-"}`;
-                                  }
-                                  const ns = stocks.map(s=>s.id===st.id?updated:s);
-                                  setStocks(ns);
-                                  // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).
-                                  await saveToCloud({stocks:ns}, {stocksChangedRows: [updated]});
-                                  showToast(msg);
-                                }}>
-                                <option value="">-- Pilih Blok --</option>
-                                {blokOptionsForStock.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
-                              </select>
-                              {effGudangIdForBlok && blokOptionsForStock.length===0 && <div style={{fontSize:12,color:"#b45309",fontStyle:"italic",marginTop:2}}>⚠️ Belum ada Blok terdaftar di Gudang ini — pilihan Gudang tetap tersimpan.</div>}
-                              {st.lokasiMovePending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"TL"} → {st.pendingLokasiKode}</div>}
-                            </>
-                          ) : hasRole(currentUser, "TL") ? (
-                            <>
-                              <select
-                                value={st.lokasiId||""}
-                                disabled={st.lokasiMovePending}
-                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:st.lokasiMovePending?"#f3f4f6":noLokasi?"#fffbeb":"#f9fafb"}}
-                                onChange={async e=>{
-                                  const newLokasiId = e.target.value;
-                                  const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  // TL yang pindahkan stok yang SUDAH punya lokasi ke Gudang lain wajib
-                                  // approval Asman (TL sendiri yang biasanya approve pemindahan Admin,
-                                  // jadi pemindahan lintas Gudang oleh TL butuh persetujuan Asman UPT).
-                                  // Isi lokasi PERTAMA KALI (lok kosong) tetap langsung tanpa approval,
-                                  // sama seperti pindah blok dalam Gudang yang sama.
-                                  const pindahGudang = !!lok && (lokSel?.gudangId||null) !== (lok?.gudangId||null);
-                                  let updated, msg;
-                                  if (pindahGudang) {
-                                    updated = {...st, lokasiMovePending:true, lokasiMoveApprover:"ASMAN", pendingLokasiId:newLokasiId, pendingLokasiKode:lokSel?.kode||"-", moveRequestedBy:currentUser.id, moveRequestedAt:Date.now()};
-                                    msg = `📨 Pemindahan ${st.name} ke Gudang lain (${lokSel?.kode||"-"}) diajukan! Menunggu approval Asman.`;
-                                  } else {
-                                    updated = {...st, lokasiId:newLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, lokasiMoveApprover:null, pendingLokasiId:null, pendingLokasiKode:null};
-                                    msg = `📍 Blok ${st.name} → ${lokSel?.kode||"-"}`;
-                                  }
-                                  const ns = stocks.map(s=>s.id===st.id?updated:s);
-                                  setStocks(ns);
-                                  // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).
-                                  await saveToCloud({stocks:ns}, {stocksChangedRows: [updated]});
-                                  showToast(msg);
-                                }}>
-                                <option value="">-- Pilih Blok --</option>
-                                {blokOptionsForStock.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
-                              </select>
-                              {effGudangIdForBlok && blokOptionsForStock.length===0 && <div style={{fontSize:12,color:"#b45309",fontStyle:"italic",marginTop:2}}>⚠️ Belum ada Blok terdaftar di Gudang ini — pilihan Gudang tetap tersimpan.</div>}
-                              {st.lokasiMovePending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"Asman"} → {st.pendingLokasiKode}</div>}
-                            </>
-                          ) : (
-                            <span style={{color:noLokasi?"#f59e0b":C.text,fontWeight:noLokasi?700:400}}>{noLokasi?"⚠️ Belum diisi":st.lokasi||"—"}</span>
-                          )}
-                        </td>
-                        <td data-label="Harga" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>Rp {fmtNum(st.price)}</td>
-                        <td data-label="Status" style={{padding:"8px 10px"}}>
-                          {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
-                        </td>
-                        <td data-label="Aksi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
-                          <div className="table-actions">
-                            {hasRole(currentUser, "ADMIN") && (
-                              <>
-                                <button className="table-action-button" title="Edit data stok" disabled={st.deletePending} onClick={()=>openEditStock(st)}>Edit</button>
-                                <button className="table-action-button is-danger" title="Hapus data stok" disabled={st.deletePending} onClick={()=>deleteStock(st.id)}>Hapus</button>
-                              </>
-                            )}
-                            <button className="table-action-button is-icon" title="Kartu Gantung TUG-2"
-                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}>🏷</button>
-                            <button
-                              className="table-action-button is-icon"
-                              title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data → Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
-                              style={{color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
-                              onClick={()=>{
-                                if (canLihatPeta) { setPetaMiniDetail({stock:st, lokasi:lok, gudang:gdg, petaInfo}); return; }
-                                if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
-                                if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data → Master Gudang.`,"error"); return; }
-                                showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data → Master Gudang.`,"error");
-                              }}>📍</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filteredStocks.length===0 && (
-                    <tr><td colSpan={9} style={{padding:30,textAlign:"center",color:C.muted}}>Tidak ada data stok untuk filter ini.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {filteredStocks.length > 0 && (
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12,flexWrap:"wrap",gap:10}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.muted}}>
-                  Tampilkan
-                  <select style={{...sty.select,width:"auto",padding:"4px 8px",minHeight:"unset",fontSize:12}} value={stockPageSize} onChange={e=>setStockPageSize(Number(e.target.value))}>
-                    {[10,20,50].map(n=><option key={n} value={n}>{n}</option>)}
-                  </select>
-                  item per halaman — {filteredStocks.length} total
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:6}}>
-                  <button style={{...sty.btn("ghost","sm")}} disabled={stockPageClamped<=1} onClick={()=>setStockPage(p=>Math.max(1,p-1))}>← Sebelumnya</button>
-                  <span style={{fontSize:12,color:C.muted,padding:"0 6px"}}>Halaman {stockPageClamped} / {stockTotalPages}</span>
-                  <button style={{...sty.btn("ghost","sm")}} disabled={stockPageClamped>=stockTotalPages} onClick={()=>setStockPage(p=>Math.min(stockTotalPages,p+1))}>Berikutnya →</button>
-                </div>
-              </div>
-            )}
-          </div>
+          <DataStokTab
+            C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
+            search={search} setSearch={setSearch}
+            setPhotoSearchImg={setPhotoSearchImg} setPhotoSearchOpen={setPhotoSearchOpen}
+            filterJenis={filterJenis} setFilterJenis={setFilterJenis}
+            filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
+            photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}
+            photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
+            enrichedStocks={enrichedStocks} pagedStocks={pagedStocks}
+            setStockDetailId={setStockDetailId}
+            katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList}
+            subGudangList={subGudangList} visibleGudangList={visibleGudangList}
+            stockGudangFilter={stockGudangFilter} setStockGudangFilter={setStockGudangFilter}
+            setPendingFoto={setPendingFoto} setLightboxImg={setLightboxImg}
+            saveToCloud={saveToCloud} showToast={showToast}
+            openEditStock={openEditStock} deleteStock={deleteStock}
+            setKartuGantungDetail={setKartuGantungDetail} setPetaMiniDetail={setPetaMiniDetail}
+            stockPageSize={stockPageSize} setStockPageSize={setStockPageSize}
+            stockPageClamped={stockPageClamped} setStockPage={setStockPage} stockTotalPages={stockTotalPages}
+          />
         )}
 
         {/* MASTER DATA — Master Katalog, Master Lokasi, Satpam (identity/reference data) */}
