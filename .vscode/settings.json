@@ -1,14 +1,3 @@
 {
-    "claudeCode.useTerminal": true,
-    "sqltools.connections": [
-        {
-            "name": "WARNOTO self-host (via SSH tunnel)",
-            "driver": "PostgreSQL",
-            "server": "localhost",
-            "port": 5432,
-            "database": "postgres",
-            "username": "postgres",
-            "askForPassword": true
-        }
-    ]
+    "claudeCode.useTerminal": true
 }
