@@ -5169,7 +5169,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               exportMaturityAuditExcel={exportMaturityAuditExcel}
               calculateItemLevel={calculateItemLevel}
               calcMaturityScore={calcMaturityScore}
-              lokasiList={lokasiList}
+              gudangList={visibleGudangList}
               askConfirmDelete={askConfirmDelete}
               MATURITY_LEVELS={MATURITY_LEVELS}
               MATURITY_WORKFLOW_LABEL={MATURITY_WORKFLOW_LABEL}

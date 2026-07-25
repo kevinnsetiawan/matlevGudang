@@ -992,7 +992,7 @@ const SUBHDR_BG = "#f8fafc";
 const ROW_ALT = "#f8fafc";
 const BORDER_CLR = "#e2e8f0";
 
-export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAuditEvidence, onBack, isMobile, selectedUpt, askConfirmDelete }) {
+export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAuditEvidence, onBack, isMobile, selectedUpt, askConfirmDelete }) {
   const now = new Date();
   const [bulan, setBulan] = useState(now.getMonth());
   const [tahun, setTahun] = useState(now.getFullYear());
@@ -1147,12 +1147,12 @@ export function Form5STab({ C, sty, currentUser, lokasiList = [], setMaturityAud
           </div>
           <div>
             <label style={sty.label}>Gudang / Lokasi</label>
-            {lokasiList.length > 0 ? (
+            {gudangList.length > 0 ? (
               <select style={sty.select} value={gudang} onChange={e => setGudang(e.target.value)}>
                 <option value="">-- Pilih Gudang --</option>
-                {lokasiList.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.kode}{l.keterangan ? ` — ${l.keterangan}` : ""}
+                {gudangList.map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.nama}{g.kode ? ` (${g.kode})` : ""}
                   </option>
                 ))}
               </select>

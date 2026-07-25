@@ -17,7 +17,7 @@ export function MaturityDashboardTab({
   maturityAuditSaving,
   saveMaturityAudit, deleteMaturityAudit, createMaturityAudit, openMaturityAudit, exportMaturityAuditExcel,
   calculateItemLevel, calcMaturityScore,
-  lokasiList, askConfirmDelete,
+  gudangList, askConfirmDelete,
   MATURITY_LEVELS, MATURITY_WORKFLOW_LABEL, MATURITY_WORKFLOW_COLOR,
 }) {
             const is3D = false;
@@ -651,7 +651,7 @@ export function MaturityDashboardTab({
 
               {/*  FORM PENGISIAN 5S  */}
               {maturitySubTab === "5s" && (
-                <Form5STab C={C} sty={sty} currentUser={currentUser} lokasiList={lokasiList}
+                <Form5STab C={C} sty={sty} currentUser={currentUser} gudangList={gudangList}
                   setMaturityAuditEvidence={setMaturityAuditEvidence} isMobile={isMobile} selectedUpt={selectedMaturityUpt}
                   askConfirmDelete={askConfirmDelete} />
               )}
