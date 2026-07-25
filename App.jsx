@@ -71,6 +71,9 @@ import { OcrSuggestGudangModal, LokasiDeleteConfirmModal, ConfirmDialogModal, Ph
 import { Tug5FormModal, Tug98FormModal, Tug10FormModal, Tug3FormModal } from "./src/components/TugFormModals.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
 import { DashboardRingkasanBlock } from "./src/components/DashboardRingkasanBlock.jsx";
+import { DemoBannerAndToast } from "./src/components/DemoBannerAndToast.jsx";
+import { AppHeaderBar } from "./src/components/AppHeaderBar.jsx";
+import { DashboardTabRouter } from "./src/components/DashboardTabRouter.jsx";
 import { TransactionHubTab } from "./src/components/TransactionHubTab.jsx";
 import { DEFAULT_UIT } from "./src/data/masterUit.js";
 import { DEFAULT_UPT_LIST } from "./src/data/masterUpt.js";
@@ -4920,39 +4923,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   return (
     <div className="app-shell" data-current-tab={tab} style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
-      {/* Mode demo per-tab: semua penyimpanan (localStorage + Supabase + Storage)
-          dibekukan — lihat isDemoMode() di src/lib/demo.js. Banner ini pengingat
-          visual bahwa perubahan di tab ini tidak akan tersimpan. */}
-      {isDemoMode() && (
-        <div className="demo-banner">
-          <span>🧪 MODE DEMO — perubahan TIDAK disimpan</span>
-          <button onClick={exitDemoMode}>Keluar</button>
-        </div>
-      )}
-      {/* Di HP: toast dipusatkan & dibatasi lebar (bukan nempel kanan tanpa batas
-          lebar) supaya pesan panjang tidak terpotong/keluar layar. */}
-      {toast && (
-        <div style={isMobile
-          ? {position:"fixed",top:16,left:16,right:16,zIndex:9999,background:toast.type==="error"?C.red:C.green,color:"white",padding:"12px 16px",borderRadius:10,fontSize:14,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",textAlign:"center"}
-          : {position:"fixed",top:20,right:20,maxWidth:420,zIndex:9999,background:toast.type==="error"?C.red:C.green,color:"white",padding:"12px 20px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,0.2)"}
-        }>{toast.msg}</div>
-      )}
-      {savingInfo && (
-        <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(15,23,42,0.55)",backdropFilter:"blur(2px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:C.surface,borderRadius:16,padding:"28px 32px",width:360,maxWidth:"100%",textAlign:"center",boxShadow:"0 24px 64px rgba(2,6,23,0.35)",borderTop:`4px solid ${C.accent}`}}>
-            <div className="txn-spinner" style={{width:44,height:44,margin:"0 auto 16px",border:`4px solid #e2e8f0`,borderTopColor:C.accent,borderRadius:"50%"}}/>
-            <div style={{fontSize:14,fontWeight:800,color:C.text,marginBottom:4}}>Menyimpan Transaksi</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:savingInfo.total>0?12:0}}>{savingInfo.label}{savingInfo.total>0?` (${savingInfo.done}/${savingInfo.total})`:""}</div>
-            {savingInfo.total>0 && (
-              <div style={{height:6,background:"#e2e8f0",borderRadius:999,overflow:"hidden"}}>
-                <div style={{height:"100%",width:`${Math.round((savingInfo.done/savingInfo.total)*100)}%`,background:C.accent,borderRadius:999,transition:"width .3s ease"}}/>
-              </div>
-            )}
-            <div style={{fontSize:12,color:C.muted,marginTop:14}}>Mohon tunggu, jangan tutup halaman ini.</div>
-          </div>
-        </div>
-      )}
-      {scannerOpen && <BarcodeScanner onDetect={handleScanResult} onClose={()=>setScannerOpen(false)}/>}
+      <DemoBannerAndToast
+        C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
+        toast={toast} savingInfo={savingInfo}
+        scannerOpen={scannerOpen} handleScanResult={handleScanResult} setScannerOpen={setScannerOpen}
+      />
 
       <AppSidebar
         C={C} sty={sty} isMobile={isMobile}
@@ -4967,138 +4942,29 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       />
       {/* MAIN */}
       <main className="app-main" style={{flex:1,overflowY:"auto",width:isMobile?"100%":"auto",minWidth:0}}>
-          <header className="app-workspace-bar">
-            {isMobile && (
-            <button
-              className="app-workspace-bar__menu"
-              onClick={()=>setMobileMenuOpen(true)}
-              aria-label="Buka menu"
-            ><SidebarIcon name="menu" size={20}/></button>
-            )}
-            <div className="app-workspace-bar__title">
-              <span>{pageMeta.eyebrow}</span>
-              <strong>{pageMeta.title}</strong>
-            </div>
-            <div className="app-account" ref={accountMenuRef}>
-              <button className={`theme-switch${theme==="dark"?" is-dark":""}`} onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} role="switch" aria-checked={theme==="dark"} aria-label="Mode gelap" title={theme==="dark"?"Mode Terang":"Mode Gelap"}>
-                <span className="theme-switch__knob" aria-hidden="true">{theme==="dark"?"🌙":"☀️"}</span>
-              </button>
-              <button className="app-account__trigger" onClick={()=>setAccountMenuOpen(open=>!open)} aria-expanded={accountMenuOpen} aria-haspopup="menu">
-                <span className="app-account__avatar">{currentUser.avatar || currentUser.name?.slice(0,2).toUpperCase()}</span>
-                <span className="app-account__identity">
-                  <small>{UPT}</small>
-                  <strong>{currentUser.name || "Fajar Sutomo"}</strong>
-                </span>
-                <span className={`app-account__chevron${accountMenuOpen?" is-open":""}`}><SidebarIcon name="chevron" size={14}/></span>
-              </button>
-              {accountMenuOpen && (
-                <div className="app-account__menu" role="menu">
-                  <div className="app-account__profile">
-                    <span className="app-account__avatar is-large">{currentUser.avatar || currentUser.name?.slice(0,2).toUpperCase()}</span>
-                    <div><strong>{currentUser.name || "Fajar Sutomo"}</strong><span>{ROLES[currentUser.role]}</span></div>
-                  </div>
-                  <div className="app-account__unit">{UPT}</div>
-                  <button role="menuitem" onClick={()=>{setAccountMenuOpen(false);openGantiPassword();}}><SidebarIcon name="key" size={17}/><span>Ganti Password</span></button>
-                  <button role="menuitem" onClick={()=>{setAccountMenuOpen(false);isDemoMode()?exitDemoMode():enterDemoMode();}}><span aria-hidden="true">🧪</span><span>{isDemoMode()?"Keluar Mode Demo":"Mode Demo (TUG)"}</span></button>
-                  {/* Menu SENGAJA tidak ditutup di sini: dibiarkan terbuka supaya label "Keluar..." + disabled
-                      terlihat selama signOut() berjalan (bisa lambat di server self-host). Saat logout sukses
-                      seluruh header unmount ke form login; kalau gagal, finally di handleLogout mengaktifkan tombol lagi. */}
-                  <button role="menuitem" className="is-danger" disabled={loggingOut} onClick={()=>handleLogout()}><SidebarIcon name="logout" size={17}/><span>{loggingOut?"Keluar...":"Logout"}</span></button>
-                </div>
-              )}
-            </div>
-          </header>
+          <AppHeaderBar
+            C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
+            setMobileMenuOpen={setMobileMenuOpen} pageMeta={pageMeta} accountMenuRef={accountMenuRef}
+            theme={theme} setTheme={setTheme} accountMenuOpen={accountMenuOpen} setAccountMenuOpen={setAccountMenuOpen}
+            UPT={UPT} openGantiPassword={openGantiPassword} loggingOut={loggingOut} handleLogout={handleLogout}
+          />
 
         <div className="app-content" style={{padding:isMobile?16:"clamp(18px, 2vw, 30px)"}}>
 
         {/* DASHBOARD */}
         {tab==="dashboard" && (
-          <div className="dashboard-command">
-            <DashboardMaturityBanner
-              maturity={maturityAssessments[0]||null}
-              levelLabel={maturityAssessments[0]?MATURITY_LEVELS[maturityAssessments[0].level]:""}
-              warehouse={WAREHOUSE}
-              canAssess={hasRole(currentUser,"ADMIN")}
-              formatDate={fmtDate}
-              onAssess={()=>{const latest=maturityAssessments[0];setMaturityForm({level:latest?.level||3,catatan:"",tanggalAsesmen:Date.now()});setMaturityModal(true);}}
-            />
-            <div className="dashboard-mode-switch" role="tablist" aria-label="Tampilan dashboard">
-              {[{id:"ringkasan",label:"Ringkasan & Kinerja",caption:"KPI, peta, dan prioritas"},{id:"detail",label:"Overview Gudang",caption:"Stok dan aktivitas operasional"}].map(item=>(
-                <button key={item.id} className={dashTab===item.id?"is-active":""} onClick={()=>setDashTab(item.id)} role="tab" aria-selected={dashTab===item.id}>
-                  <strong>{item.label}</strong><span>{item.caption}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {tab==="dashboard" && hasRole(currentUser, "MANAGER") && (
-          <>
-          {dashTab==="ringkasan" ? (
-            <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
-          ) : (
-          <DashboardManager
-            stocks={enrichedStocks} txns={txns} katalogList={katalogList}
-            uptList={uptList} rencanaKedatanganList={rencanaKedatanganList}
-            myPendingApprovals={myPendingApprovals}
-            topN={topN} setTopN={setTopN}
-            pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
-            C={C} sty={sty} setTab={setTab}
-            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-            currentUser={currentUser}
-            attbList={attbList} attbBongkaranPool={attbBongkaranPool}
-            isMobile={isMobile}
-          />
-          )}
-          </>
-        )}
-        {tab==="dashboard" && hasRole(currentUser, "ASMAN") && !hasRole(currentUser, "MANAGER") && (
-          <>
-          {dashTab==="ringkasan" ? (
-            <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
-          ) : (
-          <DashboardAsman
-            stocks={enrichedStocks} txns={txns} katalogList={katalogList}
-            rencanaKedatanganList={rencanaKedatanganList}
-            myPendingApprovals={myPendingApprovals}
-            topN={topN} setTopN={setTopN}
-            pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
-            C={C} sty={sty} setTab={setTab}
-            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-            currentUser={currentUser}
-            attbList={attbList} attbBongkaranPool={attbBongkaranPool}
-            isMobile={isMobile}
-          />
-          )}
-          </>
-        )}
-        {tab==="dashboard" && !hasRole(currentUser, "MANAGER","ASMAN") && (
-          <>
-          {dashTab==="ringkasan" && (
-            <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
-          )}
-
-          {dashTab==="detail" && (
-          <DashboardDefault
-            stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList}
-            rencanaKedatanganList={rencanaKedatanganList}
-            myPendingApprovals={myPendingApprovals}
-            lowStocks={lowStocks} totalVal={totalVal}
-            topN={topN} setTopN={setTopN}
-            pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
-            C={C} sty={sty} setTab={setTab} currentUser={currentUser}
-            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-            materialCadangData={materialCadangData}
-            attbList={attbList} attbBongkaranPool={attbBongkaranPool}
-          />
-          )}
-        </>
-        )}
-
-        {tab==="dashboard" && dashTab==="ringkasan" && (
-          <DashboardRingkasanBlock
-            C={C} currentUser={currentUser} gudangList={gudangList}
-            petaWilayahDivRef={petaWilayahDivRef} stockCountList={stockCountList}
+          <DashboardTabRouter
+            C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
+            maturityAssessments={maturityAssessments} MATURITY_LEVELS={MATURITY_LEVELS} WAREHOUSE={WAREHOUSE}
+            setMaturityForm={setMaturityForm} setMaturityModal={setMaturityModal}
+            dashTab={dashTab} setDashTab={setDashTab}
+            totalVal={totalVal} lowStocks={lowStocks} forecastSoon={forecastSoon} myPendingApprovals={myPendingApprovals}
+            stockCountPendingCount={stockCountPendingCount} attbPendingCount={attbPendingCount} attbBelumLanjutCount={attbBelumLanjutCount} stockCountList={stockCountList}
             setTab={setTab} setOpnameSubTab={setOpnameSubTab}
+            enrichedStocks={enrichedStocks} txns={txns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
+            topN={topN} setTopN={setTopN} pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
+            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={attbList} attbBongkaranPool={attbBongkaranPool}
+            materialCadangData={materialCadangData} gudangList={gudangList} petaWilayahDivRef={petaWilayahDivRef}
           />
         )}
 
