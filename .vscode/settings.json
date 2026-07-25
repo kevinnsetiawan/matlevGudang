@@ -1,3 +1,14 @@
 {
-    "claudeCode.useTerminal": true
+    "claudeCode.useTerminal": true,
+    "sqltools.connections": [
+        {
+            "name": "Supabase WARNOTO (pooler)",
+            "driver": "PostgreSQL",
+            "server": "aws-0-<region>.pooler.supabase.com",
+            "port": 6543,
+            "database": "postgres",
+            "username": "postgres.tadxodrzoquugnsyejld",
+            "askForPassword": true
+        }
+    ]
 }
