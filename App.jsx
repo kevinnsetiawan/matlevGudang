@@ -4776,7 +4776,15 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const forecastSoon = getMaterialAkanHabis(enrichedStocks, katalogList, txns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
   const totalVal = enrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
   const filteredStocks = enrichedStocks.filter(s=>{
-    const ms = matchesStockSearch(s, search);
+    const lokForSearch = lokasiList.find(l=>l.id===s.lokasiId);
+    const gdgForSearch = (lokForSearch?.gudangId || s.gudangId)
+      ? gudangList.find(g=>g.id===(lokForSearch?.gudangId || s.gudangId))
+      : null;
+    const ms = matchesStockSearch({
+      ...s,
+      blok: [lokForSearch?.kode, lokForSearch?.nama].filter(Boolean).join(" "),
+      gudang: [gdgForSearch?.kode, gdgForSearch?.nama].filter(Boolean).join(" "),
+    }, search);
     const mj = filterJenis==="ALL" || s.jenisBarang===filterJenis;
     // RBAC per gudang: sembunyikan stok yang lokasinya milik gudang terlarang.
     // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
@@ -5304,7 +5312,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         if (!st) return null;
         const kat = katalogList.find(k=>k.id===st.katalogId);
         const lok = lokasiList.find(l=>l.id===st.lokasiId);
-        const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
+        const gdg = (lok?.gudangId || st.gudangId) ? gudangList.find(g=>g.id===(lok?.gudangId || st.gudangId)) : null;
+        const keteranganBarang = kat?.keterangan || st.keteranganBarang || "Keterangan barang belum diisi.";
         const canUploadFoto = hasRole(currentUser, "ADMIN","TL");
         const isSAP = st.id?.startsWith("STK-SAP-");
         const bs = getSAPBadgeStyle(st.katalog);
@@ -5318,13 +5327,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <img src={previewImg} alt={label} onClick={()=>setLightboxImg(previewImg)} style={{width:"100%",height:140,objectFit:"cover",borderRadius:8,border:`1px solid ${hasUnsaved?"#f59e0b":C.border}`,cursor:"zoom-in"}}/>
               ) : (
                 <div style={{width:"100%",height:140,background:"#f3f4f6",borderRadius:8,border:`1px dashed ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontSize:12,textAlign:"center",padding:8}}>
-                  {isSAP ? "Belum ada foto (data SAP — akan disinkronkan saat import PEMAT)" : "⚠️ Belum ada foto"}
+                  {isSAP ? "Belum ada foto (data SAP — akan disinkronkan saat import PEMAT)" : "Belum ada foto"}
                 </div>
               )}
               {canUploadFoto && (
                 <>
                   <label style={{...sty.btn("ghost","sm"),display:"block",textAlign:"center",marginTop:6,cursor:"pointer"}}>
-                    🔄 Update Gambar
+                    Update Gambar
                     <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
                       onChange={e=>handleImg(e, img=>setPendingFoto(p=>({...p,[field]:img})))}/>
                   </label>
@@ -5349,9 +5358,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                 <div>
                   <h3 style={{fontSize:16,fontWeight:800}}>{st.name}</h3>
-                  <p style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:2}}>📑 {st.katalog||kat?.katalog||"-"}</p>
+                  <p style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:2}}>{st.katalog||kat?.katalog||"-"}</p>
                 </div>
-                <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>✕</button>
+                <button aria-label="Tutup detail stok" style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,minWidth:44,minHeight:44,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:800}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>Tutup</button>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:12}}>
                 <div><b>Kategori:</b> {st.category||"-"}</div>
@@ -5362,6 +5371,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <div><b>Blok:</b> {lok?.kode||"—"}</div>
                 <div><b>Harga:</b> Rp {fmtNum(st.price)}</div>
                 <div><b>Status:</b> <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg}}>{getSAPLabel(st.katalog)}</span></div>
+                <div className="stock-detail-keterangan"><b>Keterangan Barang:</b> <span>{keteranganBarang}</span></div>
               </div>
               <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
                 {fotoBox("Foto Nameplate", "fotoNameplate")}
@@ -5370,7 +5380,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               {!canUploadFoto && <div style={{fontSize:12,color:C.muted,marginTop:10}}>Hanya Admin/TL yang bisa mengunggah/mengganti foto.</div>}
               <div style={{marginTop:16,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
                 <button style={{...sty.btn("ghost"),width:"100%",borderColor:"#e0f2fe",color:"#0369a1"}}
-                  onClick={()=>{ if(kat) setKartuGantungDetail(kat); }}>🏷️ Lihat Kartu Gantung (TUG-2)</button>
+                  onClick={()=>{ if(kat) setKartuGantungDetail(kat); }}>Lihat Kartu Gantung (TUG-2)</button>
               </div>
             </div>
           </div>

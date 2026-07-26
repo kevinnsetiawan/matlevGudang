@@ -6,6 +6,8 @@ import { getSAPBadgeStyle } from "../lib/sap.js";
 import { hasRole } from "../lib/roles.js";
 import { getLokasiPetaInfo } from "../lib/masterSync.js";
 import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
+import { Camera, X, ImageSquare, Tag, MapPin } from "@phosphor-icons/react";
+import "../styles/stock.css";
 
 export function DataStokTab({
   C, sty, currentUser, isMobile,
@@ -29,18 +31,20 @@ export function DataStokTab({
             <div className="workspace-filter-panel">
               <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
                 <div style={{position:"relative",flex:1}}>
-                  <input style={{...sty.input,paddingRight:32}} placeholder="🔍 Cari nama, kode, no. katalog, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                  <label className="stock-search-label" htmlFor="stock-search-input">Cari Data Stok</label>
+                  <input id="stock-search-input" aria-label="Cari Data Stok" style={{...sty.input,paddingRight:32,fontSize:16}} placeholder="Cari nama, kode, keterangan, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
                   {search && (
                     <button
                       onClick={()=>setSearch("")}
                       title="Hapus pencarian"
                       style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:14,color:C.muted,padding:4,lineHeight:1}}
-                    >✕</button>
+                    ><X size={16} aria-hidden="true" /></button>
                   )}
                 </div>
-                <button type="button" title="Cari barang berdasarkan foto" onClick={()=>{setPhotoSearchImg(null);setPhotoSearchOpen(true);}}
+                <button type="button" className="stock-photo-search-button" aria-label="Cari barang berdasarkan foto" title="Cari barang berdasarkan foto" onClick={()=>{setPhotoSearchImg(null);setPhotoSearchOpen(true);}}
                   style={{...sty.btn("primary"),whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
-                  📷{!isMobile && <span>Cari Foto</span>}
+                  <Camera size={18} weight="bold" aria-hidden="true" />
+                  {!isMobile && <span>Cari Foto</span>}
                 </button>
               </div>
               <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
@@ -54,8 +58,8 @@ export function DataStokTab({
               {photoSearchResults && (
                 <div style={{...sty.card,padding:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                    <div style={{fontWeight:800,fontSize:13}}>{photoSearchResultMode==="nameplate"?"🔖":"📷"} Hasil pencarian foto — {photoSearchResults.length} barang {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
-                    <button style={sty.btn("ghost","sm")} onClick={()=>setPhotoSearchResults(null)}>✕ Reset</button>
+                    <div style={{fontWeight:800,fontSize:13}}><Camera size={16} weight="bold" style={{verticalAlign:"-0.15em",marginRight:5}} aria-hidden="true"/> Hasil pencarian foto — {photoSearchResults.length} barang {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
+                    <button style={sty.btn("ghost","sm")} onClick={()=>setPhotoSearchResults(null)}><X size={15} aria-hidden="true" /> Reset</button>
                   </div>
                   {photoSearchResultMode==="nameplate" && photoSearchOcrText && (
                     <div style={{fontSize:12,color:C.muted,background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 8px",marginBottom:10,whiteSpace:"pre-wrap",maxHeight:60,overflowY:"auto"}}>
@@ -72,10 +76,10 @@ export function DataStokTab({
                         const pct = Math.round((r.similarity||0)*100);
                         return (
                           <div key={r.katalog} onClick={()=>est&&setStockDetailId(est.id)} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:10,cursor:est?"pointer":"default",display:"flex",gap:10,alignItems:"center",background:C.surface}}>
-                            {thumb ? <img src={thumb} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0,border:`1px solid ${C.border}`}}/> : <div style={{width:54,height:54,borderRadius:8,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>📦</div>}
+                            {thumb ? <img src={thumb} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0,border:`1px solid ${C.border}`}}/> : <div style={{width:54,height:54,borderRadius:8,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><ImageSquare size={22} color={C.accent} aria-hidden="true"/></div>}
                             <div style={{minWidth:0,flex:1}}>
                               <div style={{fontWeight:700,fontSize:12,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{est?.name||"(tidak ada di Data Stok)"}</div>
-                              <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>📑 {r.katalog}</div>
+                              <div style={{fontSize:12,color:"#0098da",fontWeight:700}}><Tag size={13} style={{verticalAlign:"-0.15em",marginRight:3}} aria-hidden="true"/> {r.katalog}</div>
                               <div style={{fontSize:12,fontWeight:800,color:pct>=80?C.green:pct>=70?"#d97706":C.muted,marginTop:2}}>{pct}% {photoSearchResultMode==="nameplate"?"cocok":"mirip"}</div>
                             </div>
                           </div>
@@ -123,11 +127,16 @@ export function DataStokTab({
                       <tr className="mobile-card-table__row" key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
                         <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.fotoKeseluruhan){e.stopPropagation(); setLightboxImg(resolveStockPhotoUrl(st.fotoKeseluruhan));} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.fotoKeseluruhan?"zoom-in":"default"}}>
                           {st.fotoKeseluruhan ? <img src={resolveStockPhotoUrl(st.fotoKeseluruhan)} alt={st.name} style={{width:48,height:48,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
-                            : <div style={{width:48,height:48,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
+                            : <div style={{width:48,height:48,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,border:`1px solid #bfdbfe`,margin:"0 auto"}}><ImageSquare size={22} color="#1d4ed8" aria-hidden="true"/></div>}
+                        </td>
+                        <td className="stock-mobile-summary" aria-label={`Ringkasan ${st.name}`}>
+                          <div className="stock-mobile-summary__head"><strong>{st.name}</strong><span>{st.katalog||"-"}</span></div>
+                          <div className="stock-mobile-summary__description">{st.keteranganBarang || "Keterangan barang belum diisi."}</div>
+                          <div className="stock-mobile-summary__meta"><span><MapPin size={14} weight="bold" aria-hidden="true"/> {[gdg?.kode||gdg?.nama, lok?.kode||st.lokasi].filter(Boolean).join(" • ") || "Lokasi belum diisi"}</span><span className={isLow ? "is-critical" : "is-ok"}>{st.jenisBarang==="Non-Stock" ? "Project-Based" : `${fmtNum(st.qty)} ${st.unit}`}</span></div>
                         </td>
                         <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200}}>
                           <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
-                          <div style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:1}}>📑 {st.katalog||"-"}</div>
+                          <div style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:1}}><Tag size={13} style={{verticalAlign:"-0.15em",marginRight:3}} aria-hidden="true"/> {st.katalog||"-"}</div>
                           {st.deletePending && <div style={{fontSize:12,color:"#dc2626",fontWeight:700,marginTop:2}}>⏳ Menunggu approval Hapus</div>}
                           {st.editPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Ada perubahan menunggu approval TL</div>}
                         </td>
@@ -253,7 +262,23 @@ export function DataStokTab({
                           {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
                         </td>
                         <td data-label="Aksi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
-                          <div className="table-actions">
+                          <div className="stock-mobile-direct-actions" onClick={e=>e.stopPropagation()}>
+                            <button
+                              className="table-action-button stock-mobile-action--location"
+                              aria-label="Lokasi"
+                              title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data â†’ Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
+                              style={{color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
+                              onClick={()=>{
+                                if (canLihatPeta) { setPetaMiniDetail({stock:st, lokasi:lok, gudang:gdg, petaInfo}); return; }
+                                if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
+                                if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data â†’ Master Gudang.`,"error"); return; }
+                                showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data â†’ Master Gudang.`,"error");
+                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>
+                            <button className="table-action-button stock-mobile-action--card" aria-label="Kartu Gantung Digital" title="Kartu Gantung Digital"
+                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}><Tag size={16} weight="bold" aria-hidden="true" /> <span>Kartu Gantung</span></button>
+                          </div>
+                          <div className="stock-desktop-actions" onClick={e=>e.stopPropagation()}>
+                            <div className="table-actions">
                             {hasRole(currentUser, "ADMIN") && (
                               <>
                                 <button className="table-action-button" title="Edit data stok" disabled={st.deletePending} onClick={()=>openEditStock(st)}>Edit</button>
@@ -261,7 +286,7 @@ export function DataStokTab({
                               </>
                             )}
                             <button className="table-action-button is-icon" title="Kartu Gantung TUG-2"
-                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}>🏷</button>
+                              onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}><Tag size={16} weight="bold" aria-hidden="true" /></button>
                             <button
                               className="table-action-button is-icon"
                               title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data → Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
@@ -271,7 +296,8 @@ export function DataStokTab({
                                 if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
                                 if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data → Master Gudang.`,"error"); return; }
                                 showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data → Master Gudang.`,"error");
-                              }}>📍</button>
+                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>
+                            </div>
                           </div>
                         </td>
                       </tr>

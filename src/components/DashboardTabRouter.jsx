@@ -98,6 +98,7 @@ export function DashboardTabRouter(props) {
           heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
           materialCadangData={materialCadangData}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
+          isMobile={isMobile}
         />
         )}
       </>

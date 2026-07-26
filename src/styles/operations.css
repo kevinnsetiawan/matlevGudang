@@ -159,6 +159,12 @@
 .operations-category-filters button.is-active { border-color: #93c5fd !important; background: #eff6ff !important; color: #1d4ed8 !important; box-shadow: inset 0 0 0 1px rgba(29,78,216,.05) !important; }
 .operations-category-filters button.is-active > span { color: #1d4ed8 !important; }
 .operations-category-filters.is-compact { margin-bottom: 14px; }
+.heavy-category-button { white-space: nowrap; }
+.heavy-category-icon { display: flex; width: 20px; height: 20px; align-items: center; justify-content: center; }
+.heavy-category-label, .heavy-category-count { white-space: nowrap; }
+[data-theme="dark"] .heavy-equipment-page .operations-category-filters button { border-color: #475569 !important; background: #1e293b !important; color: #cbd5e1 !important; }
+[data-theme="dark"] .heavy-equipment-page .operations-category-filters button.is-active { border-color: #60a5fa !important; background: #172554 !important; color: #bfdbfe !important; }
+[data-theme="dark"] .heavy-equipment-page .operations-category-filters button.is-active > span { color: #bfdbfe !important; }
 
 .operations-card { border-radius: 12px !important; box-shadow: 0 1px 2px rgba(15,23,42,.04),0 8px 18px -17px rgba(15,23,42,.75) !important; transition: transform .16s ease,border-color .16s ease,box-shadow .16s ease; }
 .operations-card:hover { transform: translateY(-1px); border-color: #cbd5e1 !important; box-shadow: 0 2px 3px rgba(15,23,42,.04),0 14px 24px -21px rgba(15,23,42,.8) !important; }
@@ -337,23 +343,30 @@
   .heavy-equipment-page .operations-category-filters {
     width: 100%;
     flex: none !important;
+    flex-direction: column;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: thin;
-    scroll-snap-type: x proximity;
-    padding: 2px 1px 8px;
+    gap: 4px;
+    overflow: visible;
+    padding: 2px 0 8px;
+    position: relative;
+    background: none;
   }
-  .heavy-equipment-page .operations-category-filters button {
-    min-width: 122px !important;
-    min-height: 52px;
+  .heavy-equipment-page .operations-category-filters .heavy-category-button {
+    width: 100%;
+    min-width: 0 !important;
+    min-height: 44px;
     flex: 0 0 auto;
-    scroll-snap-align: start;
+    grid-template-columns: 24px minmax(0,1fr) auto;
+    gap: 6px !important;
+    padding: 7px 10px !important;
+    text-align: left;
   }
-  .heavy-equipment-page .operations-category-filters.is-compact button { min-width: 116px !important; }
+  .heavy-equipment-page .operations-category-filters.is-compact .heavy-category-button { min-width: 0 !important; }
   .heavy-equipment-page .operations-category-filters.is-compact > div:last-child {
-    min-width: max-content;
-    padding-right: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 2px 10px 0;
+    text-align: right;
   }
 
   .heavy-equipment-page .equipment-condition-filter { width: 100% !important; }

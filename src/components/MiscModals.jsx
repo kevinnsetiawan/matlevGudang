@@ -1,6 +1,7 @@
 // Kumpulan modal/popup kecil — dipindah dari App.jsx (refactor batch 2g).
 // Murni relokasi JSX; tidak ada perubahan tampilan/teks/logic. State & handler
 // tetap hidup di App.jsx dan diteruskan sebagai props.
+import { ArrowsClockwise, Camera, IdentificationCard, MagnifyingGlass } from "@phosphor-icons/react";
 
 // USULAN BLOK DARI DENAH — popup terpusat (guard hasRole/ocr tetap di App.jsx).
 export function OcrSuggestGudangModal({ ocrSuggestGudangId, ocrSuggestSubGudangId, ocrSuggestions, updateOcrSuggestion, removeOcrSuggestion, dismissOcrSuggestions, confirmOcrSuggestions, isMobile, sty, C }) {
@@ -99,20 +100,21 @@ export function ConfirmDialogModal({ confirmDialog, setConfirmDialog, sty, C }) 
 
 // CARI DENGAN FOTO — modal upload foto query untuk visual search Data Stok
 export function PhotoSearchModal({ photoSearchOpen, photoSearchLoading, setPhotoSearchOpen, photoSearchMode, setPhotoSearchMode, photoSearchImg, setPhotoSearchImg, handleImg, runPhotoSearch, sty, C }) {
+  const searchModes = [
+    { m:"bentuk", Icon:MagnifyingGlass, label:"Bentuk Barang" },
+    { m:"nameplate", Icon:IdentificationCard, label:"Foto Nameplate" },
+  ];
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}} onClick={()=>!photoSearchLoading&&setPhotoSearchOpen(false)}>
       <div style={{...sty.card,width:420,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{fontWeight:800,fontSize:16,marginBottom:6}}>📷 Cari Barang dengan Foto</div>
+        <div style={{display:"flex",alignItems:"center",gap:7,fontWeight:800,fontSize:16,marginBottom:6}}><Camera size={20} weight="bold" aria-hidden="true" /> Cari Barang dengan Foto</div>
         {/* Pilih cara mencari: kemiripan bentuk visual (Cohere) atau baca teks nameplate (OCR.space) */}
         <div style={{display:"flex",gap:8,marginBottom:10}}>
-          {[
-            {m:"bentuk",   icon:"🔍", label:"Bentuk Barang"},
-            {m:"nameplate",icon:"🔖", label:"Foto Nameplate"},
-          ].map(opt=>(
-            <button key={opt.m} type="button" disabled={photoSearchLoading}
-              onClick={()=>setPhotoSearchMode(opt.m)}
-              style={{flex:1,padding:"8px 6px",borderRadius:8,border:`2px solid ${photoSearchMode===opt.m?C.accent:C.border}`,background:photoSearchMode===opt.m?"#eff6ff":"white",color:photoSearchMode===opt.m?C.accent:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
-              {opt.icon} {opt.label}
+          {searchModes.map(({ m, Icon, label })=>(
+            <button key={m} type="button" disabled={photoSearchLoading}
+              onClick={()=>setPhotoSearchMode(m)}
+              style={{display:"inline-flex",minHeight:44,alignItems:"center",justifyContent:"center",gap:5,flex:1,padding:"8px 6px",borderRadius:8,border:`2px solid ${photoSearchMode===m?C.accent:C.border}`,background:photoSearchMode===m?"#eff6ff":"white",color:photoSearchMode===m?C.accent:C.muted,cursor:"pointer",fontWeight:700,fontSize:12}}>
+              <Icon size={17} weight="bold" aria-hidden="true" /> {label}
             </button>
           ))}
         </div>
@@ -121,14 +123,15 @@ export function PhotoSearchModal({ photoSearchOpen, photoSearchLoading, setPhoto
             ? "Foto papan nama/label barang — sistem membaca teksnya (nomor katalog, type, merk) lalu mencocokkan ke Master Katalog & ke foto nameplate yang sudah di-upload di Data Stok."
             : "Ambil/unggah foto barang — sistem mencari material paling mirip bentuknya di Data Stok (kemiripan ≥75%, maks 10 hasil)."}
         </p>
-        <label style={{...sty.btn("ghost"),display:"block",textAlign:"center",cursor:"pointer",marginBottom:10}}>
-          {photoSearchImg?"🔄 Ganti Foto":"📸 Ambil / Pilih Foto"}
+        <label style={{...sty.btn("ghost"),display:"flex",minHeight:44,alignItems:"center",justifyContent:"center",gap:6,textAlign:"center",cursor:"pointer",marginBottom:10}}>
+          {photoSearchImg ? <ArrowsClockwise size={17} weight="bold" aria-hidden="true" /> : <Camera size={17} weight="bold" aria-hidden="true" />}
+          {photoSearchImg ? "Ganti Foto" : "Ambil / Pilih Foto"}
           <input type="file" accept="image/*" capture="environment" onChange={e=>handleImg(e, img=>setPhotoSearchImg(img))} style={{display:"none"}}/>
         </label>
         {photoSearchImg && <img src={photoSearchImg} alt="query" style={{width:"100%",maxHeight:220,objectFit:"contain",borderRadius:8,marginBottom:12,border:`1px solid ${C.border}`,background:"#f8fafc"}}/>}
         <div style={{display:"flex",gap:8}}>
           <button style={{...sty.btn("ghost"),flex:1}} disabled={photoSearchLoading} onClick={()=>setPhotoSearchOpen(false)}>Batal</button>
-          <button style={{...sty.btn("primary"),flex:2}} disabled={!photoSearchImg||photoSearchLoading} onClick={runPhotoSearch}>{photoSearchLoading?(photoSearchMode==="nameplate"?"🔖 Membaca teks...":"🔎 Menganalisa..."):(photoSearchMode==="nameplate"?"Baca & Cocokkan Nameplate":"Cari Barang Mirip")}</button>
+          <button style={{...sty.btn("primary"),flex:2}} disabled={!photoSearchImg||photoSearchLoading} onClick={runPhotoSearch}>{photoSearchLoading?(photoSearchMode==="nameplate"?"Membaca teks...":"Menganalisa..."):(photoSearchMode==="nameplate"?"Baca & Cocokkan Nameplate":"Cari Barang Mirip")}</button>
         </div>
       </div>
     </div>
