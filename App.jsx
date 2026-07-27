@@ -55,6 +55,7 @@ import { KapasitasGudangImportTab } from "./src/components/KapasitasGudangImport
 import { BarcodePrintModal } from "./src/components/BarcodePrintModal.jsx";
 import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
+import { InspeksiMaterialCadangTab } from "./src/components/InspeksiMaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
 import { ApprovalHubTab } from "./src/components/ApprovalHubTab.jsx";
@@ -283,6 +284,7 @@ export default function PLNWarehouse() {
   const [materialCadangData, setMaterialCadangData] = useState({ imports:[], analyses:[], applyHistory:[] });
   const [materialCadangHealthData, setMaterialCadangHealthData] = useState({ imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
   const [materialCadangAiInsights, setMaterialCadangAiInsights] = useState({ runs:[], materialInsights:[] });
+  const [materialInspections, setMaterialInspections] = useState(() => readCachedList("pln_material_inspections_v1") ?? []);
   const [maraReference, setMaraReference] = useState(null); // legacy — dipertahankan untuk MigrasiDataTab & MaterialCadangTab
   const [maraSearch, setMaraSearch] = useState("");
   const [maraSearchResults, setMaraSearchResults] = useState([]);
@@ -4906,6 +4908,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"attb",icon:<SidebarIcon name="attb"/>,label:"ATTB",badge:attbPendingCount+attbBelumLanjutCount},
     {id:"opname",icon:<SidebarIcon name="opname"/>,label:"Stock Opname & Count",badge:stockCountPendingCount},
     {id:"maturity",icon:<SidebarIcon name="maturity"/>,label:"Penilaian Maturity"},
+    {id:"inspeksiMaterial",icon:<SidebarIcon name="inspeksiMaterial"/>,label:"Inspeksi Material"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
     {id:"forecastStok",icon:<SidebarIcon name="forecast"/>,label:"Forecast Stok"},
     {id:"ai",icon:<SidebarIcon name="ai"/>,label:"Pak War"},
@@ -4922,6 +4925,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     heavyEquipment: {eyebrow:"Fleet Operations",title:"Alat Berat & Peminjaman"},
     attb: {eyebrow:"Asset Disposal Governance",title:"ATTB — Penghapusan Aset"},
     maturity: {eyebrow:"Warehouse Maturity Audit",title:"Penilaian Maturity Gudang"},
+    inspeksiMaterial: {eyebrow:"Inventory Health Check",title:"Inspeksi Material Cadang"},
     opname: {eyebrow:"Inventory Assurance",title:opnameSubTab==="stockCount"?"Stock Count":"Stock Opname"},
     rencana: {eyebrow:"Inbound Planning",title:"Rencana Kedatangan Barang"},
     kapasitasGudang: {eyebrow:"Warehouse Utilization",title:"Monitoring Kapasitas Gudang"},
@@ -5033,6 +5037,23 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             sty={sty} C={C}
             setTab={setTab}
             setStockSubTab={setStockSubTab}
+          />
+        )}
+
+        {/* INSPEKSI MATERIAL CADANG */}
+        {tab==="inspeksiMaterial" && (
+          <InspeksiMaterialCadangTab
+            stocks={stocks}
+            katalogList={katalogList}
+            lokasiList={lokasiList}
+            materialInspections={materialInspections}
+            setMaterialInspections={setMaterialInspections}
+            currentUser={currentUser}
+            C={C}
+            sty={sty}
+            isMobile={isMobile}
+            showToast={showToast}
+            saveToCloud={saveToCloud}
           />
         )}
 
