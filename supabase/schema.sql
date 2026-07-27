@@ -860,6 +860,54 @@ create policy "Authenticated write mc_ai_insights" on material_cadang_ai_insight
 create policy "Authenticated read mc_apply_audit" on material_cadang_apply_audit for select using (auth.role() = 'authenticated');
 create policy "Authenticated write mc_apply_audit" on material_cadang_apply_audit for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- 20b. MATERIAL_INSPECTIONS — append-only inspection Material Cadang.
+-- DB canonical; foto privat disimpan sebagai path bucket, bukan base64 jsonb.
+create table if not exists material_inspections (
+  id uuid primary key default gen_random_uuid(),
+  stock_id text references stocks(id) on delete set null,
+  katalog_id text references katalog(id) on delete set null,
+  lokasi_id text references lokasi(id) on delete set null,
+  inspector_id uuid references profiles(id) on delete set null,
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_material_inspections_created_at on material_inspections(created_at desc);
+create index if not exists idx_material_inspections_stock on material_inspections(stock_id);
+alter table material_inspections enable row level security;
+drop policy if exists "Authenticated read material_inspections" on material_inspections;
+drop policy if exists "Admin TL insert material_inspections" on material_inspections;
+create policy "Authenticated read material_inspections" on material_inspections
+  for select using (auth.role() = 'authenticated');
+create policy "Admin TL insert material_inspections" on material_inspections
+  for insert to authenticated
+  with check (
+    inspector_id = auth.uid()
+    and exists (select 1 from profiles where profiles.id = auth.uid() and profiles.role in ('ADMIN', 'TL'))
+  );
+
+insert into storage.buckets (id, name, public)
+values ('material-inspection-photos', 'material-inspection-photos', false)
+on conflict (id) do update set public = false;
+drop policy if exists "Authenticated read material-inspection-photos" on storage.objects;
+drop policy if exists "Admin TL insert material-inspection-photos" on storage.objects;
+drop policy if exists "Admin TL cleanup material-inspection-photos" on storage.objects;
+create policy "Authenticated read material-inspection-photos" on storage.objects
+  for select using (bucket_id = 'material-inspection-photos' and auth.role() = 'authenticated');
+create policy "Admin TL insert material-inspection-photos" on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'material-inspection-photos'
+    and name like (auth.uid()::text || '/%')
+    and exists (select 1 from profiles where profiles.id = auth.uid() and profiles.role in ('ADMIN', 'TL'))
+  );
+create policy "Admin TL cleanup material-inspection-photos" on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'material-inspection-photos'
+    and name like (auth.uid()::text || '/%')
+    and exists (select 1 from profiles where profiles.id = auth.uid() and profiles.role in ('ADMIN', 'TL'))
+  );
+
 -- ────────────────────────────────────────────────────────────
 -- 21. HEAVY_EQUIPMENT / HEAVY_EQUIPMENT_LOANS — master alat berat + riwayat
 --     peminjaman antar-UPT (menu "Alat Berat & Peminjaman UPT" di App.jsx).

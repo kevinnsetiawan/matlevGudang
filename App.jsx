@@ -56,6 +56,7 @@ import { KapasitasGudangImportTab } from "./src/components/KapasitasGudangImport
 import { BarcodePrintModal } from "./src/components/BarcodePrintModal.jsx";
 import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
+import { InspeksiMaterialCadangTab } from "./src/components/InspeksiMaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
 import { ApprovalHubTab } from "./src/components/ApprovalHubTab.jsx";
@@ -92,6 +93,7 @@ import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl } from "./src/lib/supabaseSync.js";
+import { loadMaterialInspections } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
 
@@ -284,6 +286,7 @@ export default function PLNWarehouse() {
   const [materialCadangData, setMaterialCadangData] = useState({ imports:[], analyses:[], applyHistory:[] });
   const [materialCadangHealthData, setMaterialCadangHealthData] = useState({ imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
   const [materialCadangAiInsights, setMaterialCadangAiInsights] = useState({ runs:[], materialInsights:[] });
+  const [materialInspections, setMaterialInspections] = useState([]);
   const [maraReference, setMaraReference] = useState(null); // legacy — dipertahankan untuk MigrasiDataTab & MaterialCadangTab
   const [maraSearch, setMaraSearch] = useState("");
   const [maraSearchResults, setMaraSearchResults] = useState([]);
@@ -933,6 +936,17 @@ export default function PLNWarehouse() {
       setDataRefreshing(false);
     }
     loadCloud();
+  }, [authLoading, currentUser?.id]);
+
+  // Inspeksi Material Cadang bersifat database-canonical dan append-only;
+  // sengaja tidak memakai cache/saveToCloud agar tidak ikut full sync state lama.
+  useEffect(() => {
+    if (authLoading || !currentUser) return;
+    let active = true;
+    loadMaterialInspections().then(items => {
+      if (active && items !== null) setMaterialInspections(items);
+    });
+    return () => { active = false; };
   }, [authLoading, currentUser?.id]);
 
   // saveToCloud now takes an overrides object. Any field not passed falls back
@@ -5020,6 +5034,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     {id:"maturity",icon:<SidebarIcon name="maturity"/>,label:"Penilaian Maturity"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
     {id:"forecastStok",icon:<SidebarIcon name="forecast"/>,label:"Forecast Stok"},
+    {id:"inspeksiMaterial",icon:<SidebarIcon name="inspection"/>,label:"Inspeksi Material"},
     {id:"ai",icon:<SidebarIcon name="ai"/>,label:"Pak War"},
   ]).filter(n => can(currentUser, "menu." + n.id, rolePerms)); // RBAC: sembunyikan menu yang izinnya dicabut Admin (default = perilaku existing)
 
@@ -5038,6 +5053,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     rencana: {eyebrow:"Inbound Planning",title:"Rencana Kedatangan Barang"},
     kapasitasGudang: {eyebrow:"Warehouse Utilization",title:"Monitoring Kapasitas Gudang"},
     forecastStok: {eyebrow:"Inventory Forecast",title:"Forecast Stok"},
+    inspeksiMaterial: {eyebrow:"Material Assurance",title:"Inspeksi Material Cadang"},
     ai: {eyebrow:"Decision Support",title:"Pak War — Asisten Gudang"},
   }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
 
@@ -5319,6 +5335,22 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             approvalOpnamePage={approvalOpnamePage} setApprovalOpnamePage={setApprovalOpnamePage} approveOpname_Asman={approveOpname_Asman} approveOpname_Manager={approveOpname_Manager} rejectOpname={rejectOpname}
             stockCountList={stockCountList} approvalStockCountPage={approvalStockCountPage} setApprovalStockCountPage={setApprovalStockCountPage} approveStockCountItem={approveStockCountItem} rejectStockCountItem={rejectStockCountItem}
             txns={txns} approvalHistoryList={approvalHistoryList} approvalHistoryPage={approvalHistoryPage} setApprovalHistoryPage={setApprovalHistoryPage}
+          />
+        )}
+
+        {tab==="inspeksiMaterial" && (
+          <InspeksiMaterialCadangTab
+            stocks={stocks}
+            katalogList={katalogList}
+            lokasiList={lokasiList}
+            gudangList={gudangList}
+            materialInspections={materialInspections}
+            onInspectionCreated={inspection => setMaterialInspections(previous => [inspection, ...previous])}
+            currentUser={currentUser}
+            rolePerms={rolePerms}
+            C={C}
+            sty={sty}
+            showToast={showToast}
           />
         )}
 
