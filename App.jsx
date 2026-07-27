@@ -93,7 +93,7 @@ import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl } from "./src/lib/supabaseSync.js";
-import { loadMaterialInspections } from "./src/lib/materialInspectionSync.js";
+import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
 
@@ -287,6 +287,8 @@ export default function PLNWarehouse() {
   const [materialCadangHealthData, setMaterialCadangHealthData] = useState({ imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
   const [materialCadangAiInsights, setMaterialCadangAiInsights] = useState({ runs:[], materialInsights:[] });
   const [materialInspections, setMaterialInspections] = useState([]);
+  // Struktur baru: satu BA berisi beberapa material Cadang. Dikonsumsi UI tahap berikutnya.
+  const [materialInspectionBatches, setMaterialInspectionBatches] = useState([]);
   const [maraReference, setMaraReference] = useState(null); // legacy — dipertahankan untuk MigrasiDataTab & MaterialCadangTab
   const [maraSearch, setMaraSearch] = useState("");
   const [maraSearchResults, setMaraSearchResults] = useState([]);
@@ -945,6 +947,9 @@ export default function PLNWarehouse() {
     let active = true;
     loadMaterialInspections().then(items => {
       if (active && items !== null) setMaterialInspections(items);
+    });
+    loadMaterialInspectionBatches().then(batches => {
+      if (active && batches !== null) setMaterialInspectionBatches(batches);
     });
     return () => { active = false; };
   }, [authLoading, currentUser?.id]);
@@ -5345,12 +5350,15 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             lokasiList={lokasiList}
             gudangList={gudangList}
             materialInspections={materialInspections}
+            materialInspectionBatches={materialInspectionBatches}
             onInspectionCreated={inspection => setMaterialInspections(previous => [inspection, ...previous])}
+            onInspectionBatchCreated={batch => setMaterialInspectionBatches(previous => [batch, ...previous])}
             currentUser={currentUser}
             rolePerms={rolePerms}
             C={C}
             sty={sty}
             showToast={showToast}
+            isMobile={isMobile}
           />
         )}
 

@@ -34,6 +34,7 @@ export function mapMaterialInspectionRow(row) {
   return {
     ...row.data,
     id: row.id,
+    batchId: row.batch_id || null,
     stockId: row.stock_id || null,
     katalogId: row.katalog_id || null,
     lokasiId: row.lokasi_id || null,
@@ -43,6 +44,9 @@ export function mapMaterialInspectionRow(row) {
   };
 }
 
+export const MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH = 10;
+
+// LEGACY v1 — keep until UI migration done
 export async function loadMaterialInspections() {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -56,6 +60,7 @@ export async function loadMaterialInspections() {
   return (data || []).map(mapMaterialInspectionRow).filter(Boolean);
 }
 
+// LEGACY v1 — keep until UI migration done
 export async function createMaterialInspection({ inspection, photoFiles = [] }) {
   if (!supabase) throw new Error("Koneksi Supabase belum tersedia.");
   if (!inspection?.inspectorId) throw new Error("Identitas pemeriksa tidak tersedia.");
@@ -104,6 +109,115 @@ export async function createMaterialInspection({ inspection, photoFiles = [] }) 
       .single();
     if (error) throw error;
     return mapMaterialInspectionRow(data);
+  } catch (error) {
+    if (uploadedPaths.length) await supabase.storage.from(MATERIAL_INSPECTION_BUCKET).remove(uploadedPaths);
+    throw error;
+  }
+}
+
+export function mapMaterialInspectionBatchRow(row) {
+  if (!isRecord(row) || typeof row.id !== "string") return null;
+  const items = Array.isArray(row.material_inspections) ? row.material_inspections : [];
+  return {
+    ...(isRecord(row.data) ? row.data : {}),
+    id: row.id,
+    nomorBa: row.nomor_ba,
+    uptId: row.upt_id || null,
+    gudangId: row.gudang_id || null,
+    tanggal: row.tanggal,
+    inspectorId: row.inspector_id || null,
+    createdAt: row.created_at,
+    items: items.map(mapMaterialInspectionRow).filter(Boolean),
+  };
+}
+
+export async function loadMaterialInspectionBatches() {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("material_inspection_batches")
+    .select(
+      "id, nomor_ba, upt_id, gudang_id, tanggal, inspector_id, data, created_at, " +
+        "material_inspections(id, stock_id, katalog_id, lokasi_id, inspector_id, data, created_at)"
+    )
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("loadMaterialInspectionBatches:", error.message, error);
+    return null;
+  }
+  return (data || []).map(mapMaterialInspectionBatchRow).filter(Boolean);
+}
+
+// Satu BA = 1..10 material. Foto di-upload dulu (butuh path di jsonb item), lalu
+// RPC atomik dipanggil; kalau RPC gagal semua foto yang sudah masuk dibersihkan.
+export async function createMaterialInspectionBatch({ header, items = [], photoFilesPerItem = [] }) {
+  if (!supabase) throw new Error("Koneksi Supabase belum tersedia.");
+  const inspectorId = header?.inspectorId;
+  if (!inspectorId) throw new Error("Identitas pemeriksa tidak tersedia.");
+  if (!items.length) throw new Error("Minimal satu material harus diperiksa.");
+  if (items.length > MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH) {
+    throw new Error(`Maksimal ${MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH} material per BA.`);
+  }
+  const stockIds = items.map(item => item?.stockId);
+  if (stockIds.some(id => !id)) throw new Error("Setiap material harus dipilih dari data stok.");
+  if (new Set(stockIds).size !== stockIds.length) throw new Error("Material tidak boleh dipilih dua kali dalam satu BA.");
+  items.forEach((_, index) => {
+    const files = photoFilesPerItem[index] || [];
+    if (files.length !== MATERIAL_INSPECTION_MAX_PHOTOS) {
+      throw new Error(`Material baris ${index + 1} wajib punya ${MATERIAL_INSPECTION_MAX_PHOTOS} foto.`);
+    }
+    for (const file of files) {
+      const validationError = validateInspectionPhoto(file);
+      if (validationError) throw new Error(`Material baris ${index + 1}: ${validationError}`);
+    }
+  });
+
+  const uploadKey = crypto.randomUUID();
+  const uploadedPaths = [];
+  try {
+    const payloadItems = [];
+    for (const [index, item] of items.entries()) {
+      const photoPaths = [];
+      for (const [photoIndex, file] of (photoFilesPerItem[index] || []).entries()) {
+        const compressed = await compressImage(file, { maxBytes: 800_000, maxDim: 1600 });
+        const path = `${inspectorId}/${uploadKey}/item-${index + 1}/foto-${photoIndex + 1}.jpg`;
+        const { error } = await supabase.storage
+          .from(MATERIAL_INSPECTION_BUCKET)
+          .upload(path, dataUrlToBlob(compressed), { contentType: "image/jpeg", upsert: false });
+        if (error) throw error;
+        uploadedPaths.push(path);
+        photoPaths.push(path);
+      }
+      const itemData = { ...item, photoPaths };
+      delete itemData.id;
+      delete itemData.stockId;
+      delete itemData.katalogId;
+      delete itemData.lokasiId;
+      delete itemData.inspectorId;
+      delete itemData.createdAt;
+      delete itemData.photos;
+      payloadItems.push({ ...itemData, stock_id: item.stockId });
+    }
+
+    const headerPayload = { ...header };
+    delete headerPayload.inspectorId;
+    delete headerPayload.items;
+
+    const { data, error } = await supabase.rpc("create_material_inspection_batch", {
+      p_items: payloadItems,
+      p_header: {
+        ...headerPayload,
+        upt_id: header.uptId || "UPT-SBY",
+        gudang_id: header.gudangId || null,
+        tanggal: header.tanggal || null,
+      },
+    });
+    if (error) throw error;
+    return {
+      ...header,
+      id: data?.batch_id,
+      nomorBa: data?.nomor_ba,
+      items: (data?.items || []).map(mapMaterialInspectionRow).filter(Boolean),
+    };
   } catch (error) {
     if (uploadedPaths.length) await supabase.storage.from(MATERIAL_INSPECTION_BUCKET).remove(uploadedPaths);
     throw error;
