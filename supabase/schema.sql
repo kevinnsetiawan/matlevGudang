@@ -873,6 +873,8 @@ create table if not exists material_inspections (
 );
 create index if not exists idx_material_inspections_created_at on material_inspections(created_at desc);
 create index if not exists idx_material_inspections_stock on material_inspections(stock_id);
+grant select, insert on material_inspections to authenticated;
+grant all on material_inspections to service_role;
 alter table material_inspections enable row level security;
 drop policy if exists "Authenticated read material_inspections" on material_inspections;
 drop policy if exists "Admin TL insert material_inspections" on material_inspections;
