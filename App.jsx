@@ -3,6 +3,7 @@
 // TUG-9: Bon Pemakaian + Surat Jalan + BAST
 
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
+import * as Sentry from "@sentry/react";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, ROMAN, JENIS_BARANG, STATUS_RETUR_TO_JENIS } from "./src/constants.js";
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
@@ -1487,6 +1488,9 @@ export default function PLNWarehouse() {
           const uptMatch = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === profile.upt_id);
           const userObj = { id: profile.id, name: profile.name, username: profile.username, role: profile.role, jabatan: profile.jabatan, avatar: profile.avatar, uptId: profile.upt_id, upt: uptMatch ? uptMatch.nama.replace(/^UPT\s+/i, "").trim() : undefined, ultgId: profile.ultg_id, uitId: profile.uit_id, gudangIds: profile.gudang_ids };
           setCurrentUser(userObj);
+          Sentry.setUser({ id: userObj.id, username: userObj.username });
+          Sentry.setTag("role", userObj.role);
+          Sentry.setTag("upt", userObj.upt);
           writeCachedProfile(userObj);
           // LOGIN dicatat cuma untuk login manual (SIGNED_IN) — bukan INITIAL_SESSION
           // (buka tab/reload dgn sesi tersimpan) atau TOKEN_REFRESHED (refresh token
