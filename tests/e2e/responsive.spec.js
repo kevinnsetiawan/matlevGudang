@@ -124,11 +124,23 @@ test.describe("ATTB mobile details", () => {
       readySelector:".attb-page",
     });
 
+    const attbCards = page.locator(".attb-mobile-card");
+    if (await attbCards.count()) {
+      await expect(attbCards.first().locator("select")).toHaveCount(0);
+    }
+
     const report = await page.locator(".attb-page").evaluate(scope => {
       const metrics = [...scope.querySelectorAll(".operations-metric span")].map(node => {
         const rect = node.getBoundingClientRect();
         return { left:rect.left, right:rect.right, top:rect.top, bottom:rect.bottom };
       });
+      const metricOutOfBounds = [...scope.querySelectorAll(".operations-metric span")]
+        .filter(node => {
+          const rect = node.getBoundingClientRect();
+          const parent = node.closest(".operations-metric").getBoundingClientRect();
+          return rect.left < parent.left - 1 || rect.right > parent.right + 1 || rect.top < parent.top - 1 || rect.bottom > parent.bottom + 1;
+        })
+        .map(node => node.textContent.trim());
       const metricCollisions = [];
       for (let i = 0; i < metrics.length; i++) for (let j = i + 1; j < metrics.length; j++) {
         const overlapX = Math.min(metrics[i].right, metrics[j].right) - Math.max(metrics[i].left, metrics[j].left);
@@ -136,14 +148,37 @@ test.describe("ATTB mobile details", () => {
         if (overlapX > 1 && overlapY > 1) metricCollisions.push([i, j]);
       }
 
-      const pipeline = scope.querySelector(".attb-pipeline").getBoundingClientRect();
+      const pipelineElement = scope.querySelector(".attb-pipeline");
+      const pipeline = pipelineElement.getBoundingClientRect();
       const croppedCards = [...scope.querySelectorAll(".attb-stage-card,.attb-pipeline__end")]
         .map(node => node.getBoundingClientRect())
         .filter(rect => rect.left < pipeline.left - 1 || rect.right > pipeline.right + 1)
         .length;
-      return { metricCollisions, croppedCards };
+      const pipelineNodeOrder = [
+        ...[...scope.querySelectorAll(".attb-stage-card")].map(node => node.classList.contains("is-source")
+          ? node.querySelector(".attb-stage-code").textContent.trim()
+          : node.querySelector(".attb-pipeline__step").textContent.trim()),
+        scope.querySelector(".attb-pipeline__end .attb-stage-code").textContent.trim(),
+      ];
+      return {
+        metricCollisions,
+        metricOutOfBounds,
+        croppedCards,
+        pipelineNodeOrder,
+        pipelineHorizontalOverflow:Math.max(0, Math.ceil(pipelineElement.scrollWidth - pipelineElement.clientWidth)),
+      };
     });
 
-    expect(report).toEqual({ metricCollisions:[], croppedCards:0 });
+    expect(report).toEqual({
+      metricCollisions:[],
+      metricOutOfBounds:[],
+      croppedCards:0,
+      pipelineNodeOrder:["SRC", "1", "2", "3", "4", "5", "KI"],
+      pipelineHorizontalOverflow:0,
+    });
+
+    await page.getByRole("switch", { name:"Mode gelap" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator(".attb-pipeline__end")).toHaveCSS("background-color", "rgb(5, 46, 26)");
   });
 });

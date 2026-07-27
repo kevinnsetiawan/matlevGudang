@@ -183,11 +183,17 @@
 .attb-stage-card,
 .attb-pipeline__end { position: relative; min-width: 0 !important; min-height: 88px; padding: 9px 8px !important; border-radius: 10px !important; box-shadow: none !important; }
 .attb-stage-card { width: 100%; border-width: 1px !important; scroll-snap-align: start; }
+.attb-pipeline__node-head { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 22px; color: currentColor; }
+.attb-pipeline__count { font-size: 20px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+.attb-pipeline__step { display: inline-flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 50%; font-size: 12px; font-weight: 900; }
+.attb-pipeline__label { display: block; max-width: 100%; font-size: 12px; font-weight: 700; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
+.attb-inline-icon { display: inline-block; vertical-align: -0.15em; flex: 0 0 auto; }
 .attb-stage-card::after,
 .attb-pipeline__end::after { content: ""; position: absolute; inset: 7px; border: 1px solid rgba(148,163,184,.14); border-radius: 7px; pointer-events: none; }
 .attb-stage-card:not(:first-child)::before,
 .attb-pipeline__end::before { content: ""; position: absolute; left: -13px; top: 50%; width: 12px; height: 2px; background: #cbd5e1; transform: translateY(-50%); pointer-events: none; }
 .attb-pipeline__end { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 2px dashed #16a34a; background: #f0fdf4; align-self: stretch; }
+.attb-pipeline__end .attb-pipeline__node-head { color: #15803d; }
 .attb-stage-code { display: inline-flex; min-width: 25px; height: 18px; align-items: center; justify-content: center; padding: 0 4px; border-radius: 5px; background: rgba(100,116,139,.12); color: inherit; font-size: 12px; font-weight: 900; letter-spacing: .5px; }
 
 /* ATTB — tabel desktop wrapper (disembunyikan di mobile, digantikan .attb-mobile-cards) */
@@ -244,6 +250,7 @@
 .attb-mobile-card__body { padding: 2px 12px 8px; }
 .attb-mobile-card__row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .attb-mobile-card__actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid #f1f5f9; background: #f8fafc; }
+.attb-stage-action { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
 
 /* ── DARK MODE (hero + heading operasional) ────────────────────────────────
    Scope MVP: hero berlatar putih & judul section (dark-text agar tidak
@@ -263,6 +270,7 @@
 [data-theme="dark"] .attb-page .attb-stage-card:not(.is-active) { background: #1e293b !important; border-color: #475569 !important; color: #e2e8f0 !important; }
 [data-theme="dark"] .attb-page .attb-stage-card:not(.is-active) .attb-stage-code { background: rgba(148,163,184,.18); }
 [data-theme="dark"] .attb-page .attb-pipeline__end { background: #052e1a !important; border-color: #4ade80 !important; }
+[data-theme="dark"] .attb-page .attb-pipeline__end .attb-pipeline__node-head { color: #4ade80; }
 [data-theme="dark"] .attb-page .attb-stage-card:not(:first-child)::before,
 [data-theme="dark"] .attb-page .attb-pipeline__end::before { background: #64748b; }
 
@@ -458,10 +466,15 @@
      two columns and remove connector cells on phones so no card is cropped. */
   .attb-page .attb-stage-card,
   .attb-page .attb-stage-card.is-source { min-width: 0 !important; min-height: 82px; padding: 6px 7px !important; }
+  .attb-page .attb-pipeline__node-head { gap: 5px; }
+  .attb-page .attb-pipeline__label { min-height: 29px; }
   .attb-page .attb-stage-card::before,
   .attb-page .attb-pipeline__end::before { display: none; }
   .attb-page .attb-pipeline__end { grid-column: 1 / -1; min-width: 0 !important; min-height: 70px; }
   .attb-page .operations-actionbar { padding: 6px 9px; margin-bottom: 8px; }
+  .attb-page .attb-stage-action { min-height: 44px; }
+  .attb-page .attb-import-dialog { padding: 14px !important; }
+  .attb-page .attb-import-preview-stats > div { flex: 1 1 112px; min-width: 0; }
   /* Tabel utama ATTB: sembunyikan tabel desktop, tampilkan kartu mobile khusus. */
   .attb-page .attb-table-wrap { display: none !important; }
   .attb-page .attb-mobile-cards { display: block; }
