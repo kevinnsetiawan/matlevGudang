@@ -17,14 +17,17 @@ Paket model: **hanya** prefix `opencode-go/`. Jangan pakai `opencode/` polos unt
 | Tukang senior | `@tukang-senior` | `opencode-go/kimi-k2.7-code` (cadangan: `deepseek-v4-pro`) | Multi-file, refactor lintas modul, bug sulit, integrasi. |
 | Tukang biasa | `@tukang-biasa` | `opencode-go/glm-5.1` (cadangan: `qwen3.7-plus`, `minimax-m2.7`) | Implementasi spek, bugfix simpel, CRUD, styling. |
 
-**Routing:** ragu senior vs biasa → pilih **`tukang-biasa`**. Eskalasi senior hanya jika scope/risiko terbukti kompleks atau tukang-biasa gagal.
+**Routing (khusus Vendor C — override AGENTS.md “prioritas biasa”):**
+- Ragu senior vs biasa → pilih **`tukang-senior`** (bukan tukang-biasa). Alasan user 2026-07-27: tukang-biasa terlalu lambat untuk alur kerja Vendor C.
+- `tukang-biasa` hanya kalau spek trivial/sempit dan arsitek yakin scope sangat kecil.
+- **Arsitek token habis / model arsitek tak tersedia:** angkat **`tukang-senior`** jadi arsitek sementara sesi itu (plan + review + routing). Jangan biarkan sesi tanpa arsitek.
 
 **Micro-edit (arsitek boleh langsung, tanpa spawn tukang)** — SEMUA harus terpenuhi:
 1. Diff ≤ ~5 baris efektif ATAU perubahan mekanis 1:1 di beberapa file
 2. Root cause/lokasi sudah pasti
 3. TIDAK menyentuh skema data, kontrak API, keamanan, atau dependensi baru
 
-Kalau ragu micro vs tukang → pakai `tukang-biasa`.
+Kalau ragu micro vs tukang → pakai `tukang-senior`.
 
 ## Review-first & git/deploy
 
