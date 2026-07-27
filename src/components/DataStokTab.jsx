@@ -9,6 +9,19 @@ import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
 import { Camera, X, ImageSquare, Tag, MapPin } from "@phosphor-icons/react";
 import "../styles/stock.css";
 
+// Keep block selectors deterministic without changing the source lokasiList.
+// Numeric-aware locale sorting makes codes such as BLOK-2 come before BLOK-10;
+// the name (then id) provides stable tie-breakers for duplicate/blank codes.
+function sortBlokOptions(options) {
+  return [...options].sort((a, b) => {
+    const byKode = String(a?.kode || "").localeCompare(String(b?.kode || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byKode !== 0) return byKode;
+    const byNama = String(a?.nama || "").localeCompare(String(b?.nama || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byNama !== 0) return byNama;
+    return String(a?.id || "").localeCompare(String(b?.id || ""), "id", { numeric: true, sensitivity: "base" });
+  });
+}
+
 export function DataStokTab({
   C, sty, currentUser, isMobile,
   search, setSearch,
@@ -119,7 +132,7 @@ export function DataStokTab({
                     // tiap render ulang. Sekarang gudangId disimpan langsung ke stok begitu dipilih.
                     const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : (st.gudangId ? gudangList.find(g=>g.id===st.gudangId) : null);
                     const effGudangIdForBlok = stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? "";
-                    const blokOptionsForStock = lokasiList.filter(l=>l.gudangId===effGudangIdForBlok);
+                    const blokOptionsForStock = sortBlokOptions(lokasiList.filter(l=>l.gudangId===effGudangIdForBlok));
                     const petaInfo = getLokasiPetaInfo(lok, gdg, subGudangList);
                     const canLihatPeta = !!petaInfo;
                     const hasDenah = !!(gdg?.denahImageData || (lok?.subGudangId && subGudangList.find(s=>s.id===lok.subGudangId)?.denahImageData));
@@ -181,42 +194,32 @@ export function DataStokTab({
                             <>
                               <select
                                 value={st.lokasiId||""}
-                                disabled={st.lokasiMovePending}
-                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:st.lokasiMovePending?"#f3f4f6":noLokasi?"#fffbeb":"#f9fafb"}}
+                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:noLokasi?"#fffbeb":"#f9fafb"}}
                                 onChange={async e=>{
                                   const newLokasiId = e.target.value;
                                   const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  // BUG DITEMUKAN 2026-07-04: kalau baris ini belum punya lokasi sama
-                                  // sekali (lok undefined, mis. baris hasil "Kosongkan" dari Migrasi
-                                  // Data), lok?.gudangId jadi undefined -> null, dan gudangId lokasi
-                                  // manapun yang dipilih Admin PASTI beda dari null -> pindahGudang
-                                  // SELALU true, jadi pengisian PERTAMA KALI ke baris kosong dianggap
-                                  // "pindah gudang" dan wajib approval TL — padahal tidak ada gudang
-                                  // lama yang benar-benar dipindah dari mana pun. Fix: hanya anggap
-                                  // "pindah gudang" (butuh approval) kalau memang SUDAH ada lokasi
-                                  // sebelumnya (lok ada isinya).
-                                  const pindahGudang = !!lok && (lokSel?.gudangId||null) !== (lok?.gudangId||null);
-                                  let updated, msg;
-                                  if (pindahGudang) {
-                                    // Pindah ke Gudang lain wajib approval TL.
-                                    updated = {...st, lokasiMovePending:true, lokasiMoveApprover:"TL", pendingLokasiId:newLokasiId, pendingLokasiKode:lokSel?.kode||"-", moveRequestedBy:currentUser.id, moveRequestedAt:Date.now()};
-                                    msg = `📨 Pemindahan ${st.name} ke Gudang lain (${lokSel?.kode||"-"}) diajukan! Menunggu approval TL.`;
-                                  } else {
-                                    // Pindah blok dalam Gudang yang sama: Admin langsung, tanpa approval.
-                                    updated = {...st, lokasiId:newLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, lokasiMoveApprover:null, pendingLokasiId:null, pendingLokasiKode:null};
-                                    msg = `📍 Blok ${st.name} → ${lokSel?.kode||"-"}`;
-                                  }
+                                  const updated = {
+                                    ...st,
+                                    lokasiId:newLokasiId,
+                                    lokasi:lokSel?.kode||"-",
+                                    gudangId:lokSel?.gudangId ?? st.gudangId ?? null,
+                                    lokasiMovePending:false,
+                                    lokasiMoveApprover:null,
+                                    pendingLokasiId:null,
+                                    pendingLokasiKode:null,
+                                    moveRequestedBy:null,
+                                    moveRequestedAt:null,
+                                  };
                                   const ns = stocks.map(s=>s.id===st.id?updated:s);
                                   setStocks(ns);
                                   // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).
                                   await saveToCloud({stocks:ns}, {stocksChangedRows: [updated]});
-                                  showToast(msg);
+                                  showToast(`📍 Lokasi ${st.name} → ${lokSel?.kode||"-"} disimpan.`);
                                 }}>
                                 <option value="">-- Pilih Blok --</option>
                                 {blokOptionsForStock.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
                               </select>
                               {effGudangIdForBlok && blokOptionsForStock.length===0 && <div style={{fontSize:12,color:"#b45309",fontStyle:"italic",marginTop:2}}>⚠️ Belum ada Blok terdaftar di Gudang ini — pilihan Gudang tetap tersimpan.</div>}
-                              {st.lokasiMovePending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"TL"} → {st.pendingLokasiKode}</div>}
                             </>
                           ) : hasRole(currentUser, "TL") ? (
                             <>

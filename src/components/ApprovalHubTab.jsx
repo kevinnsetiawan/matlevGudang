@@ -118,7 +118,7 @@ export function ApprovalHubTab({
         approvalPageSize={approvalPageSize}
       />
 
-      {/* ── BAGIAN: Pemindahan Blok Data Stok — pindah Gudang oleh ADMIN, wajib approval TL ── */}
+      {/* Legacy recovery untuk pengajuan ADMIN lama yang masih menunggu TL; perubahan baru ADMIN tidak lagi membuat antrian ini. */}
       {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "TL") && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL") && (()=>{
         const list = stocks.filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL");
         const paged = list.slice((approvalStokPage-1)*approvalPageSize, approvalStokPage*approvalPageSize);
