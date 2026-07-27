@@ -19,6 +19,7 @@ export const PERM_MENUS = [
   { key: "menu.attb", label: "ATTB" },
   { key: "menu.opname", label: "Stock Opname & Count" },
   { key: "menu.maturity", label: "Penilaian Maturity" },
+  { key: "menu.inspeksiMaterial", label: "Inspeksi Material" },
   { key: "menu.rencana", label: "Rencana Kedatangan" },
   { key: "menu.forecastStok", label: "Forecast Stok" },
   { key: "menu.ai", label: "Pak War (AI)" },
@@ -47,7 +48,7 @@ function menus(...ids) {
 
 const FULL_MENUS = menus(
   "dashboard", "stock", "kapasitasGudang", "master", "transaction", "approval",
-  "heavyEquipment", "attb", "opname", "maturity", "rencana", "forecastStok", "ai"
+  "heavyEquipment", "attb", "opname", "maturity", "inspeksiMaterial", "rencana", "forecastStok", "ai"
 );
 
 // Default per role — turunan langsung dari gating hardcoded App.jsx:

@@ -56,6 +56,7 @@ import { BarcodePrintModal } from "./src/components/BarcodePrintModal.jsx";
 import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
 import { TUG15Tab } from "./src/components/TUG15Tab.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
+import { InspeksiMaterialCadangTab } from "./src/components/InspeksiMaterialCadangTab.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
 import { SidebarNavItem } from "./src/components/SidebarNavItem.jsx";
@@ -281,6 +282,7 @@ export default function PLNWarehouse() {
   const [catalogMasterRef, setCatalogMasterRef] = useState(null); // session-only hidden cataloger reference
   const [gudangCapacityList, setGudangCapacityList] = useState(() => readCachedList("pln_gudang_capacity_v1") ?? []);
   const [gudangCapacityImports, setGudangCapacityImports] = useState(() => readCachedList("pln_gudang_capacity_imports_v1") ?? []);
+  const [materialInspections, setMaterialInspections] = useState(() => readCachedList("pln_material_inspections_v1") ?? []);
   const [migratedTug15History, setMigratedTug15History] = useState([]);
   // Antrian item BARU (belum ada di Master Katalog) hasil Migrasi Data SAP —
   // tidak langsung ditambahkan ke katalogList/stocks, menunggu Admin review
