@@ -7,6 +7,7 @@ import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, R
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
 import { leanStocksForCache, resolveStockPhotoUrl } from "./src/lib/stockCache.js";
+import { applyStockRealtimeEvent, applyStockRealtimeEvents, stockListsEqual } from "./src/lib/stockRealtime.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
@@ -19,7 +20,7 @@ import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentSt
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
-import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
+import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
 import { loadMaturityAssessments, loadMaturityAudits, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
@@ -533,6 +534,9 @@ export default function PLNWarehouse() {
   const showToastRef = useRef(null);
   const lastSyncErrorToastRef = useRef(0);
   const maturityMigrationPromptedRef = useRef({ assessments:false, audits:false });
+  // Hanya aktif setelah bootstrap untuk user ini selesai. Ref mencegah channel
+  // sempat terbuka saat login ulang sebelum effect loadCloud sempat set state refresh.
+  const stocksBootstrapUserIdRef = useRef(null);
 
   useEffect(() => {
     // Tabel master memakai RLS authenticated. Tunggu sesi/profil selesai dipulihkan;
@@ -540,6 +544,7 @@ export default function PLNWarehouse() {
     // dan data remote (termasuk warehouse_capacity) tidak pernah dimuat ulang.
     if (authLoading || !currentUser) return;
     async function loadCloud() {
+      stocksBootstrapUserIdRef.current = null;
       setDataRefreshing(true);
       // Cache-first: JANGAN setLoading(true) di sini. `loading` sudah diinisialisasi
       // true HANYA saat tidak ada cache first-screen-critical (device baru); memaksa
@@ -924,6 +929,7 @@ export default function PLNWarehouse() {
         showToastRef.current && showToastRef.current(`⚠️ Gagal memuat sebagian data dari cloud (${loadFailures.join(", ")}). Menampilkan data lokal sementara — JANGAN edit sampai refresh berhasil, untuk menghindari data lama menimpa data server.`, "error");
       }
       setLoading(false);
+      stocksBootstrapUserIdRef.current = currentUser.id;
       setDataRefreshing(false);
     }
     loadCloud();
@@ -934,6 +940,107 @@ export default function PLNWarehouse() {
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
   stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
+
+  // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
+  // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
+  useEffect(() => {
+    if (authLoading || !currentUser || dataRefreshing || !supabase || stocksBootstrapUserIdRef.current !== currentUser.id) return;
+    let disposed = false;
+    let outageWarned = false;
+    const sync = { active:false, queued:false, bufferedEvents:[] };
+
+    const persistLeanStocks = next => { void CLOUD.set("pln_stocks_v4", leanStocks(next)); };
+    const updateStocks = reducer => {
+      setStocks(previous => {
+        const next = reducer(previous);
+        if (next !== previous) persistLeanStocks(next);
+        return next;
+      });
+    };
+    const warnOnce = message => {
+      if (disposed || outageWarned) return;
+      outageWarned = true;
+      showToastRef.current?.(message, "error");
+    };
+    const applyEvent = payload => {
+      if (sync.active) {
+        sync.bufferedEvents.push(payload);
+        return;
+      }
+      updateStocks(previous => applyStockRealtimeEvent(previous, payload));
+    };
+    const resyncStocks = async () => {
+      if (disposed || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+      if (sync.active) {
+        sync.queued = true;
+        return;
+      }
+      sync.active = true;
+      try {
+        const snapshot = await loadMasterTable("stocks");
+        if (disposed) return;
+        if (snapshot === null) {
+          // Snapshot gagal: pertahankan state/cache yang sudah ada. Buffer dibuang
+          // supaya retry berikutnya selalu dimulai dari sumber otoritatif baru.
+          sync.bufferedEvents = [];
+          warnOnce("Koneksi Data Stok belum pulih. Menampilkan data terakhir yang tersedia.");
+          return;
+        }
+        const bufferedDuringSnapshot = sync.bufferedEvents;
+        sync.bufferedEvents = [];
+        updateStocks(previous => {
+          const next = applyStockRealtimeEvents(snapshot, bufferedDuringSnapshot);
+          return stockListsEqual(previous, next) ? previous : next;
+        });
+      } catch (error) {
+        if (!disposed) {
+          sync.bufferedEvents = [];
+          console.error("Resync Realtime Data Stok gagal:", error);
+          warnOnce("Koneksi Data Stok belum pulih. Menampilkan data terakhir yang tersedia.");
+        }
+      } finally {
+        sync.active = false;
+        if (disposed) return;
+        // Event yang tiba setelah snapshot dipotong di atas harus tetap diterapkan
+        // sebelum resync berikutnya, tanpa menunggu jaringan atau memicu write cloud.
+        if (sync.bufferedEvents.length > 0) {
+          const afterSnapshot = sync.bufferedEvents;
+          sync.bufferedEvents = [];
+          updateStocks(previous => applyStockRealtimeEvents(previous, afterSnapshot));
+        }
+        if (sync.queued) {
+          sync.queued = false;
+          void resyncStocks();
+        }
+      }
+    };
+    const requestResync = () => { void resyncStocks(); };
+    const handleOnline = () => requestResync();
+    const handleVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") requestResync();
+    };
+    const channel = supabase
+      .channel("warnoto-stocks-realtime")
+      .on("postgres_changes", { event:"*", schema:"public", table:"stocks" }, applyEvent)
+      .subscribe(status => {
+        if (disposed) return;
+        if (status === "SUBSCRIBED") {
+          outageWarned = false;
+          requestResync();
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+          warnOnce("Koneksi realtime Data Stok terputus. Data akan disegarkan saat koneksi kembali.");
+        }
+      });
+    if (typeof window !== "undefined") window.addEventListener("online", handleOnline);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      disposed = true;
+      sync.bufferedEvents = [];
+      if (typeof window !== "undefined") window.removeEventListener("online", handleOnline);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleVisibility);
+      void supabase.removeChannel(channel);
+    };
+  }, [authLoading, currentUser?.id, dataRefreshing]);
   // Debounce auto-sync warnoto_state + RAG (bot WA/Telegram) — dipicu tiap ada perubahan
   // stocks/txns lewat saveToCloud, tapi ditunda sampai 90 detik tidak ada perubahan baru
   // lagi (quiet period), supaya sesi edit beruntun (banyak saveToCloud berturut-turut)
@@ -946,12 +1053,13 @@ export default function PLNWarehouse() {
   // data yang belum dimigrasi (stocks, katalog, txns, dst).
   // Param kedua `hints` (opsional, backward-compatible): kalau caller TAHU persis
   // baris mana saja yang berubah (mis. update lokasi 1 item Data Stok), ia bisa
-  // memberi `{ stocksChangedRows: [...] }` / `{ katalogChangedRows: [...] }` supaya
-  // sync ke Supabase cuma mengirim baris itu (syncMasterTableRows, ringan) alih-alih
+  // memberi `{ stocksChangedRows: [...] }` / `{ stocksDeletedId: "..." }` /
+  // `{ katalogChangedRows: [...] }` supaya sync ke Supabase cuma mengirim atau menghapus
+  // baris itu (syncMasterTableRows/deleteMasterTableRow, ringan) alih-alih
   // seluruh tabel (syncMasterTable, yang untuk `stocks` bisa ~18.7MB gara-gara foto
   // base64 di jsonb). TANPA hint, perilaku PERSIS SAMA seperti sebelumnya (full sync,
   // termasuk reconciliation-delete) — hint HANYA dipakai untuk kasus "beberapa baris
-  // spesifik berubah", BUKAN untuk kasus yang butuh deteksi baris terhapus.
+  // spesifik berubah", BUKAN untuk kasus yang butuh deteksi banyak baris terhapus.
   const saveToCloud = useCallback(async (overrides = {}, hints = {}) => {
     const s = overrides.stocks ?? stateRef.current.stocks;
     const t = overrides.txns ?? stateRef.current.txns;
@@ -1024,9 +1132,12 @@ export default function PLNWarehouse() {
     if (overrides.stocks !== undefined) {
       // Idem untuk Data Stok — ini kasus utama optimasi (tabel `stocks` paling berat).
       const stocksHint = hints.stocksChangedRows;
+      const deletedStockId = hints.stocksDeletedId;
       syncTasks.push({ label: "Data Stok", promise: (Array.isArray(stocksHint) && stocksHint.length > 0)
         ? syncMasterTableRows("stocks", stocksHint, extraColsStocks)
-        : syncMasterTable("stocks", s, extraColsStocks) });
+        : deletedStockId
+          ? deleteMasterTableRow("stocks", deletedStockId)
+          : syncMasterTable("stocks", s, extraColsStocks) });
     }
     // Kapasitas Gudang — sebelumnya localStorage/CLOUD-only, sekarang auto-backup
     // ke Supabase tiap kali berubah (lihat schema.sql section 10-11).
@@ -1167,6 +1278,7 @@ export default function PLNWarehouse() {
   }
 
   function clearLocalAuthState() {
+    stocksBootstrapUserIdRef.current = null;
     try { sessionStorage.removeItem("warnoto_tab"); } catch {}
     try { localStorage.removeItem(PROFILE_CACHE_KEY); localStorage.removeItem(LEGACY_PROFILE_CACHE_KEY); } catch {}
     try { localStorage.removeItem(SUPABASE_AUTH_STORAGE_KEY); } catch {}
@@ -2024,7 +2136,7 @@ export default function PLNWarehouse() {
   async function deleteStock(id) {
     if (!window.confirm("Hapus baris stok ini?")) return;
     const ns = stocks.filter(s=>s.id!==id);
-    setStocks(ns); await saveToCloud({stocks: ns});
+    setStocks(ns); await saveToCloud({stocks: ns}, {stocksDeletedId: id});
     logAudit(currentUser, "DELETE", "stocks", id);
     showToast("Data Stok dihapus.");
   }
@@ -2052,7 +2164,7 @@ export default function PLNWarehouse() {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.deletePending) return;
     const ns = stocks.filter(s=>s.id!==id);
-    setStocks(ns); await saveToCloud({stocks: ns});
+    setStocks(ns); await saveToCloud({stocks: ns}, {stocksDeletedId: id});
     await logApprovalHistory({type:"STOCK_DELETE", decision:"APPROVED", title:`Hapus ${st.name}`, requestedBy:st.deleteRequestedBy, requestedAt:st.deleteRequestedAt});
     showToast(`✅ Penghapusan ${st.name} disetujui.`);
   }

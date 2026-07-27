@@ -69,6 +69,25 @@ drop policy if exists "Authenticated write stocks" on stocks;
 create policy "Authenticated read stocks" on stocks for select using (auth.role() = 'authenticated');
 create policy "Authenticated write stocks" on stocks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Realtime Data Stok (PROPOSAL OPERASIONAL — JANGAN dieksekusi otomatis dari file ini).
+-- Setelah service Realtime self-host telah sehat dan user memberi gate eksplisit,
+-- tambahkan HANYA public.stocks ke publication yang sudah ada. PK stocks.id cukup
+-- untuk DELETE; jangan ubah REPLICA IDENTITY ke FULL karena payload jsonb/WAL membesar.
+-- Blok berikut idempotent bila dijalankan manual oleh operator:
+--
+-- do $$
+-- begin
+--   if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+--      and not exists (
+--        select 1 from pg_publication_tables
+--        where pubname = 'supabase_realtime'
+--          and schemaname = 'public'
+--          and tablename = 'stocks'
+--      ) then
+--     alter publication supabase_realtime add table public.stocks;
+--   end if;
+-- end $$;
+
 -- ────────────────────────────────────────────────────────────
 -- 2. TUG15_HISTORY — riwayat mutasi stok (sumber data training ML
 --    + ditampilkan di halaman scan QR TUG-2 publik)
