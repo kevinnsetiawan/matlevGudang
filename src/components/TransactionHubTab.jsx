@@ -115,7 +115,7 @@ export function TransactionHubTab({
               <TUG15Tab
                 txns={txns} katalogList={katalogList} stocks={stocks}
                 sty={sty} C={C}
-                filter={tug15Filter} setFilter={setTug15Filter}
+                filter={{...tug15Filter, ultgList, uitList}} setFilter={setTug15Filter}
                 lokasiList={lokasiList}
               />
             ) : (

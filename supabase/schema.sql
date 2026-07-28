@@ -1412,3 +1412,10 @@ alter table legacy_history_documents enable row level security;
 drop policy if exists "Authenticated read legacy_history_documents" on legacy_history_documents;
 create policy "Authenticated read legacy_history_documents" on legacy_history_documents
   for select using (auth.role() = 'authenticated');
+
+-- Privilege minimum untuk endpoint REST self-host: RLS di atas tetap menjadi
+-- pengaman row-level; tidak ada DELETE/TRUNCATE atau default privilege tambahan.
+grant usage on schema public to authenticated, service_role;
+grant select on legacy_history_archive, legacy_history_documents to authenticated;
+grant select, insert, update on legacy_history_archive, legacy_history_documents to service_role;
+grant usage on sequence legacy_history_archive_id_seq, legacy_history_documents_id_seq to service_role;

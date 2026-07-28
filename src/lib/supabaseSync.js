@@ -354,8 +354,94 @@ function dataUrlToBlob(dataUrl) {
   return new Blob([bytes], { type: mime });
 }
 
-export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
-  const { dateFrom, dateTo, katalogId, jenisBarang, sapStatus, docTypes } = filter;
+async function loadLegacyHistoryPages(table, fields, sourceUpt) {
+  const rows = [];
+  let afterId = null;
+  while (true) {
+    let query = supabase.from(table).select(fields).eq("source_upt", sourceUpt).order("id", { ascending: true }).limit(1000);
+    if (afterId !== null) query = query.gt("id", afterId);
+    const { data, error } = await query;
+    if (error) return { rows, error };
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < 1000) return { rows, error: null };
+    afterId = page[page.length - 1]?.id;
+    if (afterId === undefined || afterId === null) return { rows, error: null };
+  }
+}
+
+export async function loadLegacyHistoryArchive(sourceUpt = "UPT Surabaya") {
+  if (isDemoMode() || !supabase) return { rows: [], documents: [], error: null };
+  const archiveFields = "id,source_upt,doc_type,doc_id,item_id,tanggal,jenis_transaksi,no_katalog,nama_material,satuan,qty,unit_lawan,lokasi_kode,catatan,link_foto,foto_barang_url,match_confidence,issue_flags,sync_key";
+  const documentFields = "id,source_upt,doc_type,doc_id,foto_surat_jalan_url,foto_sim_ktp_url,foto_kendaraan_url,pdf_url,berita_acara_url,lampiran_url,match_notes";
+  const [archiveRes, documentRes] = await Promise.all([
+    loadLegacyHistoryPages("legacy_history_archive", archiveFields, sourceUpt),
+    loadLegacyHistoryPages("legacy_history_documents", documentFields, sourceUpt),
+  ]);
+  return {
+    rows: archiveRes.rows,
+    documents: documentRes.rows,
+    error: archiveRes.error || documentRes.error || null,
+  };
+}
+
+export async function resolveLegacyPrivateUrl(value) {
+  if (typeof value !== "string" || !value.startsWith("priv:") || !supabase) return value || null;
+  const { data, error } = await supabase.storage.from("tug-docs-private").createSignedUrl(value.slice(5), 3600);
+  if (error) throw error;
+  return data?.signedUrl || null;
+}
+
+function historyMaterialKey(katalog, deskripsi, sourceScope = "live") {
+  const code = String(katalog || "").trim().toLowerCase();
+  if (code && code !== "-") return `katalog:${code}`;
+  return `${sourceScope}:nama:${String(deskripsi || "").trim().toLowerCase()}`;
+}
+
+function normalizedSearchText(value) {
+  return String(value || "").normalize("NFKC").toLocaleLowerCase("id-ID").replace(/\s+/g, " ").trim();
+}
+
+function valuesToText(values) {
+  return values.filter(Boolean).map(normalizedSearchText).filter(Boolean).join(" ");
+}
+
+function matchesSearchTokens(row, query) {
+  const tokens = normalizedSearchText(query).split(" ").filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = valuesToText([
+    row.deskripsi, row.katalog, row.eventKind, row.eventDate, row.docType, row.documentNo, row.tugBaDoc,
+    row.jobName, row.workLocation, row.counterparty, row.unit, row.contractRefs, row.documentRefs,
+    row.notes, row.storageLocation, row.quality, row.upt, row.unitLawan,
+  ]);
+  return tokens.every(token => haystack.includes(token));
+}
+
+function addLiveSearchFields(row, fields) {
+  return {
+    ...row,
+    eventKind: fields.eventKind,
+    eventDate: row.tanggalMutasi,
+    documentNo: fields.documentNo || "-",
+    jobName: fields.jobName || "-",
+    workLocation: fields.workLocation || "-",
+    counterparty: fields.counterparty || "-",
+    unit: fields.unit || "-",
+    contractRefs: fields.contractRefs || "-",
+    documentRefs: fields.documentRefs || "-",
+    notes: fields.notes || "-",
+    storageLocation: fields.storageLocation || "-",
+    quality: fields.quality || "-",
+  };
+}
+
+export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacyRows = [], context = {}) {
+  const { dateFrom, dateTo, katalogId, jenisBarang, sapStatus } = filter;
+  const docTypes = filter.docTypes || ["TUG9", "TUG8", "TUG10", "TUG3"];
+  const source = filter.source || "ALL";
+  const searchText = filter.searchText || "";
+  const ultgList = context.ultgList || filter.ultgList || [];
+  const uitList = context.uitList || filter.uitList || [];
   const fromMs = dateFrom ? new Date(dateFrom).getTime() : 0;
   const toMs   = dateTo   ? new Date(dateTo).getTime() + 86399999 : Infinity;
 
@@ -380,20 +466,23 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
   txns.forEach(t => {
     const approved = t.status==="APPROVED" || t.stage==="APPROVED";
     if (!approved) return;
+    if (source === "LAMA") return;
     if (!docTypes.includes(t.docType)) return;
 
-    const ts = t.approvedAt || t.approvedAtAsman || t.approvedAtMgrLogistik || t.createdAt || 0;
-    if (ts < fromMs || ts > toMs) return;
+    const ts = t.docType === "TUG5"
+      ? (t.approvedAtMgrUltg || t.approvedAtManager || t.createdAt || 0)
+      : (t.approvedAt || t.approvedAtAsman || t.approvedAtMgrLogistik || t.createdAt || 0);
 
     const tanggal = fmtDateOnly(ts);
-    const docNo = t.docNumbers?.[t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":t.docType==="TUG10"?"tug10":"tug3"] || "-";
+    const docKey = { TUG3:"tug3", TUG5:"tug5", TUG8:"tug8", TUG9:"tug9", TUG10:"tug10" }[t.docType];
+    const docNo = t.docNumbers?.[docKey] || "-";
 
     if (t.docType==="TUG9" || t.docType==="TUG8") {
       (t.stockItems||[]).forEach(si => {
         const stockRow = stocks.find(s=>s.id===si.stockId);
         const kat = katalogList.find(k=>k.id===stockRow?.katalogId);
         if (!shouldIncludeKatalog(kat, stockRow)) return;
-        rows.push({
+        rows.push(addLiveSearchFields({
           katalog: kat.katalog||"-", deskripsi: kat.name, merk:"-", type:"-",
           satuan: kat.satuan||"-", valuasi: stockRow?.price||0,
           masuk:0, keluar: si.qty||0,
@@ -408,7 +497,20 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
           docType: t.docType,
           lokasiId: stockRow?.lokasiId||"",
           lokasiKode: (lokasiList||[]).find(l=>l.id===stockRow?.lokasiId)?.kode||"-",
-        });
+          source: "BARU",
+          sourceLabel: "Baru",
+          materialKey: historyMaterialKey(kat.katalog, kat.name),
+        }, {
+          eventKind: "KELUAR",
+          documentNo: docNo,
+          jobName: t.namaPekerjaan || t.pekerjaan,
+          workLocation: t.lokasiPekerjaan,
+          counterparty: t.docType === "TUG8" ? (t.unitTujuan || t.penerimaUnit || t.penerimaNama) : (t.penerimaUnit || t.penerimaNama),
+          unit: t.docType === "TUG8" ? (t.unitTujuan || t.penerimaUnit) : t.penerimaUnit,
+          documentRefs: t.noNodin || t.noPersetujuan,
+          notes: t.keteranganBarang || t.namaPekerjaan,
+          storageLocation: (lokasiList||[]).find(l=>l.id===stockRow?.lokasiId)?.kode,
+        }));
       });
     }
 
@@ -419,7 +521,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
           : { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
         const fakeStockRow = { jenisBarang: STATUS_RETUR_TO_JENIS[si.statusMaterial]||"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
-        rows.push({
+        rows.push(addLiveSearchFields({
           katalog: kat?.katalog||"-", deskripsi: kat?.name||"-", merk:"-", type:"-",
           satuan: kat?.satuan||"-", valuasi: 0,
           masuk: si.qty||0, keluar: 0,
@@ -434,7 +536,21 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
           docType: "TUG10",
           lokasiId: t.lokasiTujuanId||"",
           lokasiKode: (lokasiList||[]).find(l=>l.id===t.lokasiTujuanId)?.kode||"-",
-        });
+          source: "BARU",
+          sourceLabel: "Baru",
+          materialKey: historyMaterialKey(kat?.katalog, kat?.name),
+        }, {
+          eventKind: "MASUK",
+          documentNo: docNo,
+          jobName: t.namaPekerjaan || t.pekerjaan,
+          workLocation: t.lokasiPekerjaan,
+          counterparty: t.menyerahkanNama,
+          unit: t.menyerahkanNama,
+          documentRefs: t.noBAPenggantian,
+          notes: t.keteranganBarang || t.namaPekerjaan,
+          storageLocation: (lokasiList||[]).find(l=>l.id===t.lokasiTujuanId)?.kode,
+          quality: si.statusMaterial,
+        }));
       });
     }
 
@@ -445,7 +561,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
           : { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
         const fakeStockRow = { jenisBarang:"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
-        rows.push({
+        rows.push(addLiveSearchFields({
           katalog: kat?.katalog||"-", deskripsi: kat?.name||"-", merk:"-", type:"-",
           satuan: kat?.satuan||"-", valuasi: si.harga||0,
           masuk: si.qty||0, keluar: 0,
@@ -460,17 +576,109 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList) {
           docType: "TUG3",
           lokasiId: si.lokasiTujuanId||"",
           lokasiKode: (lokasiList||[]).find(l=>l.id===si.lokasiTujuanId)?.kode||"-",
-        });
+          source: "BARU",
+          sourceLabel: "Baru",
+          materialKey: historyMaterialKey(kat?.katalog, kat?.name),
+        }, {
+          eventKind: "MASUK",
+          documentNo: docNo,
+          jobName: t.namaPekerjaan,
+          workLocation: t.lokasiPekerjaan,
+          counterparty: t.dariSupplier,
+          unit: t.dariSupplier,
+          contractRefs: [t.noSpk, t.noAmandemen].filter(Boolean).join(" | "),
+          documentRefs: [t.noSuratJalan, t.noFaktur].filter(Boolean).join(" | "),
+          notes: t.keteranganTug3 || t.keteranganBarang,
+          storageLocation: (lokasiList||[]).find(l=>l.id===si.lokasiTujuanId)?.kode,
+          quality: t.keteranganTug3,
+        }));
+      });
+    }
+
+    if (t.docType === "TUG5") {
+      const sourceUnit = t.sourceType === "ULTG"
+        ? (ultgList.find(unit => unit.id === t.ultgId)?.nama || t.ultgId)
+        : (uitList.find(unit => unit.id === t.uitId)?.nama || t.uitId);
+      (t.stockItems || []).forEach(si => {
+        const kat = katalogList.find(k => k.id === si.katalogId);
+        if (!shouldIncludeKatalog(kat, { jenisBarang:"Persediaan" })) return;
+        rows.push(addLiveSearchFields({
+          katalog: kat?.katalog || "-", deskripsi: kat?.name || "-", merk:"-", type:"-",
+          satuan: kat?.satuan || "-", valuasi:0,
+          masuk:0, keluar:0,
+          upt: "UPT Surabaya",
+          tugBaDoc: `TUG-5 / ${docNo}`,
+          keterangan: t.keteranganUmum || t.namaPekerjaan || "Permintaan material",
+          tanggalMutasi: tanggal, ts,
+          // TUG-5 adalah permintaan, bukan mutasi: sentinel ini mempertahankan
+          // guard sync lama agar tidak masuk tug15_history/live saldo.
+          katalogId:"-", resolvedKatalogId:kat?.id || "-", affectsSaldo:false,
+          sapStatus: getSAPStatus(kat?.katalog), sapLabel:getSAPLabel(kat?.katalog), jenisBarang:"Persediaan",
+          docType:"TUG5", lokasiId:"", lokasiKode:"-",
+          source:"BARU", sourceLabel:"Baru", materialKey:historyMaterialKey(kat?.katalog, kat?.name),
+        }, {
+          eventKind:"PERMINTAAN",
+          documentNo:docNo,
+          jobName:t.namaPekerjaan || t.keteranganUmum,
+          workLocation:t.lokasiPekerjaan,
+          counterparty:sourceUnit,
+          unit:sourceUnit,
+          documentRefs:t.noReferensiTug7 || t.noReferensiTug5,
+          notes:t.keteranganUmum || t.keteranganBarang,
+        }));
       });
     }
   });
 
-  rows.sort((a,b)=>a.ts-b.ts);
+  if (source !== "BARU") {
+    legacyRows.forEach(item => {
+      if (!docTypes.includes(item.doc_type)) return;
+      const katalog = item.no_katalog || "-";
+      const deskripsi = item.nama_material || "-";
+      const selectedKatalog = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
+      // Kode legacy tidak punya FK ke master aktif; filter barang hanya boleh memakai
+      // kecocokan kode persis agar arsip tidak "divalidasi" atau dipetakan ulang.
+      if (selectedKatalog && String(selectedKatalog.katalog || "") !== String(katalog)) return;
+      if (jenisBarang !== "ALL" || sapStatus !== "ALL") return;
+      const ts = item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0;
+      const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
+      const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
+      rows.push({
+        katalog, deskripsi, merk:"-", type:"-", satuan:item.satuan || "-", valuasi:0,
+        masuk: isMasuk ? Number(item.qty || 0) : 0,
+        keluar: isKeluar ? Number(item.qty || 0) : 0,
+        upt: item.source_upt || "-",
+        tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
+        keterangan: item.catatan || item.unit_lawan || "-",
+        tanggalMutasi: item.tanggal || "-", ts,
+        katalogId: "-", sapStatus:"ARSIP", sapLabel:"Arsip lama", jenisBarang:"-",
+        docType:item.doc_type || "-", lokasiId:"", lokasiKode:item.lokasi_kode || "-",
+        eventKind:String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate:item.tanggal || "-",
+        documentNo:item.doc_id || "-", jobName:"-", workLocation:item.lokasi_kode || "-",
+        counterparty:item.unit_lawan || "-", unit:item.unit_lawan || "-", unitLawan:item.unit_lawan || "-",
+        contractRefs:"-", documentRefs:item.doc_id || "-", notes:item.catatan || "-",
+        storageLocation:item.lokasi_kode || "-",
+        quality:[item.match_confidence !== null && item.match_confidence !== undefined ? `Match ${item.match_confidence}%` : "", item.issue_flags].filter(Boolean).join(" | ") || "-",
+        source:"LAMA", sourceLabel:"Lama", materialKey:historyMaterialKey(katalog, deskripsi, "legacy"),
+        legacyId:item.id, legacyDocId:item.doc_id || null, legacySyncKey:item.sync_key, fotoBarangUrl:item.foto_barang_url || null,
+        issueFlags:item.issue_flags || null, matchConfidence:item.match_confidence,
+      });
+    });
+  }
+
+  const visibleRows = rows.filter(row => {
+    // Saat ada pencarian, hasil lintas sumber sengaja tidak dibatasi tanggal.
+    if (searchText) return matchesSearchTokens(row, searchText);
+    return row.ts >= fromMs && row.ts <= toMs;
+  });
+  visibleRows.sort((a,b)=>a.ts-b.ts);
   const saldoMap = {};
-  return rows.map((r,i) => {
-    const prev = saldoMap[r.katalogId] || 0;
+  return visibleRows.map((r,i) => {
+    if (r.affectsSaldo === false) return { ...r, saldoAwal:null, saldoAkhir:null, no:i+1 };
+    const saldoKey = r.source === "LAMA" ? `legacy:${r.materialKey}` : `live:${r.katalogId}`;
+    const prev = saldoMap[saldoKey] || 0;
     const saldo = prev + r.masuk - r.keluar;
-    saldoMap[r.katalogId] = saldo;
+    saldoMap[saldoKey] = saldo;
     return { ...r, saldoAwal: prev, saldoAkhir: saldo, no: i+1 };
   });
 }
@@ -487,6 +695,7 @@ export function buildTUG15HTML(rows, filter, katalogList) {
 
   const itemRows = rows.map(r=>`<tr>
     <td style="text-align:center">${r.no}</td>
+    <td><span style="padding:2px 6px;border-radius:10px;font-size:8px;font-weight:700;background:${r.source==="LAMA"?"#fef3c7":"#dbeafe"};color:${r.source==="LAMA"?"#92400e":"#1d4ed8"}">${r.sourceLabel||"Baru"}</span></td>
     <td>${r.katalog}</td>
     <td>${r.deskripsi}</td>
     <td><span style="padding:2px 6px;border-radius:10px;font-size:8px;font-weight:700;background:${r.sapStatus==="SAP"?"#dbeafe":"#f3f4f6"};color:${r.sapStatus==="SAP"?"#1d4ed8":"#6b7280"}">${r.sapStatus||"-"}</span></td>
@@ -495,10 +704,10 @@ export function buildTUG15HTML(rows, filter, katalogList) {
     <td>${r.type}</td>
     <td style="text-align:center">${r.satuan}</td>
     <td style="text-align:right">${r.valuasi>0?fmtRp(r.valuasi):"-"}</td>
-    <td style="text-align:center">${fmtNum(r.saldoAwal)||0}</td>
+    <td style="text-align:center">${r.affectsSaldo===false?"-":(fmtNum(r.saldoAwal)||0)}</td>
     <td style="text-align:center;color:#16a34a;font-weight:${r.masuk>0?"700":"400"}">${r.masuk>0?fmtNum(r.masuk):"-"}</td>
     <td style="text-align:center;color:#dc2626;font-weight:${r.keluar>0?"700":"400"}">${r.keluar>0?fmtNum(r.keluar):"-"}</td>
-    <td style="text-align:center;font-weight:700">${fmtNum(r.saldoAkhir)}</td>
+    <td style="text-align:center;font-weight:700">${r.affectsSaldo===false?"-":fmtNum(r.saldoAkhir)}</td>
     <td>${r.upt}</td>
     <td style="font-size:9px">${r.tugBaDoc}</td>
     <td style="font-size:9px">${r.keterangan}</td>
@@ -518,6 +727,7 @@ export function buildTUG15HTML(rows, filter, katalogList) {
 <table class="items">
   <thead><tr>
     <th style="width:3%">No</th>
+    <th style="width:4%">Sumber</th>
     <th style="width:7%">No Katalog</th>
     <th style="width:13%">Deskripsi Material</th>
     <th style="width:5%">Status SAP</th>
@@ -538,7 +748,7 @@ export function buildTUG15HTML(rows, filter, katalogList) {
   <tbody>
     ${itemRows}
     <tr class="total-row">
-      <td colspan="10" style="text-align:right;padding:5px 8px">TOTAL PERIODE</td>
+      <td colspan="11" style="text-align:right;padding:5px 8px">TOTAL PERIODE</td>
       <td style="text-align:center;color:#16a34a">${fmtNum(totalMasuk)}</td>
       <td style="text-align:center;color:#dc2626">${fmtNum(totalKeluar)}</td>
       <td colspan="5"></td>

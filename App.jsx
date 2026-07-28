@@ -397,7 +397,9 @@ export default function PLNWarehouse() {
     katalogId: "ALL",
     jenisBarang: "ALL",
     sapStatus: "ALL",  // "ALL" | "SAP" | "Non-SAP"
-    docTypes: ["TUG9","TUG8","TUG10","TUG3"],
+    source: "ALL", // "ALL" | "BARU" | "LAMA"
+    searchText: "",
+    docTypes: ["TUG9","TUG8","TUG10","TUG3","TUG5"],
   });
   const [topN, setTopN] = useState(10);
   const [pemakaianMode, setPemakaianMode] = useState("frekuensi"); // "frekuensi" | "qty"
