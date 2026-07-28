@@ -1330,3 +1330,85 @@ create policy "Auth upload tug-docs-private" on storage.objects
   for insert with check (bucket_id = 'tug-docs-private' and auth.role() = 'authenticated');
 create policy "Auth update tug-docs-private" on storage.objects
   for update using (bucket_id = 'tug-docs-private' and auth.role() = 'authenticated');
+
+-- ────────────────────────────────────────────────────────────
+-- 26. LEGACY_HISTORY_ARCHIVE — arsip READ-ONLY riwayat transaksi dari aplikasi
+--     WARNOTO versi lama (AppSheet, DB Excel). Terpisah TOTAL dari tug15_history
+--     (transaksi live) — TANPA FK ke `katalog` karena kode katalog lama banyak
+--     tidak match master katalog aktif; memaksa FK akan menolak baris legacy yang
+--     sah atau merusak katalog live. Kode/nama katalog di sini APA ADANYA dari
+--     data lama, tidak divalidasi ulang. Format dibakukan supaya UPT lain juga
+--     bisa pakai pipeline yang sama (lihat migration-tools/README.md).
+--     Diisi via migration-tools/load_legacy_history_to_supabase.mjs (service_role
+--     saja) dari hasil migration-tools/clean_warnoto_history.py — TIDAK ada
+--     tulisan dari App.jsx.
+-- ────────────────────────────────────────────────────────────
+create table if not exists legacy_history_archive (
+  id bigint generated always as identity primary key,
+  source_app text not null default 'appsheet_warnoto', -- antisipasi sumber legacy lain di masa depan
+  source_upt text,                -- "UPT Surabaya", "UPT Gresik", dst — teks bebas, bukan FK ke lokasi aktif
+  doc_type text,                  -- TUG3/TUG5/TUG8/TUG9/TUG10
+  doc_id text,                    -- No Dokumen/No Bon dari AppSheet
+  item_id text,
+  tanggal date,
+  jenis_transaksi text,           -- MASUK/KELUAR/PERMINTAAN
+  no_katalog text,                -- kode katalog APA ADANYA dari data lama, tidak divalidasi ke katalog aktif
+  nama_material text,
+  satuan text,
+  qty numeric,
+  unit_lawan text,
+  lokasi_kode text,
+  catatan text,
+  link_foto text,                 -- link Google Drive asli AppSheet, tidak dimigrasi fisik
+  match_confidence numeric,       -- dari hasil cleansing (0-100), transparansi kualitas data ke admin
+  issue_flags text,               -- anomali dari cleansing (mis. "KATALOG_KOSONG; NAMA_BEDA_DENGAN_MASTER"), kosong = bersih
+  sync_key text,                  -- dedupe idempotent antar-run import
+  imported_by text,
+  imported_at timestamptz default now()
+);
+create unique index if not exists idx_legacy_history_sync_key on legacy_history_archive(sync_key);
+create index if not exists idx_legacy_history_upt_doctype on legacy_history_archive(source_upt, doc_type);
+
+alter table legacy_history_archive enable row level security;
+-- Read HANYA untuk user login (BUKAN public seperti tug15_history) — arsip internal,
+-- bukan untuk halaman scan publik. Insert/update/delete HANYA lewat service_role
+-- (loader script), sengaja TIDAK ada policy write untuk anon/authenticated.
+drop policy if exists "Authenticated read legacy_history_archive" on legacy_history_archive;
+create policy "Authenticated read legacy_history_archive" on legacy_history_archive
+  for select using (auth.role() = 'authenticated');
+
+-- ────────────────────────────────────────────────────────────
+-- 27. LAMPIRAN ARSIP LEGACY — foto/PDF dokumen AppSheet lama yang file fisiknya
+--     ikut di-backup (path relatif lokal, bukan URL Drive). Diupload ke Supabase
+--     Storage oleh migration-tools/upload_legacy_history_attachments.mjs
+--     (service_role saja), dua bucket sesuai sensitivitas:
+--       - tug-docs-private : foto SIM/KTP sopir + PDF dokumen (data pribadi) —
+--                            disimpan sebagai `priv:<path>`, resolve via signed URL.
+--       - tug-photos       : foto surat jalan/permintaan/pengembalian, kendaraan,
+--                            dan foto barang (public URL langsung).
+-- ────────────────────────────────────────────────────────────
+alter table legacy_history_archive add column if not exists foto_barang_url text; -- backup foto item ke tug-photos (link_foto Drive lama bisa mati sewaktu-waktu)
+
+create table if not exists legacy_history_documents (
+  id bigint generated always as identity primary key,
+  source_app text not null default 'appsheet_warnoto',
+  source_upt text,
+  doc_type text,                  -- TUG3/TUG5/TUG8/TUG9/TUG10
+  doc_id text,                    -- No Dokumen/No Bon dari AppSheet
+  foto_surat_jalan_url text,      -- public (tug-photos)
+  foto_sim_ktp_url text,          -- private, disimpan sbg `priv:<path>` (tug-docs-private)
+  foto_kendaraan_url text,        -- public (tug-photos)
+  pdf_url text,                   -- private, disimpan sbg `priv:<path>` (tug-docs-private)
+  berita_acara_url text,          -- private, disimpan sbg `priv:<path>` (tug-docs-private)
+  lampiran_url text,              -- private, disimpan sbg `priv:<path>` (tug-docs-private)
+  match_notes text,               -- jejak resolusi file (mis. "sim_ktp: AMBIGU 2 kandidat beda isi, dipilih dari WARNOTOV2-2757983")
+  imported_by text,
+  imported_at timestamptz default now()
+);
+create unique index if not exists idx_legacy_history_documents_doc on legacy_history_documents(doc_type, doc_id);
+
+alter table legacy_history_documents enable row level security;
+-- Sama seperti legacy_history_archive: read hanya user login, write HANYA service_role.
+drop policy if exists "Authenticated read legacy_history_documents" on legacy_history_documents;
+create policy "Authenticated read legacy_history_documents" on legacy_history_documents
+  for select using (auth.role() = 'authenticated');
