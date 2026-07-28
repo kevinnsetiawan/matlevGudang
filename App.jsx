@@ -93,7 +93,7 @@ import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
-import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl } from "./src/lib/supabaseSync.js";
+import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
@@ -2023,37 +2023,65 @@ export default function PLNWarehouse() {
     // prevent duplicate katalog+lokasi combo (except when editing that same row)
     const dup = stocks.find(s => s.katalogId===stockForm.katalogId && s.lokasiId===stockForm.lokasiId && s.id!==stockForm.id);
     if (dup) { showToast("Kombinasi barang + lokasi ini sudah ada! Edit baris yang sudah ada saja.","error"); return; }
+    // Foto ke Storage DULU (sebelum percabangan approval — foto memang tidak butuh
+    // approval TL). Kalau upload gagal, batalkan simpan: lebih baik user ulang
+    // daripada base64 mentah masuk jsonb stocks.data lagi.
+    let sf = stockForm;
+    try {
+      for (const f of ["fotoNameplate","fotoKeseluruhan"])
+        if (_isDataUrl(sf[f])) sf = {...sf, [f]: await uploadStockFoto(sf.katalogId, f, sf[f])};
+    } catch (e) {
+      console.warn("Upload foto Data Stok gagal:", sf.id, e?.message||e);
+      showToast("Gagal upload foto ke server, coba lagi.","error"); return;
+    }
     let ns;
     let wentToApproval = false;
     if (stockModal==="edit") {
-      const original = stocks.find(s=>s.id===stockForm.id) || {};
+      const original = stocks.find(s=>s.id===sf.id) || {};
       const isTL = hasRole(currentUser, "TL");
-      const fieldsChanged = original.qty!==stockForm.qty || original.price!==stockForm.price || original.jenisBarang!==stockForm.jenisBarang;
+      const fieldsChanged = original.qty!==sf.qty || original.price!==sf.price || original.jenisBarang!==sf.jenisBarang;
       if (fieldsChanged && !isTL) {
         wentToApproval = true;
         // qty/harga/jenis butuh approval TL — field lain (lokasi, minQty, foto) tetap langsung tersimpan
         const updated = {
-          ...stockForm,
+          ...sf,
           qty: original.qty, price: original.price, jenisBarang: original.jenisBarang,
           editPending: true,
-          pendingEditData: { qty: stockForm.qty, price: stockForm.price, jenisBarang: stockForm.jenisBarang },
+          pendingEditData: { qty: sf.qty, price: sf.price, jenisBarang: sf.jenisBarang },
           editRequestedBy: currentUser.id, editRequestedAt: Date.now(),
         };
-        ns = stocks.map(s=>s.id===stockForm.id?updated:s);
+        ns = stocks.map(s=>s.id===sf.id?updated:s);
       } else {
-        ns = stocks.map(s=>s.id===stockForm.id?{...stockForm, editPending:false, pendingEditData:null}:s);
+        ns = stocks.map(s=>s.id===sf.id?{...sf, editPending:false, pendingEditData:null}:s);
       }
     }
-    else ns = [...stocks, {...stockForm, createdAt:Date.now()}];
+    else ns = [...stocks, {...sf, createdAt:Date.now()}];
     setStocks(ns); setStockModal(null);
-    // Hanya 1 baris berubah (edit/tambah baris id===stockForm.id) — sync ringan cuma baris itu.
-    await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===stockForm.id)});
-    logAudit(currentUser, stockModal==="edit"?"UPDATE":"CREATE", "stocks", stockForm.id, {katalogId:stockForm.katalogId, lokasiId:stockForm.lokasiId, wentToApproval});
+    // Hanya 1 baris berubah (edit/tambah baris id===sf.id) — sync ringan cuma baris itu.
+    await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===sf.id)});
+    logAudit(currentUser, stockModal==="edit"?"UPDATE":"CREATE", "stocks", sf.id, {katalogId:sf.katalogId, lokasiId:sf.lokasiId, wentToApproval});
     showToast(wentToApproval ? "📨 Perubahan qty/harga/jenis diajukan! Menunggu approval TL." : (stockModal==="edit" ? "Data Stok diupdate!" : "Data Stok baru ditambahkan!"));
   }
+  // Foto Data Stok WAJIB disimpan sebagai URL Supabase Storage, JANGAN base64 mentah
+  // ke jsonb `stocks.data` (insiden 2026-07-23 & 2026-07-28: tabel stocks 119KB → 12MB,
+  // GET /stocks lambat → snapshot realtime gagal → "koneksi realtime terputus").
+  // Melempar kalau upload gagal — pemanggil WAJIB membatalkan simpan, bukan fallback base64.
+  async function uploadStockFoto(katalogId, field, img) {
+    if (!_isDataUrl(img) || isDemoMode()) return img; // sudah URL Storage / mode demo (tidak menulis Storage)
+    const kode = String(katalogId || "tanpa-katalog").replace(/^KAT-/, "");
+    const path = `upt-surabaya/${kode}/${field==="fotoNameplate"?"tambahan":"utama"}.jpg`;
+    return _withTimeout(uploadPhotoToStorage(await compressImage(img, {maxBytes:1_000_000}), "stock-photos", path), 30_000, "unggah foto");
+  }
   // Upload langsung foto Nameplate/Keseluruhan dari modal detail (klik baris Data Stok) — khusus Admin/TL
+  // Return true kalau tersimpan, false kalau upload gagal (foto pending jangan dibuang).
   async function updateStockFoto(id, field, img) {
-    let ns = stocks.map(s=>s.id===id?{...s,[field]:img}:s);
+    let url;
+    try { url = await uploadStockFoto(stocks.find(s=>s.id===id)?.katalogId, field, img); }
+    catch (e) {
+      console.warn("Upload foto Data Stok gagal:", id, field, e?.message||e);
+      showToast("Gagal upload foto ke server, coba lagi.","error"); return false;
+    }
+    let ns = stocks.map(s=>s.id===id?{...s,[field]:url}:s);
     setStocks(ns);
     // Foto = payload paling berat; cuma 1 baris berubah → sync ringan baris itu saja.
     await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
@@ -2072,6 +2100,7 @@ export default function PLNWarehouse() {
         console.warn("Auto-OCR nameplate (upload) gagal:", id, e?.message||e);
       }
     }
+    return true;
   }
   // Auto-OCR nameplate di LATAR BELAKANG (senyap) — tanpa tombol/aksi user. Menyapu
   // foto Nameplate yang belum punya fotoNameplateOcr (mis. foto lama sebelum fitur
@@ -3099,6 +3128,14 @@ export default function PLNWarehouse() {
       showToast(`Kode katalog "${code}" sudah dipakai. Coba lagi.`, "error");
       return null;
     }
+    // Foto ke Storage dulu (sama alasannya dengan updateStockFoto/saveStock — JANGAN
+    // base64 mentah masuk jsonb stocks.data, insiden 2026-07-23 & 2026-07-28).
+    let fotoUrl = null;
+    try { fotoUrl = await uploadStockFoto(newKatalogId, "fotoKeseluruhan", foto); }
+    catch (e) {
+      console.warn("Upload foto material baru (opname) gagal:", newKatalogId, e?.message||e);
+      showToast("Gagal upload foto ke server, coba lagi.","error"); return null;
+    }
     const now = Date.now();
     const newKatalog = {
       id: newKatalogId, katalog: code, name: nama,
@@ -3114,7 +3151,7 @@ export default function PLNWarehouse() {
       qty: Number(qty) || 0, price: 0, minQty: 0, unit: satuan || "-",
       jenisBarang: "Non-Stock", name: nama, katalog: code,
       category: nama.split(";")[0].trim() || "Material",
-      fotoKeseluruhan: foto || null,
+      fotoKeseluruhan: fotoUrl,
       pendingOpnameId: opnameId,
       createdAt: now, updatedAt: now,
     };
@@ -3123,7 +3160,7 @@ export default function PLNWarehouse() {
     setKatalogList(nk); setStocks(ns);
     // Cuma 1 baris katalog & 1 baris stok baru ditambah — sync ringan baris itu saja.
     await saveToCloud({ katalogList: nk, stocks: ns }, {katalogChangedRows: [newKatalog], stocksChangedRows: [newStock]});
-    return newKatalog;
+    return { ...newKatalog, fotoKeseluruhan: fotoUrl };
   }
 
   // ── STOCK COUNT (banding SAP vs Aplikasi) — read-only, TIDAK mengubah
@@ -3292,7 +3329,20 @@ export default function PLNWarehouse() {
     if (["MAINTENANCE","KIR"].includes(updates.statusAlat) && alat.availabilityStatus==="DIPINJAM") {
       showToast("Alat sedang dipinjam, tidak bisa diubah ke status ini.","error"); return;
     }
-    const next = heavyEquipmentList.map(eq => eq.id === equipmentId ? { ...eq, ...updates, ...(updates.foto!==undefined ? {fotoUpdatedAt:Date.now(), fotoUpdatedBy:currentUser.id} : {}) } : eq);
+    // Foto ke Storage dulu (pola sama dengan Data Stok — JANGAN base64 mentah masuk
+    // jsonb heavy_equipment.data, cegah pola insiden 2026-07-23 & 2026-07-28 terulang
+    // di tabel lain). Bucket reuse "tug-photos" (sudah publik), folder alat-berat/.
+    let upd = updates;
+    if (_isDataUrl(updates.foto)) {
+      try {
+        const url = await _withTimeout(uploadPhotoToStorage(await compressImage(updates.foto, {maxBytes:1_000_000}), "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
+        upd = { ...updates, foto: url };
+      } catch (e) {
+        console.warn("Upload foto alat berat gagal:", equipmentId, e?.message||e);
+        showToast("Gagal upload foto ke server, coba lagi.","error"); return;
+      }
+    }
+    const next = heavyEquipmentList.map(eq => eq.id === equipmentId ? { ...eq, ...upd, ...(upd.foto!==undefined ? {fotoUpdatedAt:Date.now(), fotoUpdatedBy:currentUser.id} : {}) } : eq);
     setHeavyEquipmentList(next);
     await saveToCloud({heavyEquipmentList: next});
     logAudit(currentUser, "UPDATE", "heavy_equipment", equipmentId, {nama:alat.nama});
@@ -5496,8 +5546,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {hasUnsaved && (
                     <div style={{display:"flex",gap:6,marginTop:6}}>
                       <button style={{...sty.btn("primary","sm"),flex:1}} onClick={async()=>{
-                        await updateStockFoto(st.id, field, pendingFoto[field]);
-                        setPendingFoto(p=>{const n={...p}; delete n[field]; return n;});
+                        // Foto pending cuma dibuang kalau upload+simpan benar-benar sukses.
+                        if (await updateStockFoto(st.id, field, pendingFoto[field]))
+                          setPendingFoto(p=>{const n={...p}; delete n[field]; return n;});
                       }}>💾 Simpan Foto</button>
                       <button style={{...sty.btn("ghost","sm")}} onClick={()=>setPendingFoto(p=>{const n={...p}; delete n[field]; return n;})}>Batal</button>
                     </div>
