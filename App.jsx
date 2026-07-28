@@ -57,6 +57,7 @@ import { KapasitasGudangImportTab } from "./src/components/KapasitasGudangImport
 import { BarcodePrintModal } from "./src/components/BarcodePrintModal.jsx";
 import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
+import { InspeksiMaterialCadangTab } from "./src/components/InspeksiMaterialCadangTab.jsx";
 import { SignaturePadModal, SignaturePreviewButton } from "./src/components/SignaturePadModal.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
