@@ -11,6 +11,10 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   const [syncState, setSyncState] = useState({ loading:false, msg:"" });
 
   async function handleSyncSupabase() {
+    if (rows.length === 0) {
+      setSyncState({ loading: false, msg: "Tidak ada data mutasi untuk disinkronkan. Silakan sesuaikan filter terlebih dahulu." });
+      return;
+    }
     setSyncState({ loading:true, msg:"" });
     try {
       const histRes = await syncTUG15ToSupabase(rows, katalogList);
@@ -27,6 +31,10 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   }
 
   function downloadTUG15() {
+    if (rows.length === 0) {
+      alert("Tidak ada data mutasi untuk filter ini. Silakan reset/sesuaikan filter tanggal atau jenis transaksi terlebih dahulu.");
+      return;
+    }
     const html = buildTUG15HTML(rows, filter, katalogList);
     const blob = new Blob([html], {type:"text/html"});
     const url = URL.createObjectURL(blob);
@@ -38,6 +46,10 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   }
 
   function downloadTUG15Excel() {
+    if (rows.length === 0) {
+      alert("Tidak ada data mutasi untuk filter ini. Silakan reset/sesuaikan filter tanggal atau jenis transaksi terlebih dahulu.");
+      return;
+    }
     try {
       const headers = ["No","No Katalog","Deskripsi Material","Status SAP","Jenis Barang","Merk","Type","Satuan","Valuasi","Saldo Awal","Stok Masuk","Stok Keluar","Saldo Akhir","UPT","TUG/BA & Tgl","Keterangan","Tanggal Mutasi"];
       const dataRows = rows.map(r=>[
@@ -80,10 +92,13 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   const docTypeLabels = {TUG9:"TUG-9",TUG8:"TUG-8",TUG10:"TUG-10",TUG3:"TUG-3"};
 
   return (
-    <div>
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Filter Panel */}
-      <div style={{...sty.card,marginBottom:16,background:"#f8fafc"}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:12}}>🔍 Filter Laporan TUG-15</div>
+      <div style={{background:"#ffffff",border:"1px solid #cbd5e1",borderRadius:12,padding:18,boxShadow:"0 1px 3px rgba(15,23,42,0.04)"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#0b2559",marginBottom:14,borderBottom:"1px solid #f1f5f9",paddingBottom:8,letterSpacing:"0.2px",textTransform:"uppercase"}}>
+          Filter Laporan Mutasi Stok (TUG-15)
+        </div>
+
         <div className="tug15-date-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
           <div>
             <label style={sty.label}>Dari Tanggal</label>
@@ -94,7 +109,8 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             <input type="date" style={sty.input} value={filter.dateTo} onChange={e=>setFilter(f=>({...f,dateTo:e.target.value}))}/>
           </div>
         </div>
-        <div className="tug15-filter-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:12}}>
+
+        <div className="tug15-filter-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:14}}>
           <div>
             <label style={sty.label}>Kategori SAP</label>
             <select style={sty.select} value={filter.sapStatus||"ALL"} onChange={e=>setFilter(f=>({...f,sapStatus:e.target.value}))}>
@@ -118,13 +134,14 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             </select>
           </div>
         </div>
-        <div style={{marginBottom:12}}>
+
+        <div style={{marginBottom:16}}>
           <label style={sty.label}>Filter Jenis Transaksi</label>
           <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
             {["TUG9","TUG8","TUG10","TUG3"].map(dt=>{
               const active = filter.docTypes.includes(dt);
               return (
-                <button key={dt} type="button" style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${active?C.accent:C.border}`,background:active?C.accent:"white",color:active?"white":C.muted,fontSize:12,cursor:"pointer",fontWeight:active?700:400}}
+                <button key={dt} type="button" style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${active?"#0098da":"#cbd5e1"}`,background:active?"#0098da":"#ffffff",color:active?"#ffffff":"#475569",fontSize:12,cursor:"pointer",fontWeight:active?700:500,transition:"all 0.15s ease"}}
                   onClick={()=>setFilter(f=>({...f,docTypes:active?f.docTypes.filter(x=>x!==dt):[...f.docTypes,dt]}))}>
                   {docTypeLabels[dt]}
                 </button>
@@ -132,67 +149,72 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             })}
           </div>
         </div>
-        <div style={{display:"flex",gap:10,alignItems:"center"}}>
-          <button style={{...sty.btn("ghost","sm")}} onClick={()=>setFilter({dateFrom:"",dateTo:"",katalogId:"ALL",jenisBarang:"ALL",sapStatus:"ALL",docTypes:["TUG9","TUG8","TUG10","TUG3"]})}>↺ Reset Filter</button>
-          <span style={{fontSize:12,color:C.muted}}>{rows.length} baris ditemukan</span>
-          <div style={{marginLeft:"auto",display:"flex",gap:8}}>
-            <button style={{...sty.btn("ghost"),border:`1px solid #0ea5e9`,color:"#0ea5e9"}} onClick={handleSyncSupabase} disabled={rows.length===0||syncState.loading}>
-              {syncState.loading?"⏳ Sinkron...":"☁️ Sync ke Supabase"}
+
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",paddingTop:12,borderTop:"1px solid #f1f5f9"}}>
+          <button className="btn-pln-ghost" onClick={()=>setFilter({dateFrom:"",dateTo:"",katalogId:"ALL",jenisBarang:"ALL",sapStatus:"ALL",docTypes:["TUG9","TUG8","TUG10","TUG3"]})}>Reset Filter</button>
+          <span style={{fontSize:12,color:"#64748b",fontWeight:600}}>{rows.length} baris ditemukan</span>
+          <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn-pln-outline-blue" onClick={handleSyncSupabase} disabled={syncState.loading}>
+              {syncState.loading?"Sinkron...":"Sync ke Supabase"}
             </button>
-            <button style={{...sty.btn("ghost"),border:`1px solid ${C.green}`,color:C.green}} onClick={downloadTUG15Excel} disabled={rows.length===0}>📊 Download Excel (.xlsx)</button>
-            <button style={sty.btn("success")} onClick={downloadTUG15} disabled={rows.length===0}>⬇️ Download HTML/PDF</button>
+            <button className="btn-pln-ghost" style={{color:"#15803d",borderColor:"#86efac",background:"#f0fdf4"}} onClick={downloadTUG15Excel}>Export Excel (.xlsx)</button>
+            <button className="btn-pln-primary" onClick={downloadTUG15}>Download HTML / PDF</button>
           </div>
         </div>
-        {syncState.msg && <div style={{marginTop:10,fontSize:12,color:syncState.msg.startsWith("✗")?C.red||"#dc2626":"#0ea5e9",fontWeight:600}}>{syncState.msg}</div>}
+        {syncState.msg && <div style={{marginTop:10,fontSize:12,color:syncState.msg.startsWith("✗")?"#dc2626":"#0284c7",fontWeight:600}}>{syncState.msg}</div>}
       </div>
 
       {/* Preview Tabel */}
       {rows.length===0 ? (
-        <div style={{...sty.card,textAlign:"center",color:C.muted,padding:40}}>
-          <div style={{fontSize:36,marginBottom:12}}>📊</div>
-          <div style={{fontSize:14,fontWeight:700}}>Tidak ada data mutasi untuk filter ini</div>
-          <div style={{fontSize:12,color:C.muted,marginTop:4}}>Coba ubah rentang tanggal atau jenis transaksi</div>
+        <div style={{background:"#ffffff",border:"1px solid #e2e8f0",borderRadius:12,textAlign:"center",color:"#64748b",padding:40}}>
+          <div style={{fontSize:15,fontWeight:700,color:"#0f172a"}}>Tidak ada data mutasi untuk filter ini</div>
+          <div style={{fontSize:12,color:"#64748b",marginTop:4}}>Coba ubah rentang tanggal atau jenis transaksi.</div>
         </div>
       ) : (
-        <div style={{overflowX:"auto"}}>
-          <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Preview {rows.length} baris — scroll kanan untuk lihat semua kolom</div>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1050}}>
-            <thead>
-              <tr style={{background:C.sidebar,color:"white"}}>
-                {["No","No Katalog","Deskripsi","Status SAP","Jenis","Satuan","Saldo Awal","Masuk","Keluar","Saldo Akhir","TUG/BA","Keterangan","Tgl Mutasi"].map(h=>(
-                  <th key={h} style={{padding:"6px 8px",textAlign:["No","Saldo Awal","Masuk","Keluar","Saldo Akhir"].includes(h)?"center":"left",whiteSpace:"nowrap"}}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r,i)=>{
-                const sapBs = getSAPBadgeStyle(r.katalog);
-                return (
-                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"white":"#f9fafb"}}>
-                    <td style={{padding:"5px 8px",textAlign:"center",color:C.muted}}>{r.no}</td>
-                    <td style={{padding:"5px 8px",fontFamily:"monospace",fontSize:12}}>{r.katalog}</td>
-                    <td style={{padding:"5px 8px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.deskripsi}</td>
-                    <td style={{padding:"5px 8px"}}><span style={{padding:"2px 6px",borderRadius:20,fontSize:12,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{r.sapStatus}</span></td>
-                    <td style={{padding:"5px 8px",fontSize:12}}>{r.jenisBarang||"-"}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center"}}>{r.satuan}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center",color:C.muted}}>{fmtNum(r.saldoAwal)}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center",color:C.green,fontWeight:r.masuk>0?700:400}}>{r.masuk>0?fmtNum(r.masuk):"-"}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center",color:C.red,fontWeight:r.keluar>0?700:400}}>{r.keluar>0?fmtNum(r.keluar):"-"}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center",fontWeight:700}}>{fmtNum(r.saldoAkhir)}</td>
-                    <td style={{padding:"5px 8px",fontSize:12,color:"#0098da",whiteSpace:"nowrap"}}>{r.tugBaDoc}</td>
-                    <td style={{padding:"5px 8px",fontSize:12,color:C.muted,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.keterangan}</td>
-                    <td style={{padding:"5px 8px",textAlign:"center",fontSize:12,whiteSpace:"nowrap"}}>{r.tanggalMutasi}</td>
-                  </tr>
-                );
-              })}
-              <tr style={{background:"#f1f5f9",fontWeight:700,borderTop:`2px solid ${C.border}`}}>
-                <td colSpan={7} style={{padding:"6px 8px",textAlign:"right"}}>TOTAL</td>
-                <td style={{padding:"6px 8px",textAlign:"center",color:C.green}}>{fmtNum(rows.reduce((a,r)=>a+r.masuk,0))}</td>
-                <td style={{padding:"6px 8px",textAlign:"center",color:C.red}}>{fmtNum(rows.reduce((a,r)=>a+r.keluar,0))}</td>
-                <td colSpan={4}></td>
-              </tr>
-            </tbody>
-          </table>
+        <div style={{background:"#ffffff",border:"1px solid #cbd5e1",borderRadius:12,overflow:"hidden",boxShadow:"0 1px 3px rgba(15,23,42,0.04)"}}>
+          <div style={{padding:"12px 18px",background:"#f8fafc",borderBottom:"1px solid #e2e8f0",fontSize:12,color:"#475569",fontWeight:600,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>Pratinjau {rows.length} Baris Mutasi Stok</span>
+            <span style={{fontSize:11,color:"#94a3b8"}}>Scroll horizontal untuk melihat seluruh kolom</span>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1050}}>
+              <thead>
+                <tr style={{background:"#0b2559",color:"#ffffff"}}>
+                  {["No","No Katalog","Deskripsi Material","Status SAP","Jenis","Satuan","Saldo Awal","Masuk","Keluar","Saldo Akhir","Dokumen TUG/BA","Keterangan","Tgl Mutasi"].map(h=>(
+                    <th key={h} style={{padding:"9px 10px",textAlign:["No","Saldo Awal","Masuk","Keluar","Saldo Akhir"].includes(h)?"center":"left",whiteSpace:"nowrap",fontSize:11,fontWeight:700,letterSpacing:"0.3px"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r,i)=>{
+                  const sapBs = getSAPBadgeStyle(r.katalog);
+                  return (
+                    <tr key={i} style={{borderBottom:"1px solid #f1f5f9",background:i%2===0?"#ffffff":"#f9fafb"}}>
+                      <td style={{padding:"7px 10px",textAlign:"center",color:"#64748b"}}>{r.no}</td>
+                      <td style={{padding:"7px 10px",fontFamily:"monospace",fontSize:12,color:"#0284c7",fontWeight:600}}>{r.katalog}</td>
+                      <td style={{padding:"7px 10px",fontWeight:600,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.deskripsi}</td>
+                      <td style={{padding:"7px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:11,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{r.sapStatus}</span></td>
+                      <td style={{padding:"7px 10px",fontSize:12}}>{r.jenisBarang||"-"}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center"}}>{r.satuan}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center",color:"#64748b"}}>{fmtNum(r.saldoAwal)}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center",color:"#166534",fontWeight:r.masuk>0?700:400}}>{r.masuk>0?fmtNum(r.masuk):"-"}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center",color:"#b91c1c",fontWeight:r.keluar>0?700:400}}>{r.keluar>0?fmtNum(r.keluar):"-"}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center",fontWeight:700,color:"#0f172a"}}>{fmtNum(r.saldoAkhir)}</td>
+                      <td style={{padding:"7px 10px",fontSize:12,color:"#0284c7",whiteSpace:"nowrap",fontWeight:600}}>{r.tugBaDoc}</td>
+                      <td style={{padding:"7px 10px",fontSize:12,color:"#64748b",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.keterangan}</td>
+                      <td style={{padding:"7px 10px",textAlign:"center",fontSize:12,whiteSpace:"nowrap",color:"#475569"}}>{r.tanggalMutasi}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{background:"#f1f5f9",fontWeight:700,borderTop:"2px solid #cbd5e1"}}>
+                  <td colSpan={7} style={{padding:"9px 10px",textAlign:"right",color:"#0f172a"}}>TOTAL MUTASI</td>
+                  <td style={{padding:"9px 10px",textAlign:"center",color:"#166534",fontSize:13}}>{fmtNum(rows.reduce((a,r)=>a+r.masuk,0))}</td>
+                  <td style={{padding:"9px 10px",textAlign:"center",color:"#b91c1c",fontSize:13}}>{fmtNum(rows.reduce((a,r)=>a+r.keluar,0))}</td>
+                  <td colSpan={4}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

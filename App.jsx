@@ -57,6 +57,7 @@ import { KartuGantungModal } from "./src/components/KartuGantungModal.jsx";
 import { TUG15Tab } from "./src/components/TUG15Tab.jsx";
 import { MaterialCadangTab } from "./src/components/MaterialCadangTab.jsx";
 import { InspeksiMaterialCadangTab } from "./src/components/InspeksiMaterialCadangTab.jsx";
+import { SignaturePadModal, SignaturePreviewButton } from "./src/components/SignaturePadModal.jsx";
 import { ForecastStokPage } from "./src/components/ForecastStokPage.jsx";
 import { ApprovalTab } from "./src/components/ApprovalTab.jsx";
 import { SidebarNavItem } from "./src/components/SidebarNavItem.jsx";
@@ -243,6 +244,8 @@ export default function PLNWarehouse() {
   const [loginErr, setLoginErr] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false); // tombol Logout busy — cegah user refresh di tengah signOut yang bisa lambat
+  const [sigPadAkunModalOpen, setSigPadAkunModalOpen] = useState(false);
+  const [sigPadTugField, setSigPadTugField] = useState(null); // 'transporter' | 'menyerahkan' | 'penerima' | 'asman'
 
   const [users, setUsers] = useState([]); // di-fetch dari tabel "profiles" Supabase setelah login (lihat effect onAuthStateChange)
   const [rolePerms, setRolePerms] = useState({}); // override izin per role dari tabel role_permissions ({role: {key:bool}}); {} = pakai DEFAULT_PERMS
@@ -252,7 +255,10 @@ export default function PLNWarehouse() {
   const [txns, setTxns] = useState(() => readCachedList("pln_txns_v3") ?? []);
   const [satpamList, setSatpamList] = useState(() => readCachedList("pln_satpam_v1") ?? []);
   const [timMutuList, setTimMutuList] = useState(() => readCachedList("pln_tim_mutu_v1") ?? []);
-  const [uitList, setUitList] = useState(() => readCachedList("pln_uit_v1") ?? []);
+  const [uitList, setUitList] = useState(() => {
+    const cached = readCachedList("pln_uit_v1");
+    return (cached && cached.length > 0) ? cached : DEFAULT_UIT;
+  });
   const [uptList, setUptList] = useState(() => readCachedList("pln_upt_v1") ?? []);
   const [ultgList, setUltgList] = useState(() => readCachedList("pln_ultg_v1") ?? []); // Unit di bawah UPT (mis. ULTG Surabaya Utara/Selatan)
   const [gudangList, setGudangList] = useState(() => readCachedList("pln_gudang_v1") ?? []);
@@ -1128,7 +1134,28 @@ export default function PLNWarehouse() {
   showToastRef.current = showToast;
 
   async function handleLogin() {
-    if (!supabase) { setLoginErr("Supabase belum dikonfigurasi."); return; }
+    if (!supabase) {
+      // Local dev mode fallback — mengizinkan login lokal tanpa koneksi Supabase
+      const inputUsername = loginForm.username.trim() || "admin.gudang";
+      const mockLocalUser = {
+        id: "usr_local_admin",
+        name: inputUsername.toUpperCase() + " (Dev Mode)",
+        username: inputUsername.toLowerCase(),
+        role: "ADMIN",
+        jabatan: "Admin Gudang PLN (Local Dev)",
+        avatar: "",
+        uptId: "upt_surabaya",
+        ultgId: null,
+        uitId: null,
+        gudangIds: []
+      };
+      try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(mockLocalUser)); } catch {}
+      setCurrentUser(mockLocalUser);
+      setUsers([mockLocalUser]);
+      setAuthLoading(false);
+      showToast("💡 Login Mode Lokal berhasil (Supabase Dev Offline)", "success");
+      return;
+    }
     if (!loginForm.username.trim() || !loginForm.password) { setLoginErr("Username dan password wajib diisi."); return; }
     setLoginBusy(true); setLoginErr("");
     const payload = {
@@ -4764,13 +4791,31 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
-  const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
-  const activeTugTxns = tugSubTab==="TUG15" ? [] : txns.filter(t=>t.docType===tugSubTab);
+  const groupTabsMap = {
+    penerimaan: ["TUG3", "TUG10"],
+    pengeluaran: ["TUG9", "TUG8"],
+    permintaan: ["TUG5"],
+    laporan: ["TUG15"]
+  };
+  const allowedTabs = groupTabsMap[tugGroup] || ["TUG3"];
+  const currentSubTab = allowedTabs.includes(tugSubTab) ? tugSubTab : allowedTabs[0];
+
+  const filteredTxns = filterStatus === "ALL" ? txns : txns.filter(t => {
+    const s = (t.status || "").toUpperCase();
+    const st = (t.stage || "").toUpperCase();
+    if (filterStatus === "PENDING") return s.includes("PENDING") || st.includes("PENDING") || st.startsWith("MENUNGGU_");
+    if (filterStatus === "APPROVED") return s.includes("APPROVED") || st.includes("APPROVED");
+    if (filterStatus === "REJECTED") return s.includes("REJECTED") || st.includes("REJECTED");
+    if (filterStatus === "DRAFT") return s.includes("DRAFT") || st.includes("DRAFT");
+    return s === filterStatus;
+  }).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+
+  const activeTugTxns = currentSubTab==="TUG15" ? [] : txns.filter(t=>t.docType===currentSubTab);
   const activeTugSummary = [
     {label:"Total Dokumen",val:activeTugTxns.length},
-    {label:"Menunggu",val:activeTugTxns.filter(t=>t.status==="PENDING").length,cls:"is-alert"},
-    {label:"Disetujui",val:activeTugTxns.filter(t=>t.status==="APPROVED").length,cls:"is-ok"},
-    {label:"Draft",val:activeTugTxns.filter(t=>t.status==="DRAFT").length},
+    {label:"Menunggu",val:activeTugTxns.filter(t=>(t.status||"").includes("PENDING") || (t.stage||"").includes("PENDING")).length,cls:"is-alert"},
+    {label:"Disetujui",val:activeTugTxns.filter(t=>(t.status||"").includes("APPROVED")).length,cls:"is-ok"},
+    {label:"Draft",val:activeTugTxns.filter(t=>(t.status||"").includes("DRAFT") || t.stage==="DRAFT_TUG8").length},
   ];
 
   // ── DESIGN TOKENS ──
@@ -4820,6 +4865,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           )}
           <div style={{fontSize:20,fontWeight:800,color:C_LIGHT.text,marginBottom:4}}>Selamat Datang</div>
           <div style={{fontSize:13,color:C_LIGHT.muted,marginBottom:24}}>Masuk untuk melanjutkan ke sistem.</div>
+
+          {!supabase && (
+            <div style={{marginBottom: 16, padding: "10px 14px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, fontSize: 12, color: "#166534", lineHeight: 1.4}}>
+              💡 <b>Mode Dev Lokal Aktif</b> (Tanpa Supabase Cloud). Isi username atau langsung klik <b>Masuk ke Sistem</b> untuk login sebagai Admin.
+            </div>
+          )}
           <div style={{marginBottom:16}}>
             <label style={loginSty.label}>Username</label>
             <input style={loginSty.input} placeholder="Masukkan username..." value={loginForm.username} onChange={e=>setLoginForm(f=>({...f,username:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleLogin()} autoFocus/>
@@ -4878,11 +4929,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
   const sidebarCompact = !isMobile && sidebarCollapsed;
   const masterPageTitle = stockSubTab==="katalog"?"Master Katalog Barang":stockSubTab==="satpam"?"Daftar Satpam":stockSubTab==="timmutu"?"Master Tim Mutu":stockSubTab==="organisasi"?"Struktur Organisasi":stockSubTab==="akun"?"Kelola Akun":stockSubTab==="migrasi"?"Migrasi Data SAP / Non-SAP":stockSubTab==="auditLog"?"Audit Log":stockSubTab==="perms"?"Matrix Izin":"Master Gudang";
+
   const pageMeta = {
     dashboard: {eyebrow:"Operations Overview",title:hasRole(currentUser,"MANAGER")?"Dashboard Eksekutif":hasRole(currentUser,"ASMAN")?"Dashboard Operasional":"Dashboard Gudang"},
     stock: {eyebrow:"Inventory Control",title:"Data Stok Gudang"},
     master: {eyebrow:"Master Data",title:masterPageTitle},
-    transaction: {eyebrow:(TUG_UI[tugSubTab]||{}).code||"TUG",title:(TUG_UI[tugSubTab]||{}).title||"Transaksi TUG"},
+    transaction: {eyebrow:(TUG_UI[currentSubTab]||{}).code||"TUG",title:(TUG_UI[currentSubTab]||{}).title||"Transaksi TUG"},
     approval: {eyebrow:"Decision Center",title:"Approval"},
     heavyEquipment: {eyebrow:"Fleet Operations",title:"Alat Berat & Peminjaman"},
     attb: {eyebrow:"Asset Disposal Governance",title:"ATTB — Penghapusan Aset"},
@@ -6403,61 +6455,59 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         )}
         {tab==="transaction" && (
           <div className="workspace-page tug-page">
-            <section className={`kpi-banner tug-summary-banner${tugSubTab==="TUG15"?" is-context-only":""}`} aria-label="Ringkasan transaksi TUG">
+            <section className={`kpi-banner tug-summary-banner${currentSubTab==="TUG15"?" is-context-only":""}`} aria-label="Ringkasan transaksi TUG">
               <div className="tug-summary-banner__context">
                 <div className="tug-summary-banner__copy">
                   <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
-                  <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
-                  <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
+                  <strong>{(TUG_UI[currentSubTab]||{}).title || "Dokumen TUG"}</strong>
+                  <small>{(TUG_UI[currentSubTab]||{}).desc || ""}</small>
                 </div>
               </div>
-              {tugSubTab!=="TUG15" && (
-                <div className="tug-summary-banner__metrics">
-                  {activeTugSummary.map(metric=>(
-                    <div key={metric.label} className={`kpi-banner__item${metric.cls?" "+metric.cls:""}`}>
-                      <strong>{metric.val}</strong><span>{metric.label}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="tug-summary-banner__metrics">
+                {activeTugSummary.map(metric=>(
+                  <div key={metric.label} className={`kpi-banner__item${metric.cls?" "+metric.cls:""}`}>
+                    <strong>{metric.val}</strong><span>{metric.label}</span>
+                  </div>
+                ))}
+              </div>
             </section>
 
-            <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
-              <div className="tug-process-tabs__header">
-                <strong>Pilih jenis transaksi</strong>
-                <span>Klik kartu untuk membuka proses yang dibutuhkan</span>
-              </div>
-              <div className="tug-process-tabs__options" role="tablist" aria-label="Pilih proses TUG">
-                {(tugGroup==="penerimaan" ? ["TUG3","TUG10"]
-                  : tugGroup==="pengeluaran" ? ["TUG9","TUG8"]
-                  : tugGroup==="laporan" ? ["TUG15"]
-                  : ["TUG5"]
-                ).map(id=>{
-                  const u = TUG_UI[id]||{}; const on = tugSubTab===id;
-                  return (
-                  <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
-                    <span>{u.code||id}</span>
-                    <strong>{u.chip||id}</strong>
-                    <small>{on?"Sedang dibuka":"Klik untuk buka"}</small>
-                  </button>
-                  );
-                })}
-              </div>
-            </section>
-            {(can(currentUser, "aksi.buatTransaksi", rolePerms) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
+            {allowedTabs.length > 1 && (
+              <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
+                <div className="tug-process-tabs__header">
+                  <strong>Pilih jenis transaksi</strong>
+                  <span>Klik kartu untuk membuka proses yang dibutuhkan</span>
+                </div>
+                <div className="tug-process-tabs__options" role="tablist" aria-label="Pilih proses TUG">
+                  {allowedTabs.map(id=>{
+                    const u = TUG_UI[id]||{}; const on = currentSubTab===id;
+                    return (
+                    <button key={id} className={on?"is-active":""} onClick={()=>setTugSubTab(id)} title={u.code} role="tab" aria-selected={on}>
+                      <span>{u.code||id}</span>
+                      <strong>{u.chip||id}</strong>
+                      <small>{on?"Sedang dibuka":"Klik untuk buka"}</small>
+                    </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+            {(can(currentUser, "aksi.buatTransaksi", rolePerms) || hasRole(currentUser, "ADMIN_ULTG")) && (currentSubTab==="TUG3"||currentSubTab==="TUG10"||currentSubTab==="TUG9"||currentSubTab==="TUG8"||currentSubTab==="TUG5") && (
               <div className="tug-action-row">
-                <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong></div>
-                <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>
+                <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[currentSubTab]||{}).title || "Dokumen TUG"}</strong></div>
+                <button className="tug-primary-action" onClick={()=>openNewTxn(currentSubTab)}>{(TUG_UI[currentSubTab]||{}).buat || "Buat Baru"}</button>
               </div>
             )}
-            <div className="tug-status-filter">
-              <span>Status dokumen</span>
-              {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
-                <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
-              ))}
-            </div>
+            {currentSubTab!=="TUG15" && (
+              <div className="tug-status-filter">
+                <span>Status dokumen</span>
+                {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
+                  <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
+                ))}
+              </div>
+            )}
 
-            {tugSubTab==="TUG3" ? (
+            {currentSubTab==="TUG3" ? (
               <TUG3Tab
                 txns={txns.filter(t=>t.docType==="TUG3")}
                 filterStatus={filterStatus}
@@ -6468,7 +6518,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 submitTUG3FinalLampiran={submitTUG3FinalLampiran} approveTUG3Final_Asman={approveTUG3Final_Asman} rejectTUG3Final_Asman={rejectTUG3Final_Asman}
                 handleImg={handleImg} setDocPreview={setDocPreview}
               />
-            ) : tugSubTab==="TUG5" ? (
+            ) : currentSubTab==="TUG5" ? (
               <TUG5Tab
                 txns={txns}
                 filterStatus={filterStatus}
@@ -6485,7 +6535,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 adoptTUG5ULTG={adoptTUG5ULTG} openDraftTug9={openDraftTug9}
                 isMobile={isMobile}
               />
-            ) : tugSubTab==="TUG15" ? (
+            ) : currentSubTab==="TUG15" ? (
               <TUG15Tab
                 txns={txns} katalogList={katalogList} stocks={stocks}
                 sty={sty} C={C}
@@ -6494,46 +6544,76 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               />
             ) : (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
-              {filteredTxns.filter(t=>t.docType===tugSubTab).length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada transaksi {tugSubTab.replace("TUG","TUG-")}</div>}
-              {filteredTxns.filter(t=>t.docType===tugSubTab).map(t=>{
+              {filteredTxns.filter(t=>t.docType===currentSubTab).length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada transaksi {currentSubTab.replace("TUG","TUG-")}</div>}
+              {filteredTxns.filter(t=>t.docType===currentSubTab).map(t=>{
                 const creator = users.find(u=>u.id===t.createdBy)||{};
                 const approver = users.find(u=>u.id===t.approvedBy)||{};
                 const dKey = t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":"tug10";
                 const lokTujuan = lokasiList.find(l=>l.id===t.lokasiTujuanId);
                 return (
-                  <div key={t.id} style={{...sty.card}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div key={t.id} className="tug-card-enterprise">
+                    <div className="tug-card-header-bar">
                       <div>
-                        <div style={{fontWeight:800,fontSize:14}}>{t.namaPekerjaan}</div>
-                        <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>{t.docNumbers[dKey]}</div>
+                        <div style={{fontWeight:700,fontSize:14,color:"#0f172a"}}>{t.namaPekerjaan}</div>
+                        <div className="tug-doc-tag" style={{marginTop:3}}>{t.docNumbers[dKey]}</div>
                       </div>
                       <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        {t.legacyImport && <span title="Diimpor dari histori lama" style={{padding:"2px 8px",borderRadius:20,fontSize:12,fontWeight:700,background:"#ede9fe",color:"#6d28d9"}}>🕘 Legacy</span>}
+                        {t.legacyImport && <span title="Diimpor dari histori lama" style={{padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,background:"#ede9fe",color:"#6d28d9"}}>Legacy</span>}
                         <span style={sty.statusBadge(t.status)}>{t.status}</span>
                       </div>
                     </div>
-                    <div style={{fontSize:12,color:C.muted,display:"flex",gap:16,flexWrap:"wrap",marginBottom:8}}>
-                      <span>📍 {t.lokasiPekerjaan}</span>
-                      <span>📅 {fmtDate(t.createdAt)}</span>
-                      <span>👷 {creator.name||"-"} ({ROLES[creator.role]})</span>
-                      {t.docType==="TUG8" && <span>🏭 Unit Tujuan: {t.unitTujuan}</span>}
-                      {(t.docType==="TUG9"||t.docType==="TUG8") && <span>🏢 Penerima: {t.penerimaNama} ({t.penerimaUnit})</span>}
-                      {t.docType==="TUG10" && <span>📍 Disimpan di: {lokTujuan?.kode||"-"}</span>}
-                      {t.docType==="TUG10" && <span>📤 Menyerahkan: {t.menyerahkanNama}</span>}
+                    <div style={{padding:16}}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:16,fontSize:12,color:"#64748b",marginBottom:12,background:"#f8fafc",padding:"8px 12px",borderRadius:6,border:"1px solid #f1f5f9"}}>
+                        <span><strong>Lokasi Pekerjaan:</strong> {t.lokasiPekerjaan}</span>
+                        <span><strong>Tanggal:</strong> {fmtDate(t.createdAt)}</span>
+                        <span><strong>Diajukan Oleh:</strong> {creator.name||"-"} ({ROLES[creator.role]})</span>
+                        {t.docType==="TUG8" && <span><strong>Unit Tujuan:</strong> {t.unitTujuan}</span>}
+                        {(t.docType==="TUG9"||t.docType==="TUG8") && <span><strong>Penerima:</strong> {t.penerimaNama} ({t.penerimaUnit})</span>}
+                        {t.docType==="TUG10" && <span><strong>Disimpan di:</strong> {lokTujuan?.kode||"-"}</span>}
+                        {t.docType==="TUG10" && <span><strong>Menyerahkan:</strong> {t.menyerahkanNama}</span>}
+                      </div>
+
+                      <table className="tug-table-preview">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Material / Barang</th>
+                            <th>Lokasi Storage</th>
+                            <th style={{textAlign:"right"}}>Jumlah</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {t.docType!=="TUG10" ? t.stockItems.map((si,idx)=>{
+                            const stock = enrichedStocks.find(s=>s.id===si.stockId);
+                            return (
+                              <tr key={idx}>
+                                <td style={{width:30,color:"#94a3b8"}}>{idx+1}</td>
+                                <td style={{fontWeight:600}}>{stock?.name||"?"} <span style={{fontFamily:"monospace",color:"#0284c7",fontSize:11}}>[{stock?.katalog}]</span></td>
+                                <td style={{color:"#475569"}}>{stock?.lokasi||"-"}</td>
+                                <td style={{textAlign:"right",fontWeight:700}}>{si.qty} {stock?.unit}</td>
+                              </tr>
+                            );
+                          }) : t.stockItems.map((si,idx)=>{
+                            const namaBarang = si.katalogMode==="existing" ? (katalogList.find(k=>k.id===si.katalogId)?.name||"?") : si.namaBaru;
+                            const bs = statusMaterialBadgeStyle(si.statusMaterial);
+                            return (
+                              <tr key={idx}>
+                                <td style={{width:30,color:"#94a3b8"}}>{idx+1}</td>
+                                <td style={{fontWeight:600}}>{namaBarang} {si.noSeri && <span style={{fontSize:11,color:"#64748b"}}>• SN: {si.noSeri}</span>}</td>
+                                <td><span style={{padding:"2px 7px",borderRadius:20,fontSize:11,background:bs.bg,color:bs.fg,fontWeight:700}}>{si.statusMaterial}</span></td>
+                                <td style={{textAlign:"right",fontWeight:700}}>{si.qty} BH</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+
+                      {t.status==="APPROVED" && <div style={{fontSize:12,color:"#15803d",marginBottom:8,fontWeight:600}}>✓ Disetujui oleh {approver.name} ({ROLES[approver.role]}) • {fmtDate(t.approvedAt)} {t.asmanAutoApproved && "• Asman Konstruksi otomatis ikut menyetujui"}</div>}
+                      {t.status==="REJECTED" && <div style={{fontSize:12,color:"#b91c1c",marginBottom:8,fontWeight:600}}>✕ Ditolak: {t.rejectReason}</div>}
+                      <div className="tug-card__footer-actions">
+                        <button className="tug-btn-secondary" onClick={()=>setDocPreview(t)}>Lihat &amp; Unduh Dokumen {t.docType.replace("TUG","TUG-")}</button>
+                      </div>
                     </div>
-                    <div style={{background:"#f9fafb",borderRadius:8,padding:8,marginBottom:8}}>
-                      {t.docType!=="TUG10" ? t.stockItems.map((si,idx)=>{
-                        const stock = enrichedStocks.find(s=>s.id===si.stockId);
-                        return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {stock?.name||"?"} <b>x{si.qty}</b> {stock?.unit} <span style={{fontSize:12,color:C.muted}}>@ {stock?.lokasi}</span> <span style={sty.jenisBadge(stock?.jenisBarang)}>{stock?.jenisBarang}</span></div>;
-                      }) : t.stockItems.map((si,idx)=>{
-                        const namaBarang = si.katalogMode==="existing" ? (katalogList.find(k=>k.id===si.katalogId)?.name||"?") : si.namaBaru;
-                        const bs = statusMaterialBadgeStyle(si.statusMaterial);
-                        return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {namaBarang} <b>x{si.qty}</b> <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:bs.bg,color:bs.fg,fontWeight:700}}>{si.statusMaterial}</span>{si.noSeri && <span style={{fontSize:12,color:C.muted}}> • SN: {si.noSeri}</span>}</div>;
-                      })}
-                    </div>
-                    {t.status==="APPROVED" && <div style={{fontSize:12,color:C.green,marginBottom:8}}>✅ Disetujui oleh {approver.name} ({ROLES[approver.role]}) • {fmtDate(t.approvedAt)} {t.asmanAutoApproved && "• Asman Konstruksi otomatis ikut menyetujui"}</div>}
-                    {t.status==="REJECTED" && <div style={{fontSize:12,color:C.red,marginBottom:8}}>❌ Ditolak: {t.rejectReason}</div>}
-                    {t.status==="APPROVED" && <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat & Unduh Dokumen {t.docType.replace("TUG","TUG-")}</button>}
                   </div>
                 );
               })}
@@ -8579,6 +8659,17 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     })}
                   </div>
                 </div>
+
+                <div style={{marginBottom:16}}>
+                  <SignaturePreviewButton
+                    label="Tanda Tangan Digital Profil (Bawaan Akun)"
+                    signatureUrl={akunForm.signatureUrl}
+                    onOpenModal={()=>setSigPadAkunModalOpen(true)}
+                    onRemove={()=>setAkunForm(f=>({...f, signatureUrl: null}))}
+                    C={C} sty={sty}
+                  />
+                </div>
+
                 <div style={{display:"flex",gap:10}}>
                   <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setAkunModal(null)} disabled={akunBusy}>Batal</button>
                   <button style={{...sty.btn("primary"),flex:2,opacity:akunBusy?0.6:1}} onClick={akunModal==="edit"?submitAkunEdit:submitAkunBaru} disabled={akunBusy}>{akunBusy?(akunModal==="edit"?"Menyimpan...":"Mendaftarkan..."):(akunModal==="edit"?"💾 Simpan Perubahan":"💾 Daftarkan")}</button>
@@ -8588,6 +8679,35 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           </div>
         </div>
       )}
+
+      {/* Modal Pad TTD Form TUG */}
+      <SignaturePadModal
+        isOpen={Boolean(sigPadTugField)}
+        onClose={()=>setSigPadTugField(null)}
+        onSave={(dataUrl)=>{
+          if (sigPadTugField && txnForm) {
+            setTxnForm(tf => ({
+              ...tf,
+              signatures: { ...(tf.signatures || {}), [sigPadTugField]: dataUrl }
+            }));
+          }
+        }}
+        title={`Tanda Tangan Digital — ${sigPadTugField === "transporter" ? "Transporter / Pengemudi" : sigPadTugField === "menyerahkan" ? "Yang Menyerahkan" : sigPadTugField === "penerima" ? "Yang Menerima" : "TUG"}`}
+        subtitle="Coret tanda tangan pada area yang tersedia untuk dimasukkan ke dokumen cetak TUG"
+        initialSignature={txnForm?.signatures?.[sigPadTugField]}
+        C={C} sty={sty} isMobile={isMobile}
+      />
+
+      {/* Modal Pad TTD Profil User */}
+      <SignaturePadModal
+        isOpen={Boolean(sigPadAkunModalOpen)}
+        onClose={()=>setSigPadAkunModalOpen(false)}
+        onSave={(dataUrl)=>setAkunForm(f=>({...f, signatureUrl: dataUrl}))}
+        title="Tanda Tangan Digital — Profile Akun"
+        subtitle="Coret tanda tangan bawaan akun yang akan otomatis digunakan pada transaksi Anda"
+        initialSignature={akunForm?.signatureUrl}
+        C={C} sty={sty} isMobile={isMobile}
+      />
 
       {/* GANTI PASSWORD MODAL — self-service, semua role, akun sendiri */}
       {gantiPasswordModal && (
@@ -8714,14 +8834,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   {kat && <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Nomor Normalisasi: {kat.katalog||"-"} • Satuan: {kat.satuan}</div>}
                   {txnForm.sourceType==="ULTG" ? (
                     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:8}}>
-                      <div><label style={sty.label}>Sisa Persediaan <span style={{color:C.muted,fontWeight:400}}>(stok aktual UPT)</span></label><input style={{...sty.input,background:"#f3f4f6"}} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} disabled/></div>
-                      <div><label style={sty.label}>Jumlah Permintaan {kat?.satuan && <span style={{color:C.muted,fontWeight:400}}>({kat.satuan})</span>}</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
+                      <div><label style={sty.label}>Sisa Persediaan <span style={{color:C.muted,fontWeight:400}}>(stok aktual UPT)</span></label><input style={{...sty.input,background:"#f3f4f6"}} type="text" inputMode="numeric" value={si.sisaPersediaan||""} placeholder="0" disabled/></div>
+                      <div><label style={sty.label}>Jumlah Permintaan {kat?.satuan && <span style={{color:C.muted,fontWeight:400}}>({kat.satuan})</span>}</label><input style={sty.input} type="text" inputMode="numeric" value={si.permintaan||""} placeholder="1" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"permintaan",v===""?"":Number(v));}}/></div>
                     </div>
                   ) : (
                     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:8}}>
-                      <div><label style={sty.label}>Pemakaian/Bulan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.pemakaianBulan||0} onChange={e=>updateItemRow(idx,"pemakaianBulan",Number(e.target.value))}/></div>
-                      <div><label style={sty.label}>Sisa Persediaan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.sisaPersediaan||0} onChange={e=>updateItemRow(idx,"sisaPersediaan",Number(e.target.value))}/></div>
-                      <div><label style={sty.label}>Jumlah Permintaan</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.permintaan||1} onChange={e=>updateItemRow(idx,"permintaan",Number(e.target.value))}/></div>
+                      <div><label style={sty.label}>Pemakaian/Bulan</label><input style={sty.input} type="text" inputMode="numeric" value={si.pemakaianBulan||""} placeholder="0" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"pemakaianBulan",v===""?"":Number(v));}}/></div>
+                      <div><label style={sty.label}>Sisa Persediaan</label><input style={sty.input} type="text" inputMode="numeric" value={si.sisaPersediaan||""} placeholder="0" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"sisaPersediaan",v===""?"":Number(v));}}/></div>
+                      <div><label style={sty.label}>Jumlah Permintaan</label><input style={sty.input} type="text" inputMode="numeric" value={si.permintaan||""} placeholder="1" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"permintaan",v===""?"":Number(v));}}/></div>
                     </div>
                   )}
                   <div style={{marginTop:8}}><label style={sty.label}>Keterangan</label><input style={sty.input} value={si.keterangan||""} onChange={e=>updateItemRow(idx,"keterangan",e.target.value)} placeholder="cth: Single Insulator Strings"/></div>
@@ -8742,7 +8862,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <>
                 <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>ADMINISTRASI</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10,marginBottom:16}}>
-                  <div><label style={sty.label}>Keterangan Umum</label><input style={sty.input} value={txnForm.keteranganUmum||""} onChange={e=>setTxnForm(tf=>({...tf,keteranganUmum:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit UPT Surabaya"/></div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:10}}>
+                    <div><label style={sty.label}>Nama Pekerjaan / Keterangan Pekerjaan *</label><input style={sty.input} value={txnForm.keteranganUmum||txnForm.namaPekerjaan||""} onChange={e=>setTxnForm(tf=>({...tf,keteranganUmum:e.target.value,namaPekerjaan:e.target.value}))} placeholder="cth: Penggantian Isolator Komposit UPT Surabaya"/></div>
+                    <div><label style={sty.label}>Lokasi Pekerjaan</label><input style={sty.input} value={txnForm.lokasiPekerjaan||""} onChange={e=>setTxnForm(tf=>({...tf,lokasiPekerjaan:e.target.value}))} placeholder="cth: GI Rungkut / Substation UPT Surabaya"/></div>
+                  </div>
                   <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:10}}>
                     <div><label style={sty.label}>Perintah Kerja</label><input style={sty.input} value={txnForm.perintahKerja||""} onChange={e=>setTxnForm(tf=>({...tf,perintahKerja:e.target.value}))}/></div>
                     <div><label style={sty.label}>Kode Perkiraan</label><input style={sty.input} value={txnForm.kodePerkiraan||""} onChange={e=>setTxnForm(tf=>({...tf,kodePerkiraan:e.target.value}))}/></div>
@@ -8770,7 +8893,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 <button onClick={()=>setTxnModal(false)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button>
               </div>
             </div>
-            <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>⚠️ Transaksi akan PENDING sampai disetujui TL Logistik / Asman.</div>
+            <div style={{background:"#fef3c7",border:`1px solid #fcd34d`,borderRadius:8,padding:"8px 12px",fontSize:12,color:"#92400e",marginBottom:16}}>Transaksi akan PENDING sampai disetujui TL Logistik / Asman.</div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>DATA PEKERJAAN</div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:14}}>
@@ -8783,7 +8906,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 </div>
               )}
               <div><label style={sty.label}>No. Surat / Nodin</label><input style={sty.input} value={txnForm.noNodin} onChange={e=>setTxnForm(tf=>({...tf,noNodin:e.target.value}))} placeholder="2175/LOG.00.02/F34000000/2026"/></div>
-              <div><label style={sty.label}>No. Surat Persetujuan</label><input style={sty.input} value={txnForm.noPersetujuan} onChange={e=>setTxnForm(tf=>({...tf,noPersetujuan:e.target.value}))} placeholder="1861/DAN.01.03/F34000000/2026"/></div>
+              <div><label style={sty.label}>No. Surat Persetujuan</label><input style={sty.input} value={txnForm.noPersetujuan} onChange={e=>setTxnForm(tf=>({...tf,noPersetujuan:e.target.value,noSuratPersetujuan:e.target.value}))} placeholder="1861/DAN.01.03/F34000000/2026"/></div>
+              <div><label style={sty.label}>Perkiraan Pembebanan</label><input style={sty.input} value={txnForm.perkiraanPembebanan||""} onChange={e=>setTxnForm(tf=>({...tf,perkiraanPembebanan:e.target.value}))} placeholder="cth: SKKI Operasi & Pemeliharaan"/></div>
+              <div><label style={sty.label}>Kode Perkiraan</label><input style={sty.input} value={txnForm.kodePerkiraan||""} onChange={e=>setTxnForm(tf=>({...tf,kodePerkiraan:e.target.value}))} placeholder="cth: 521.10.01"/></div>
             </div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>DATA PENERIMA</div>
@@ -8814,7 +8939,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>BARANG / MATERIAL</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontStyle:"italic"}}>💡 Barang yang sama bisa ada di lokasi berbeda — pastikan pilih baris dengan lokasi yang benar.</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontStyle:"italic"}}>Barang yang sama bisa ada di lokasi berbeda — pastikan pilih baris dengan lokasi yang benar.</div>
             {txnForm.stockItems.map((si,idx)=>{
               const stockOpt = enrichedStocks.find(s=>s.id===si.stockId);
               return (
@@ -8830,7 +8955,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                       renderOption={s=>(
                         <div>
                           <div style={{fontWeight:600}}>{s.name} <span style={{color:C.muted,fontWeight:400}}>[{s.katalog}]</span></div>
-                          <div style={{fontSize:12,color:C.muted}}>📍 {s.lokasi} • {s.jenisBarang!=="Non-Stock"?`Stok: ${fmtNum(s.qty)} ${s.unit}`:"Non-Stock"}</div>
+                          <div style={{fontSize:12,color:C.muted}}>Lokasi: {s.lokasi} • {s.jenisBarang!=="Non-Stock"?`Stok: ${fmtNum(s.qty)} ${s.unit}`:"Non-Stock"}</div>
                         </div>
                       )}
                       placeholder="-- Cari & pilih barang --"
@@ -8838,8 +8963,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                     />
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
-                    <div style={{flex:1}}><label style={sty.label}>Qty</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.qty} onChange={e=>updateItemRow(idx,"qty",Number(e.target.value))}/></div>
-                    <button type="button" title="Scan barcode" style={{...sty.btn("ghost","sm"),height:isMobile?44:36}} onClick={()=>openScanner({txnIndex:idx})}>📷</button>
+                    <div style={{flex:1}}><label style={sty.label}>Qty</label><input style={sty.input} type="text" inputMode="numeric" value={si.qty||""} placeholder="1" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"qty",v===""?"":Number(v));}}/></div>
+                    <button type="button" title="Scan barcode" style={{...sty.btn("ghost","sm"),height:isMobile?44:36}} onClick={()=>openScanner({txnIndex:idx})}>Scan Barcode</button>
                     {txnForm.stockItems.length>1 && <button type="button" title="Hapus baris barang ini" style={{...sty.btn("danger","sm"),height:isMobile?44:36}} onClick={()=>removeItemRow(idx)}>✕</button>}
                   </div>
                 </div>
@@ -8849,7 +8974,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
             <div style={{marginBottom:14}}><label style={sty.label}>Keterangan Barang{txnForm.docType!=="TUG8"?" (status proyek/non-stock)":""}</label><input style={sty.input} value={txnForm.keteranganBarang} onChange={e=>setTxnForm(tf=>({...tf,keteranganBarang:e.target.value}))} placeholder="cth: Untuk Proyek PT. Mitra Jaya"/></div>
 
-            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>📸 LAMPIRAN FOTO (opsional)</div>
+            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>LAMPIRAN FOTO (opsional)</div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:12,marginBottom:14}}>
               <div>
                 <label style={sty.label}>Foto Kendaraan</label>
@@ -8883,6 +9008,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 })}
                 {txnForm.stockItems.filter(si=>si.stockId).length===0 && <div style={{fontSize:12,color:C.muted,fontStyle:"italic"}}>Pilih barang terlebih dahulu untuk upload foto material</div>}
               </div>
+            </div>
+
+            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>✍️ TANDA TANGAN DIGITAL DOKUMEN TUG</div>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:16}}>
+              <SignaturePreviewButton
+                label="TTD Transporter / Pengemudi"
+                signatureUrl={txnForm.signatures?.transporter}
+                onOpenModal={()=>setSigPadTugField("transporter")}
+                onRemove={()=>setTxnForm(tf=>({...tf, signatures:{...(tf.signatures||{}), transporter:null}}))}
+                C={C} sty={sty}
+              />
+              <SignaturePreviewButton
+                label="TTD Yang Menyerahkan (Admin Gudang)"
+                signatureUrl={txnForm.signatures?.menyerahkan || currentUser?.signatureUrl}
+                onOpenModal={()=>setSigPadTugField("menyerahkan")}
+                onRemove={()=>setTxnForm(tf=>({...tf, signatures:{...(tf.signatures||{}), menyerahkan:null}}))}
+                C={C} sty={sty}
+              />
             </div>
 
             <div style={sty.stickyFooter}>
@@ -9101,6 +9244,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               </div>
             )}
 
+            <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>✍️ TANDA TANGAN DIGITAL DOKUMEN TUG-10</div>
+            <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12,marginBottom:16}}>
+              <SignaturePreviewButton
+                label="TTD Yang Menyerahkan (Pihak Pengembali)"
+                signatureUrl={txnForm.signatures?.menyerahkan}
+                onOpenModal={()=>setSigPadTugField("menyerahkan")}
+                onRemove={()=>setTxnForm(tf=>({...tf, signatures:{...(tf.signatures||{}), menyerahkan:null}}))}
+                C={C} sty={sty}
+              />
+              <SignaturePreviewButton
+                label="TTD Yang Menerima (SPV Logistik)"
+                signatureUrl={txnForm.signatures?.penerima || currentUser?.signatureUrl}
+                onOpenModal={()=>setSigPadTugField("penerima")}
+                onRemove={()=>setTxnForm(tf=>({...tf, signatures:{...(tf.signatures||{}), penerima:null}}))}
+                C={C} sty={sty}
+              />
+            </div>
+
             <div style={{border:`1px solid ${missingList.length?"#fecaca":"#bbf7d0"}`,background:missingList.length?"#fef2f2":"#f0fdf4",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12}}>
               {missingList.length===0
                 ? <div style={{color:"#166534",fontWeight:800}}>✅ Siap diajukan</div>
@@ -9147,16 +9308,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               <div><label style={sty.label}>No. Faktur / Bukti Kas</label><input style={sty.input} value={txnForm.noFaktur} onChange={e=>setTxnForm(tf=>({...tf,noFaktur:e.target.value}))}/></div>
               <div><label style={sty.label}>Tgl. Faktur</label><input type="date" style={sty.input} value={txnForm.tglFaktur} onChange={e=>setTxnForm(tf=>({...tf,tglFaktur:e.target.value}))}/></div>
               <div><label style={sty.label}>No. Amandemen/Kontrak</label><input style={sty.input} value={txnForm.noAmandemen} onChange={e=>setTxnForm(tf=>({...tf,noAmandemen:e.target.value}))}/></div>
-              <div><label style={sty.label}>Biaya Angkutan</label><input type="number" inputMode="decimal" style={sty.input} value={txnForm.biayaAngkutan} onChange={e=>setTxnForm(tf=>({...tf,biayaAngkutan:Number(e.target.value)}))}/></div>
+              <div><label style={sty.label}>Biaya Angkutan</label><input type="text" inputMode="numeric" style={sty.input} value={txnForm.biayaAngkutan||""} placeholder="0" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");setTxnForm(tf=>({...tf,biayaAngkutan:v===""?"":Number(v)}));}}/></div>
             </div>
 
             <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:8,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>BARANG / SPARE PARTS</div>
-            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontStyle:"italic"}}>💡 Pilih dari katalog yang sudah ada, atau daftarkan barang baru langsung di sini.</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8,fontStyle:"italic"}}>Pilih dari katalog yang sudah ada, atau daftarkan barang baru langsung di sini.</div>
             {txnForm.stockItems.map((si,idx)=>(
               <div key={idx} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:12,marginBottom:10,background:"#f9fafb"}}>
                 <div style={{display:"flex",gap:8,marginBottom:8}}>
-                  <button type="button" style={{...sty.btn(si.katalogMode==="existing"?"primary":"ghost","sm"),flex:1}} onClick={()=>updateItemRow(idx,"katalogMode","existing")}>📑 Dari Katalog</button>
-                  <button type="button" style={{...sty.btn(si.katalogMode==="new"?"primary":"ghost","sm"),flex:1}} onClick={()=>updateItemRow(idx,"katalogMode","new")}>✨ Barang Baru</button>
+                  <button type="button" style={{...sty.btn(si.katalogMode==="existing"?"primary":"ghost","sm"),flex:1}} onClick={()=>updateItemRow(idx,"katalogMode","existing")}>Dari Katalog</button>
+                  <button type="button" style={{...sty.btn(si.katalogMode==="new"?"primary":"ghost","sm"),flex:1}} onClick={()=>updateItemRow(idx,"katalogMode","new")}>Barang Baru</button>
                   {txnForm.stockItems.length>1 && <button type="button" title="Hapus barang ini" style={{...sty.btn("danger","sm")}} onClick={()=>removeItemRow(idx)}>✕</button>}
                 </div>
                 {si.katalogMode==="existing" ? (
@@ -9181,8 +9342,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                   </div>
                 )}
                 <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr 1fr",gap:8}}>
-                  <div><label style={sty.label}>Jumlah</label><input style={sty.input} type="number" inputMode="decimal" min="1" value={si.qty} onChange={e=>updateItemRow(idx,"qty",Number(e.target.value))}/></div>
-                  <div><label style={sty.label}>Harga Satuan</label><input style={sty.input} type="number" inputMode="decimal" min="0" value={si.harga} onChange={e=>updateItemRow(idx,"harga",Number(e.target.value))}/></div>
+                  <div><label style={sty.label}>Jumlah</label><input style={sty.input} type="text" inputMode="numeric" value={si.qty||""} placeholder="1" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"qty",v===""?"":Number(v));}}/></div>
+                  <div><label style={sty.label}>Harga Satuan</label><input style={sty.input} type="text" inputMode="numeric" value={si.harga||""} placeholder="0" onChange={e=>{const v=e.target.value.replace(/[^0-9]/g,"");updateItemRow(idx,"harga",v===""?"":Number(v));}}/></div>
                   <div>
                     <label style={sty.label}>Lokasi Tujuan</label>
                     <select style={sty.select} value={si.lokasiTujuanId||""} onChange={e=>updateItemRow(idx,"lokasiTujuanId",e.target.value)}>
@@ -9206,7 +9367,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
             <div style={sty.stickyFooter}>
               <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setTxnModal(false)}>Batal</button>
-              <button style={{...sty.btn("primary"),flex:2}} onClick={saveTxn}>📤 Ajukan TUG-3 Karantina</button>
+              <button style={{...sty.btn("primary"),flex:2}} onClick={saveTxn}>Ajukan TUG-3 Karantina</button>
             </div>
           </div>
         </div>
@@ -9220,7 +9381,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         return (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",flexDirection:"column",zIndex:1500}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 18px",background:C.sidebar,flexShrink:0}}>
-            <div style={{color:"white",fontWeight:700,fontSize:14}}>📄 Dokumen {dp.docType.replace("TUG","TUG-")} — {dp.docNumbers?.[docKeyOf(dp)]||dp.id}</div>
+            <div style={{color:"white",fontWeight:700,fontSize:14}}>Dokumen {dp.docType.replace("TUG","TUG-")} — {dp.docNumbers?.[docKeyOf(dp)]||dp.id}</div>
             <div style={{display:"flex",gap:8}}>
               <button style={{...sty.btn("success"),padding:"7px 16px"}} onClick={()=>{
                 if (dp.docType==="TUG10") downloadTUG10HTML(dp, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, showToast);
@@ -9228,7 +9389,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 else if (dp.docType==="TUG5") downloadTUG5HTML(dp, katalogList, uitList, users, showToast, ultgList);
                 else if (dp.docType==="TUG7") downloadTUG7HTML(dp, katalogList, uitList, uptList, users, showToast);
                 else downloadTUG9HTML(dp, enrichedStocks, users, satpamList, showToast);
-              }}>⬇️ Unduh File (untuk Print/PDF)</button>
+              }}>Unduh File (untuk Print/PDF)</button>
               <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600}} onClick={()=>setDocPreview(null)}>✕ Tutup</button>
             </div>
           </div>

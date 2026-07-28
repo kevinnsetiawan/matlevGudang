@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { fmtDate, uid } from "../lib/utils.js";
 import { hasRole } from "../lib/roles.js";
 import { normalizeKatalog, matchesMaterialSearch } from "../lib/sap.js";
+import { SignaturePadModal, SignaturePreviewButton } from "./SignaturePadModal.jsx";
 
 const KONDISI_OPTIONS = [
   { value: "BAIK", label: "BAIK", color: "#10b981", bg: "rgba(16, 185, 129, 0.15)" },
@@ -75,6 +76,12 @@ export function InspeksiMaterialCadangTab({
   const [baPelaksanaLogistik, setBaPelaksanaLogistik] = useState(currentUser?.name || "WIDI FERDIAN");
   const [baPelaksanaPemeliharaan, setBaPelaksanaPemeliharaan] = useState("M. HASSAN");
   const [baManagerUpt, setBaManagerUpt] = useState("YAYA SUPRIMAN");
+
+  // Tanda Tangan Digital BA
+  const [baPelaksanaLogistikSig, setBaPelaksanaLogistikSig] = useState(currentUser?.signatureUrl || null);
+  const [baPelaksanaPemeliharaanSig, setBaPelaksanaPemeliharaanSig] = useState(null);
+  const [baManagerUptSig, setBaManagerUptSig] = useState(null);
+  const [activeSigField, setActiveSigField] = useState(null); // 'logistik' | 'pemeliharaan' | 'manager'
 
   // Click outside to close stock search dropdown
   useEffect(() => {
@@ -825,15 +832,36 @@ export function InspeksiMaterialCadangTab({
                   </div>
                   <div>
                     <label style={{ fontSize: 10, fontWeight: 700, color: C.muted || "#64748b", display: "block", marginBottom: 2 }}>Pelaksana (Logistik)</label>
-                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px" }} value={baPelaksanaLogistik} onChange={e => setBaPelaksanaLogistik(e.target.value)} />
+                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px", marginBottom: 6 }} value={baPelaksanaLogistik} onChange={e => setBaPelaksanaLogistik(e.target.value)} />
+                    <SignaturePreviewButton
+                      label="TTD Pelaksana Logistik"
+                      signatureUrl={baPelaksanaLogistikSig}
+                      onOpenModal={() => setActiveSigField("logistik")}
+                      onRemove={() => setBaPelaksanaLogistikSig(null)}
+                      C={C} sty={sty}
+                    />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, fontWeight: 700, color: C.muted || "#64748b", display: "block", marginBottom: 2 }}>Pelaksana (Pemeliharaan)</label>
-                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px" }} value={baPelaksanaPemeliharaan} onChange={e => setBaPelaksanaPemeliharaan(e.target.value)} />
+                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px", marginBottom: 6 }} value={baPelaksanaPemeliharaan} onChange={e => setBaPelaksanaPemeliharaan(e.target.value)} />
+                    <SignaturePreviewButton
+                      label="TTD Pelaksana Pemeliharaan"
+                      signatureUrl={baPelaksanaPemeliharaanSig}
+                      onOpenModal={() => setActiveSigField("pemeliharaan")}
+                      onRemove={() => setBaPelaksanaPemeliharaanSig(null)}
+                      C={C} sty={sty}
+                    />
                   </div>
                   <div>
                     <label style={{ fontSize: 10, fontWeight: 700, color: C.muted || "#64748b", display: "block", marginBottom: 2 }}>Manager UPT</label>
-                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px" }} value={baManagerUpt} onChange={e => setBaManagerUpt(e.target.value)} />
+                    <input style={{ ...sty.input, fontSize: 11, padding: "4px 8px", marginBottom: 6 }} value={baManagerUpt} onChange={e => setBaManagerUpt(e.target.value)} />
+                    <SignaturePreviewButton
+                      label="TTD Manager UPT"
+                      signatureUrl={baManagerUptSig}
+                      onOpenModal={() => setActiveSigField("manager")}
+                      onRemove={() => setBaManagerUptSig(null)}
+                      C={C} sty={sty}
+                    />
                   </div>
                 </div>
               </div>
@@ -922,14 +950,26 @@ export function InspeksiMaterialCadangTab({
                     <div>
                       <div style={{ fontWeight: "bold" }}>Pelaksana</div>
                       <div style={{ fontSize: 10, color: "#334155" }}>(Bidang Logistik)</div>
-                      <div style={{ height: 60 }} />
+                      <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {baPelaksanaLogistikSig ? (
+                          <img src={baPelaksanaLogistikSig} alt="TTD Logistik" style={{ maxHeight: 58, maxWidth: 140, objectFit: "contain" }} />
+                        ) : (
+                          <div style={{ height: 50 }} />
+                        )}
+                      </div>
                       <div style={{ fontWeight: "bold", textDecoration: "underline" }}>{baPelaksanaLogistik}</div>
                     </div>
 
                     <div>
                       <div style={{ fontWeight: "bold" }}>Pelaksana</div>
                       <div style={{ fontSize: 10, color: "#334155" }}>(Bidang Pemeliharaan)</div>
-                      <div style={{ height: 60 }} />
+                      <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {baPelaksanaPemeliharaanSig ? (
+                          <img src={baPelaksanaPemeliharaanSig} alt="TTD Pemeliharaan" style={{ maxHeight: 58, maxWidth: 140, objectFit: "contain" }} />
+                        ) : (
+                          <div style={{ height: 50 }} />
+                        )}
+                      </div>
                       <div style={{ fontWeight: "bold", textDecoration: "underline" }}>{baPelaksanaPemeliharaan}</div>
                     </div>
                   </div>
@@ -937,7 +977,13 @@ export function InspeksiMaterialCadangTab({
                   <div style={{ textAlign: "center", fontSize: 11 }}>
                     <div style={{ fontWeight: "bold" }}>Mengetahui</div>
                     <div style={{ fontWeight: "bold" }}>MANAGER UPT</div>
-                    <div style={{ height: 60 }} />
+                    <div style={{ height: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {baManagerUptSig ? (
+                        <img src={baManagerUptSig} alt="TTD Manager" style={{ maxHeight: 58, maxWidth: 140, objectFit: "contain" }} />
+                      ) : (
+                        <div style={{ height: 50 }} />
+                      )}
+                    </div>
                     <div style={{ fontWeight: "bold", textDecoration: "underline" }}>{baManagerUpt}</div>
                   </div>
                 </div>
@@ -985,6 +1031,33 @@ export function InspeksiMaterialCadangTab({
           </div>
         </div>
       )}
+
+      {/* MODAL PAD TANDA TANGAN DIGITAL */}
+      <SignaturePadModal
+        isOpen={Boolean(activeSigField)}
+        onClose={() => setActiveSigField(null)}
+        onSave={(dataUrl) => {
+          if (activeSigField === "logistik") setBaPelaksanaLogistikSig(dataUrl);
+          else if (activeSigField === "pemeliharaan") setBaPelaksanaPemeliharaanSig(dataUrl);
+          else if (activeSigField === "manager") setBaManagerUptSig(dataUrl);
+        }}
+        title={`Tanda Tangan Digital — ${
+          activeSigField === "logistik"
+            ? "Pelaksana Logistik"
+            : activeSigField === "pemeliharaan"
+            ? "Pelaksana Pemeliharaan"
+            : "Manager UPT"
+        }`}
+        subtitle="Coret tanda tangan Anda di bawah ini untuk disisipkan ke Berita Acara cetak"
+        initialSignature={
+          activeSigField === "logistik"
+            ? baPelaksanaLogistikSig
+            : activeSigField === "pemeliharaan"
+            ? baPelaksanaPemeliharaanSig
+            : baManagerUptSig
+        }
+        C={C} sty={sty} isMobile={isMobile}
+      />
     </div>
   );
 }
