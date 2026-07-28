@@ -8,7 +8,7 @@ import { OperationsHero } from "./OperationsHero.jsx";
 
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, saveEdit, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const myUpt = getUserUptScope(currentUser);
-  const isMSB = hasRole(currentUser, "MSB","Manager UIT");
+  const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
   // padahal unifiedLoans-nya sendiri tidak pernah benar-benar difilter UPT) — digabung jadi 1
@@ -264,7 +264,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
       <div className="operations-section-heading"><div><span>Fleet Registry</span><h2>Daftar Alat Berat</h2></div><small>{filteredEquipment.length} alat sesuai filter</small></div>
       {/* Kategori (kiri, wrap) + dropdown kondisi ringkas (kanan) — satu baris, hilangkan dualisme chip. */}
       <div className="equipment-filter-layout" style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:10}}>
-        <div className="operations-category-filters" style={{flex:1,minWidth:0,marginBottom:0}}>
+        <div className="operations-category-filters heavy-category-strip" role="tablist" aria-label="Kategori alat berat" style={{flex:1,minWidth:0,marginBottom:0}}>
           {EQUIPMENT_CATEGORIES.map(cat=>{
             const active = categoryFilter===cat.id;
             const count = equipmentList.filter(e=>
@@ -273,10 +273,10 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               (kondisiFilter==="ALL"||e.statusAlat===kondisiFilter||(kondisiFilter==="DIPINJAM"&&!!activeLoanForEquipment(e.id)))
             ).length;
             return (
-              <button key={cat.id} className={active?"is-active":""} onClick={()=>setCategoryFilter(cat.id)}>
-                <span style={{color:active?C.accent:"#9ca3af",display:"flex"}}>{cat.icon}</span>
-                <span style={{fontSize:12,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
-                <span style={{fontSize:12,fontWeight:700,color:active?C.accent:C.muted}}>{count}</span>
+              <button key={cat.id} className={`heavy-category-button${active?" is-active":""}`} onClick={()=>setCategoryFilter(cat.id)} role="tab" aria-selected={active}>
+                <span className="heavy-category-icon" style={{color:active?C.accent:"#9ca3af"}}>{cat.icon}</span>
+                <span className="heavy-category-label" style={{fontWeight:active?800:500}}>{cat.label}</span>
+                <span className="heavy-category-count" style={{color:active?C.accent:C.muted}}>{count}</span>
               </button>
             );
           })}
@@ -325,18 +325,17 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
       {viewMode==="peminjaman" && (<>
       {/* ── SECTION: Ajukan Peminjaman + Peminjaman & Histori ── */}
       <div className="operations-section-heading"><div><span>Loan Operations</span><h2>Peminjaman & Histori</h2></div><small>{unifiedLoans.length} transaksi</small></div>
-      <div className="operations-category-filters is-compact">
+      <div className="operations-category-filters heavy-category-strip is-compact" role="tablist" aria-label="Kategori alat berat untuk peminjaman">
         {EQUIPMENT_CATEGORIES.map(cat=>{
           const active = loanCategoryFilter===cat.id;
           const base = equipmentList.filter(e=>(cat.id==="ALL"||getEquipmentCategory(e)===cat.id));
           const countActive = base.filter(e=>activeLoanForEquipment(e.id)).length;
           const countTotal = base.length;
           return (
-            <button key={cat.id} className={active?"is-active":""} onClick={()=>setLoanCategoryFilter(cat.id)}
-              style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 12px",minWidth:64,borderRadius:10,border:`2px solid ${active?C.accent:C.border}`,background:active?"#eff6ff":"white",color:active?C.accent:C.muted,cursor:"pointer",boxShadow:active?"0 2px 8px rgba(0,152,218,.15)":"none"}}>
-              <span style={{color:active?C.accent:"#9ca3af"}}>{cat.icon}</span>
-              <span style={{fontSize:12,fontWeight:active?800:500,whiteSpace:"nowrap"}}>{cat.label}</span>
-              <span style={{fontSize:12,color:active?C.accent:C.muted}}><b>{countActive}</b>/{countTotal}</span>
+            <button key={cat.id} className={`heavy-category-button${active?" is-active":""}`} onClick={()=>setLoanCategoryFilter(cat.id)} role="tab" aria-selected={active}>
+              <span className="heavy-category-icon" style={{color:active?C.accent:"#9ca3af"}}>{cat.icon}</span>
+              <span className="heavy-category-label" style={{fontWeight:active?800:500}}>{cat.label}</span>
+              <span className="heavy-category-count" style={{color:active?C.accent:C.muted}}><b>{countActive}</b>/{countTotal}</span>
             </button>
           );
         })}

@@ -153,14 +153,16 @@ export async function syncStockQtyToSupabase(stocks, katalogList) {
 // Balapan promise vs timeout — kalau promise belum selesai dalam `ms`, reject
 // dengan pesan yang jelas (dipakai supaya upload foto yang macet tidak
 // menggantung proses simpan transaksi selamanya).
-function _withTimeout(promise, ms, label) {
+export function _withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
     new Promise((_, rej) => setTimeout(() => rej(new Error(`Timeout ${label || "upload"} (${Math.round(ms / 1000)}s)`)), ms)),
   ]);
 }
 
-async function _uploadTxnPhoto(dataUrl, bucket, path) {
+// Upload satu foto base64 ke Storage → kembalikan URL publik (atau penanda "priv:"
+// untuk bucket privat). Dipakai foto transaksi TUG maupun foto Data Stok.
+export async function uploadPhotoToStorage(dataUrl, bucket, path) {
   const blob = dataUrlToBlob(dataUrl);
   const { error } = await supabase.storage.from(bucket).upload(path, blob, { upsert: true, contentType: blob.type });
   if (error) throw error;
@@ -191,7 +193,7 @@ export async function processTxnPhotos(txn, prefix, onProgress) {
 
   for (const { field, bucket, maxBytes } of TXN_PHOTO_SLOTS) {
     if (_isDataUrl(t[field])) {
-      try { t[field] = await _withTimeout(_uploadTxnPhoto(await compressImage(t[field], { maxBytes }), bucket, `${prefix}/${field}.jpg`), 30_000, "unggah foto"); }
+      try { t[field] = await _withTimeout(uploadPhotoToStorage(await compressImage(t[field], { maxBytes }), bucket, `${prefix}/${field}.jpg`), 30_000, "unggah foto"); }
       catch { pending.push(field); }
       tick();
     }
@@ -200,7 +202,7 @@ export async function processTxnPhotos(txn, prefix, onProgress) {
     t.fotoMaterial = await Promise.all(t.fotoMaterial.map(async (fm) => {
       if (!_isDataUrl(fm?.img)) return fm;
       try {
-        const img = await _withTimeout(_uploadTxnPhoto(await compressImage(fm.img, { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/material-${fm.stockId}.jpg`), 30_000, "unggah foto");
+        const img = await _withTimeout(uploadPhotoToStorage(await compressImage(fm.img, { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/material-${fm.stockId}.jpg`), 30_000, "unggah foto");
         tick();
         return { ...fm, img };
       }
@@ -212,7 +214,7 @@ export async function processTxnPhotos(txn, prefix, onProgress) {
       const nsi = { ...si };
       for (const field of ["fotoNameplate", "fotoBarangRetur"]) {
         if (_isDataUrl(nsi[field])) {
-          try { nsi[field] = await _withTimeout(_uploadTxnPhoto(await compressImage(nsi[field], { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/item${idx}-${field}.jpg`), 30_000, "unggah foto"); }
+          try { nsi[field] = await _withTimeout(uploadPhotoToStorage(await compressImage(nsi[field], { maxBytes: 1_000_000 }), "tug-photos", `${prefix}/item${idx}-${field}.jpg`), 30_000, "unggah foto"); }
           catch { pending.push(`item${idx}.${field}`); }
           tick();
         }
