@@ -419,7 +419,8 @@ Kalau ditanya jumlah/qty/harga/nilai material, cek dulu "Data kondisi gudang ter
 // ── Kirim pesan Telegram ─────────────────────────────────────────────────────
 
 async function sendTelegramMessage(chatId: number | string, text: string) {
-  const resp = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const resp = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -429,7 +430,25 @@ async function sendTelegramMessage(chatId: number | string, text: string) {
     }),
   });
   if (!resp.ok) {
-    console.error("Gagal kirim Telegram:", resp.status, await resp.text());
+    const errorBody = await resp.text();
+    // Telegram rejects malformed Markdown with HTTP 400. Retry once as plain
+    // text so a formatting issue in an LLM response never leaves the user
+    // without the actual answer. Other API errors preserve the existing
+    // best-effort logging behavior and are not retried.
+    const isMarkdownEntityError = resp.status === 400 && /(?:parse entities|find end of (?:the )?entity|unclosed entity)/i.test(errorBody);
+    if (isMarkdownEntityError) {
+      console.error("Gagal kirim Telegram (Markdown), retry plain text:", resp.status, errorBody);
+      const retryResp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+      if (!retryResp.ok) {
+        console.error("Gagal retry kirim Telegram plain text:", retryResp.status, await retryResp.text());
+      }
+      return;
+    }
+    console.error("Gagal kirim Telegram:", resp.status, errorBody);
   }
 }
 

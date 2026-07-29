@@ -1,7 +1,12 @@
 -- Canonical TUG transactions.  This file is intentionally migration-only:
 -- review it and run it on self-host only after an explicit production gate.
 -- It does not alter TUG-15 history/reporting.
-create extension if not exists pgcrypto;
+create schema if not exists extensions;
+do $$ begin
+  if not exists (select 1 from pg_extension where extname='pgcrypto') then
+    create extension pgcrypto with schema extensions;
+  end if;
+end $$;
 
 alter table public.profiles add column if not exists official_phone text;
 do $$ begin
@@ -120,7 +125,9 @@ create table if not exists public.stock_movements (
   transaction_id uuid not null references public.tug_transactions(id) on delete restrict,
   tug_item_id uuid not null references public.tug_items(id) on delete restrict,
   stock_id text not null references public.stocks(id) on delete restrict,
-  direction text not null check (direction in ('IN','OUT')),
+  -- Canonical live documents are TUG-8/TUG-9 only, both of which issue stock.
+  -- Legacy documents are baseline-only and never create a movement.
+  direction text not null check (direction = 'OUT'),
   qty numeric(18,4) not null check (qty > 0),
   before_qty numeric(18,4) not null,
   after_qty numeric(18,4) not null,
@@ -134,9 +141,11 @@ create table if not exists public.tug_idempotency_keys (
   key uuid primary key,
   operation text not null check (operation in ('CREATE','SUBMIT','DECIDE')),
   actor_id uuid not null references public.profiles(id),
+  request_hash text not null,
   response jsonb not null,
   created_at timestamptz not null default now()
 );
+alter table public.tug_idempotency_keys add column if not exists request_hash text;
 
 alter table public.tug_global_document_counters enable row level security;
 alter table public.tug_transactions enable row level security;
@@ -196,7 +205,7 @@ end $$;
 
 create or replace function public.tug_hash(p_document jsonb, p_items jsonb, p_doc_number text, p_identity_snapshot jsonb)
 returns text language sql immutable as $$
-  select encode(digest(coalesce(p_document, '{}'::jsonb)::text || '|' || coalesce(p_items, '[]'::jsonb)::text || '|' || coalesce(p_doc_number,'') || '|' || coalesce(p_identity_snapshot,'{}'::jsonb)::text, 'sha256'), 'hex')
+  select encode(extensions.digest(coalesce(p_document, '{}'::jsonb)::text || '|' || coalesce(p_items, '[]'::jsonb)::text || '|' || coalesce(p_doc_number,'') || '|' || coalesce(p_identity_snapshot,'{}'::jsonb)::text, 'sha256'), 'hex')
 $$;
 
 create or replace function public.tug_doc_code(p_doc_type text)
@@ -251,10 +260,83 @@ end $$;
 
 create or replace function public.tug_stock_direction(p_doc_type text)
 returns text language sql immutable as $$
-  select case when p_doc_type in ('TUG8','TUG9') then 'OUT'
-              when p_doc_type in ('TUG3','TUG10') then 'IN'
-              else 'NONE' end
+  select case when p_doc_type in ('TUG8','TUG9') then 'OUT' else 'NONE' end
 $$;
+
+-- Both RPCs that accept item JSON validate it before any cast/insert.  The
+-- canonical path also requires a concrete stock row so it cannot create stock.
+create or replace function public.tug_assert_items(p_items jsonb, p_require_stock boolean default false)
+returns void language plpgsql immutable as $$
+begin
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'TUG_ITEMS_REQUIRED';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements(p_items) x(value)
+    where jsonb_typeof(x.value) <> 'object'
+       or nullif(btrim(x.value->>'qty'),'') is null
+       or btrim(x.value->>'qty') !~ '^[0-9]+([.][0-9]{1,4})?$'
+       or case when btrim(x.value->>'qty') ~ '^[0-9]+([.][0-9]{1,4})?$'
+               then (btrim(x.value->>'qty'))::numeric <= 0 else false end
+       or (p_require_stock and nullif(btrim(x.value->>'stockId'),'') is null)
+  ) then
+    raise exception 'TUG_ITEMS_INVALID';
+  end if;
+end $$;
+
+-- TUG-8/TUG-9 selects an existing stock row.  Its item references are facts
+-- from that row, not client-controlled metadata.  Any supplied contradictory
+-- katalog/lokasi value fails before a counter or draft is created.
+create or replace function public.tug_assert_canonical_item_refs(p_items jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  if exists (
+    select 1 from jsonb_array_elements(p_items) x(value)
+    left join public.stocks st on st.id=nullif(btrim(x.value->>'stockId'),'')
+    where st.id is null
+  ) then raise exception 'TUG_STOCK_NOT_FOUND'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_items) x(value)
+    join public.stocks st on st.id=nullif(btrim(x.value->>'stockId'),'')
+    where (nullif(btrim(x.value->>'katalogId'),'') is not null and nullif(btrim(x.value->>'katalogId'),'') is distinct from st.katalog_id)
+       or (nullif(btrim(x.value->>'lokasiId'),'') is not null and nullif(btrim(x.value->>'lokasiId'),'') is distinct from st.lokasi_id)
+  ) then raise exception 'TUG_ITEM_REFERENCE_MISMATCH'; end if;
+end $$;
+
+create or replace function public.tug_stock_snapshot(p_transaction_id uuid)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'stock_id',s.id,
+    'katalog_id',s.katalog_id,
+    'lokasi_id',s.lokasi_id,
+    'qty',coalesce((s.data->>'qty')::numeric,0)
+  ) order by s.id),'[]'::jsonb)
+  from public.stocks s
+  where exists (select 1 from public.tug_items i where i.transaction_id=p_transaction_id and i.stock_id=s.id)
+$$;
+
+create or replace function public.tug_request_hash(p_operation text, p_payload jsonb)
+returns text language sql immutable as $$
+  select encode(extensions.digest(p_operation || '|' || coalesce(p_payload, 'null'::jsonb)::text, 'sha256'), 'hex')
+$$;
+
+-- Serialize all callers for one key before checking its persisted response.
+-- A hash collision only serializes unrelated requests; the row lookup below is
+-- still keyed by the UUID and rejects cross-operation/actor reuse explicitly.
+create or replace function public.tug_idempotency_response(p_key uuid, p_operation text, p_actor_id uuid, p_request_hash text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare existing public.tug_idempotency_keys;
+begin
+  if p_key is null then raise exception 'TUG_IDEMPOTENCY_REQUIRED'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_key::text, 0));
+  select * into existing from public.tug_idempotency_keys where key=p_key;
+  if existing.key is null then return null; end if;
+  if existing.operation <> p_operation or existing.actor_id <> p_actor_id or existing.request_hash is distinct from p_request_hash then
+    raise exception 'TUG_IDEMPOTENCY_REUSE_FORBIDDEN' using errcode='42501';
+  end if;
+  return existing.response;
+end $$;
 
 -- Outgoing stock must physically belong to the transaction UPT.  Rows without
 -- a location are intentionally rejected rather than guessed into a warehouse.
@@ -288,14 +370,14 @@ declare a public.profiles := public.tug_actor(); v_doc_type text := upper(coales
   v_seq bigint; v_id uuid; v_hash text; v_doc_number text; v_identity jsonb; v_unit_code text;
   v_response jsonb;
 begin
-  if p_idempotency_key is null then raise exception 'TUG_IDEMPOTENCY_REQUIRED'; end if;
-  select response into v_response from public.tug_idempotency_keys where key = p_idempotency_key;
+  v_response := public.tug_idempotency_response(p_idempotency_key,'CREATE',a.id,public.tug_request_hash('CREATE',jsonb_build_object('document',p_document,'items',p_items)));
   if v_response is not null then return v_response; end if;
-  if v_doc_type not in ('TUG3','TUG5','TUG7','TUG8','TUG9','TUG10') then raise exception 'TUG_DOC_TYPE_INVALID'; end if;
+  if v_doc_type not in ('TUG8','TUG9') then raise exception 'TUG_CANONICAL_DOC_TYPE_FORBIDDEN'; end if;
   if v_upt_id is null then raise exception 'TUG_UPT_REQUIRED'; end if;
   perform public.tug_assert_upt_scope(a, v_upt_id);
   if a.role not in ('ADMIN','TL','ADMIN_UIT','ADMIN_ULTG','SUPERADMIN') then raise exception 'TUG_CREATE_FORBIDDEN' using errcode='42501'; end if;
-  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then raise exception 'TUG_ITEMS_REQUIRED'; end if;
+  perform public.tug_assert_items(p_items, true);
+  perform public.tug_assert_canonical_item_refs(p_items);
   update public.tug_global_document_counters set last_value=last_value+1,updated_at=now() where upt_id=v_upt_id returning last_value,document_unit_code into v_seq,v_unit_code;
   if v_seq is null or v_unit_code is null then raise exception 'TUG_DOCUMENT_UNIT_CONFIG_REQUIRED'; end if;
   v_doc_number := public.tug_doc_number(v_seq,v_doc_type,v_unit_code);
@@ -307,13 +389,20 @@ begin
   values(v_doc_type, v_doc_number, v_seq, v_upt_id, 'DRAFT', p_document, v_hash, v_identity, a.id)
   returning id into v_id;
   insert into public.tug_items(transaction_id,line_no,stock_id,katalog_id,lokasi_id,qty,unit,snapshot)
-  select v_id, ord::integer, nullif(x.value->>'stockId',''), nullif(x.value->>'katalogId',''), coalesce(nullif(x.value->>'lokasiId',''),nullif(x.value->>'lokasiTujuanId','')), (x.value->>'qty')::numeric, x.value->>'unit', x.value
-  from jsonb_array_elements(p_items) with ordinality as x(value,ord);
+  select v_id, ord::integer, st.id, st.katalog_id, st.lokasi_id, (x.value->>'qty')::numeric, x.value->>'unit',
+    jsonb_set(
+      jsonb_set(
+        jsonb_set(x.value,'{stockId}',to_jsonb(st.id),true),
+        '{katalogId}',coalesce(to_jsonb(st.katalog_id),'null'::jsonb),true),
+      '{lokasiId}',coalesce(to_jsonb(st.lokasi_id),'null'::jsonb),true)
+  from jsonb_array_elements(p_items) with ordinality as x(value,ord)
+  join public.stocks st on st.id=nullif(btrim(x.value->>'stockId'),'');
   if v_doc_type in ('TUG8','TUG9') then perform public.tug_assert_outgoing_stock_scope(v_id,v_upt_id); end if;
   insert into public.tug_approvals(transaction_id,event_type,actor_id,actor_snapshot,document_hash,transaction_version,evidence)
   values(v_id,'CREATED',a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),v_hash,1,jsonb_build_object('internal_signature','approval evidence only; not PSrE certified'));
   v_response := jsonb_build_object('id',v_id,'docNumber',v_doc_number,'docSequence',v_seq,'status','DRAFT','version',1,'identitySnapshot',v_identity);
-  insert into public.tug_idempotency_keys(key,operation,actor_id,response) values(p_idempotency_key,'CREATE',a.id,v_response);
+  insert into public.tug_idempotency_keys(key,operation,actor_id,request_hash,response)
+  values(p_idempotency_key,'CREATE',a.id,public.tug_request_hash('CREATE',jsonb_build_object('document',p_document,'items',p_items)),v_response);
   return v_response;
 end $$;
 
@@ -321,7 +410,7 @@ create or replace function public.tug_submit_transaction(p_transaction_id uuid, 
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare a public.profiles := public.tug_actor(); t public.tug_transactions; r jsonb;
 begin
-  select response into r from public.tug_idempotency_keys where key=p_idempotency_key; if r is not null then return r; end if;
+  r := public.tug_idempotency_response(p_idempotency_key,'SUBMIT',a.id,public.tug_request_hash('SUBMIT',jsonb_build_object('transactionId',p_transaction_id,'expectedVersion',p_expected_version))); if r is not null then return r; end if;
   select * into t from public.tug_transactions where id=p_transaction_id for update;
   if t.id is null or t.created_by <> a.id then raise exception 'TUG_NOT_FOUND_OR_FORBIDDEN' using errcode='42501'; end if;
   perform public.tug_assert_upt_scope(a, t.upt_id);
@@ -334,7 +423,8 @@ begin
     values(t.id,'APPROVED','APPROVE','PENDING_TL',a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,jsonb_build_object('explicit_submit_approval',true));
   end if;
   r := jsonb_build_object('id',t.id,'status',t.status,'stage',t.stage,'version',t.version,'docNumber',t.doc_number);
-  insert into public.tug_idempotency_keys(key,operation,actor_id,response) values(p_idempotency_key,'SUBMIT',a.id,r); return r;
+  insert into public.tug_idempotency_keys(key,operation,actor_id,request_hash,response)
+  values(p_idempotency_key,'SUBMIT',a.id,public.tug_request_hash('SUBMIT',jsonb_build_object('transactionId',p_transaction_id,'expectedVersion',p_expected_version)),r); return r;
 end $$;
 
 create or replace function public.tug_prepare_review(p_transaction_id uuid, p_expected_version integer)
@@ -346,8 +436,7 @@ begin
   perform public.tug_assert_upt_scope(a, t.upt_id);
   if t.status <> 'PENDING' or t.version <> p_expected_version then raise exception 'TUG_VERSION_MISMATCH'; end if;
   if a.role <> 'SUPERADMIN' and a.role <> public.tug_required_role(t.stage) then raise exception 'TUG_APPROVER_FORBIDDEN' using errcode='42501'; end if;
-  select coalesce(jsonb_agg(jsonb_build_object('stock_id',s.id,'qty',coalesce((s.data->>'qty')::numeric,0)) order by s.id),'[]'::jsonb) into snap
-  from public.stocks s join public.tug_items i on i.stock_id=s.id where i.transaction_id=t.id;
+  snap := public.tug_stock_snapshot(t.id);
   insert into public.tug_review_tokens(transaction_id,actor_id,transaction_version,document_hash,stock_snapshot,expires_at)
   values(t.id,a.id,t.version,t.document_hash,snap,now()+interval '15 minutes') returning token into tok;
   insert into public.tug_approvals(transaction_id,event_type,stage,actor_id,actor_snapshot,document_hash,transaction_version,review_token,evidence)
@@ -367,22 +456,23 @@ create or replace function public.tug_decide(
   p_reason text default null, p_idempotency_key uuid default null, p_attestations jsonb default null
 ) returns jsonb language plpgsql security definer set search_path = public as $$
 declare a public.profiles := public.tug_actor(); t public.tug_transactions; rt public.tug_review_tokens; r jsonb;
-  v_next text; v_direction text; i record; v_stock_row public.stocks; v_before numeric; v_after numeric; v_stock_id text;
+  v_next text; v_decision_stage text; i record; v_stock_row public.stocks; v_before numeric; v_after numeric; v_current_snapshot jsonb;
 begin
   if p_decision not in ('APPROVE','REJECT') then raise exception 'TUG_DECISION_INVALID'; end if;
-  if p_idempotency_key is null then raise exception 'TUG_IDEMPOTENCY_REQUIRED'; end if;
-  select response into r from public.tug_idempotency_keys where key=p_idempotency_key; if r is not null then return r; end if;
+  r := public.tug_idempotency_response(p_idempotency_key,'DECIDE',a.id,public.tug_request_hash('DECIDE',jsonb_build_object('transactionId',p_transaction_id,'expectedVersion',p_expected_version,'decision',p_decision,'reviewToken',p_review_token,'reason',p_reason,'attestations',p_attestations))); if r is not null then return r; end if;
   select * into t from public.tug_transactions where id=p_transaction_id for update;
   if t.id is null or t.status <> 'PENDING' or t.version <> p_expected_version then raise exception 'TUG_VERSION_MISMATCH'; end if;
   perform public.tug_assert_upt_scope(a, t.upt_id);
   if a.role <> 'SUPERADMIN' and a.role <> public.tug_required_role(t.stage) then raise exception 'TUG_APPROVER_FORBIDDEN' using errcode='42501'; end if;
   if p_decision='REJECT' and nullif(btrim(coalesce(p_reason,'')),'') is null then raise exception 'TUG_REJECT_REASON_REQUIRED'; end if;
+  v_decision_stage := t.stage;
   if p_decision='REJECT' then
     update public.tug_transactions set status='REJECTED',stage='REJECTED',rejected_at=now(),version=version+1,updated_at=now() where id=t.id returning * into t;
     insert into public.tug_approvals(transaction_id,event_type,decision,stage,actor_id,actor_snapshot,document_hash,transaction_version,reason)
-    values(t.id,'REJECTED','REJECT',t.stage,a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,p_reason);
+    values(t.id,'REJECTED','REJECT',v_decision_stage,a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,p_reason);
     r:=jsonb_build_object('id',t.id,'status',t.status,'stage',t.stage,'version',t.version);
-    insert into public.tug_idempotency_keys(key,operation,actor_id,response) values(p_idempotency_key,'DECIDE',a.id,r); return r;
+    insert into public.tug_idempotency_keys(key,operation,actor_id,request_hash,response)
+    values(p_idempotency_key,'DECIDE',a.id,public.tug_request_hash('DECIDE',jsonb_build_object('transactionId',p_transaction_id,'expectedVersion',p_expected_version,'decision',p_decision,'reviewToken',p_review_token,'reason',p_reason,'attestations',p_attestations)),r); return r;
   end if;
   v_next := public.tug_next_stage(t.doc_type,t.stage);
   if v_next='FINAL_APPROVED' then
@@ -392,33 +482,23 @@ begin
        or coalesce((p_attestations->>'parties')::boolean,false) is not true
        or coalesce((p_attestations->>'document')::boolean,false) is not true
        or coalesce((p_attestations->>'impact')::boolean,false) is not true then raise exception 'TUG_ATTESTATIONS_REQUIRED'; end if;
-    if public.tug_stock_direction(t.doc_type) = 'OUT' then perform public.tug_assert_outgoing_stock_scope(t.id,t.upt_id); end if;
+    perform public.tug_assert_outgoing_stock_scope(t.id,t.upt_id);
     -- Lock every explicitly referenced stock row in deterministic order before changing any qty.
     perform 1 from public.stocks st where exists (
       select 1 from public.tug_items ti where ti.transaction_id=t.id and ti.stock_id=st.id
     ) order by st.id for update;
-    v_direction:=public.tug_stock_direction(t.doc_type);
-    if v_direction <> 'NONE' then
-      for i in select * from public.tug_items where transaction_id=t.id order by coalesce(stock_id,''), line_no loop
-        v_stock_id:=i.stock_id;
-        if v_stock_id is null and v_direction='IN' and i.katalog_id is not null and i.lokasi_id is not null then
-          select id into v_stock_id from public.stocks where katalog_id=i.katalog_id and lokasi_id=i.lokasi_id order by id limit 1 for update;
-          if v_stock_id is null then
-            v_stock_id:='STK-TUG-'||upper(substr(replace(gen_random_uuid()::text,'-',''),1,12));
-            insert into public.stocks(id,katalog_id,lokasi_id,data,created_at) values(v_stock_id,i.katalog_id,i.lokasi_id,jsonb_build_object('qty',0,'minQty',0,'createdAt',(extract(epoch from now())*1000)::bigint),(extract(epoch from now())*1000)::bigint);
-          end if;
-        end if;
-        if v_stock_id is null then raise exception 'TUG_STOCK_REFERENCE_REQUIRED'; end if;
-        select * into v_stock_row from public.stocks where id=v_stock_id for update;
+    v_current_snapshot := public.tug_stock_snapshot(t.id);
+    if v_current_snapshot <> rt.stock_snapshot then raise exception 'TUG_REVIEW_STALE'; end if;
+    for i in select * from public.tug_items where transaction_id=t.id order by stock_id, line_no loop
+        select * into v_stock_row from public.stocks where id=i.stock_id for update;
         if v_stock_row.id is null then raise exception 'TUG_STOCK_NOT_FOUND'; end if;
         v_before:=coalesce((v_stock_row.data->>'qty')::numeric,0);
-        v_after:=case when v_direction='OUT' then v_before-i.qty else v_before+i.qty end;
-        if v_after < 0 then raise exception 'TUG_INSUFFICIENT_STOCK stock_id=% requested=% available=%',v_stock_id,i.qty,v_before; end if;
+        v_after:=v_before-i.qty;
+        if v_after < 0 then raise exception 'TUG_INSUFFICIENT_STOCK stock_id=% requested=% available=%',i.stock_id,i.qty,v_before; end if;
         insert into public.stock_movements(transaction_id,tug_item_id,stock_id,direction,qty,before_qty,after_qty,actor_id)
-        values(t.id,i.id,v_stock_id,v_direction,i.qty,v_before,v_after,a.id);
-        update public.stocks set data=jsonb_set(coalesce(data,'{}'::jsonb),'{qty}',to_jsonb(v_after),true) where id=v_stock_id;
+        values(t.id,i.id,i.stock_id,'OUT',i.qty,v_before,v_after,a.id);
+        update public.stocks set data=jsonb_set(coalesce(data,'{}'::jsonb),'{qty}',to_jsonb(v_after),true) where id=i.stock_id;
       end loop;
-    end if;
     update public.tug_review_tokens set consumed_at=now(), attestations=p_attestations where token=rt.token;
     insert into public.tug_approvals(transaction_id,event_type,stage,actor_id,actor_snapshot,document_hash,transaction_version,review_token,evidence)
     values(t.id,'REVIEWED',t.stage,a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,rt.token,jsonb_build_object('attestations',p_attestations));
@@ -427,10 +507,11 @@ begin
     update public.tug_transactions set stage=v_next,version=version+1,updated_at=now() where id=t.id returning * into t;
   end if;
   insert into public.tug_approvals(transaction_id,event_type,decision,stage,actor_id,actor_snapshot,document_hash,transaction_version,evidence)
-  values(t.id,'APPROVED','APPROVE',t.stage,a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,
+  values(t.id,'APPROVED','APPROVE',v_decision_stage,a.id,jsonb_build_object('name',a.name,'role',a.role,'upt_id',a.upt_id),t.document_hash,t.version,
     jsonb_build_object('internal_signature','approval evidence only; not PSrE certified','approved_at',now()));
   r:=jsonb_build_object('id',t.id,'status',t.status,'stage',t.stage,'version',t.version,'docNumber',t.doc_number,'stockDirection',public.tug_stock_direction(t.doc_type));
-  insert into public.tug_idempotency_keys(key,operation,actor_id,response) values(p_idempotency_key,'DECIDE',a.id,r); return r;
+  insert into public.tug_idempotency_keys(key,operation,actor_id,request_hash,response)
+  values(p_idempotency_key,'DECIDE',a.id,public.tug_request_hash('DECIDE',jsonb_build_object('transactionId',p_transaction_id,'expectedVersion',p_expected_version,'decision',p_decision,'reviewToken',p_review_token,'reason',p_reason,'attestations',p_attestations)),r); return r;
 end $$;
 
 -- Legacy imports are deliberately baseline-only: final legacy documents never replay stock.
@@ -440,6 +521,7 @@ declare a public.profiles := public.tug_actor(); existing public.tug_transaction
 begin
   if a.role not in ('ADMIN','SUPERADMIN') then raise exception 'TUG_LEGACY_IMPORT_FORBIDDEN' using errcode='42501'; end if;
   if nullif(p_document->>'uptId','') is null then raise exception 'TUG_UPT_REQUIRED'; end if;
+  perform public.tug_assert_items(p_items, false);
   perform public.tug_assert_upt_scope(a, p_document->>'uptId');
   select * into existing from public.tug_transactions where legacy_id=p_legacy_id;
   if existing.id is not null then return jsonb_build_object('id',existing.id,'status',existing.status,'deduped',true); end if;
@@ -454,4 +536,15 @@ end $$;
 
 revoke all on public.tug_global_document_counters, public.tug_transactions, public.tug_items, public.tug_approvals, public.tug_review_tokens, public.stock_movements, public.tug_idempotency_keys from anon, authenticated;
 grant select on public.tug_global_document_counters, public.tug_transactions, public.tug_items, public.tug_approvals, public.stock_movements to authenticated;
+
+-- SECURITY DEFINER helpers are implementation details, never API surface.
+do $$ declare f regprocedure; begin
+  for f in
+    select p.oid::regprocedure
+    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='public' and left(p.proname, 4) = 'tug_'
+  loop
+    execute format('revoke all on function %s from public, anon, authenticated', f);
+  end loop;
+end $$;
 grant execute on function public.tug_create_transaction(jsonb,jsonb,uuid), public.tug_submit_transaction(uuid,integer,uuid), public.tug_prepare_review(uuid,integer), public.tug_decide(uuid,integer,text,uuid,text,uuid,jsonb), public.tug_import_legacy_baseline(text,jsonb,jsonb) to authenticated;
