@@ -7,6 +7,8 @@ import { fmtNum, getSAPLabel } from "./ragShared.mjs";
 import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari } from "./utils.js";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE } from "../constants.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt } from "./heavyEquipment.js";
+import { buildKartuGantungHistory, resolveLokasiLengkap } from "./sap.js";
+import { resolveStockPhotoUrl } from "./stockCache.js";
 
 // ─── TUG-9 DOCUMENT HTML BUILDER (Surat Jalan + Bon TUG-9 + Lampiran Foto) ────
 // Returns a full standalone HTML string. Used for both in-app preview
@@ -915,3 +917,217 @@ export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
 <div class="sheet">${labels.join("")}</div>
 </body></html>`;
 }
+
+// ─── TUG-2 DOCUMENT HTML BUILDERS (Kartu Gantung Barang TUG. 2 - Depan & Belakang) ────
+
+// Halaman 1 (Depan): Header + Metadata + Foto Barang + QR Code
+export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList) {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
+  const qrDataUrl = await QRCode.toDataURL(scanUrl, { margin: 1, width: 280 });
+
+  // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
+  const lokasiStr = resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList);
+  const sampleStock = (stocks||[]).find(s=>s.katalogId===katalog.id && s.fotoKeseluruhan);
+  const sampleFoto = sampleStock ? resolveStockPhotoUrl(sampleStock.fotoKeseluruhan) : null;
+  const kategoriMaterial = (stocks||[]).find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Kartu Gantung Depan TUG.2 - ${esc(katalog.katalog)}</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; background: #e5e7eb; }
+  .bar { position: sticky; top: 0; background: #003087; color: #fff; padding: 8px 14px; text-align: center; font-size: 12px; font-weight: 700; z-index: 10; }
+  .bar button { background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: 12px; cursor: pointer; margin-left: 10px; }
+  .page { padding: 24px; background: white; max-width: 800px; margin: 0 auto 16px; min-height: 100vh; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .header-tbl { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .header-tbl td { vertical-align: top; }
+  .meta-tbl { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1.5px solid #111; }
+  .meta-tbl td { border: 1px solid #111; padding: 6px 8px; font-size: 11px; }
+  .meta-tbl .lbl { font-weight: bold; width: 110px; background: #f8fafc; }
+  .media-row { display: flex; gap: 16px; margin-bottom: 16px; justify-content: space-between; }
+  .media-box { flex: 1; border: 1.5px solid #111; padding: 12px; text-align: center; background: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 220px; }
+  .media-title { font-weight: 800; font-size: 12px; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #cbd5e1; width: 100%; padding-bottom: 4px; }
+  @media print { .bar { display: none; } body { background: white; } .page { box-shadow: none; margin: 0; max-width: none; padding: 0; } }
+</style></head><body>
+<div class="bar">📄 Kartu Gantung (Halaman Depan / QR Code) siap dicetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
+<div class="page">
+  <table class="header-tbl">
+    <tr>
+      <td style="width:60px">
+        <img src="${PLN_LOGO_DATA_URI}" style="height:44px;width:auto" alt="PLN Logo"/>
+      </td>
+      <td style="padding-left:10px">
+        <div style="font-size:11px;font-weight:800;line-height:1.2">PT PLN (PERSERO)</div>
+        <div style="font-size:10px;font-weight:700;line-height:1.2">TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
+        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${UPT.toUpperCase()}</div>
+      </td>
+      <td style="text-align:right">
+        <div style="font-size:14px;font-weight:900;letter-spacing:1px">TUG. 2</div>
+      </td>
+    </tr>
+  </table>
+
+  <div style="text-align:center;margin:12px 0 14px">
+    <h2 style="font-size:16px;font-weight:900;text-decoration:underline;letter-spacing:0.5px;text-transform:uppercase">KARTU GANTUNG BARANG</h2>
+  </div>
+
+  <table class="meta-tbl">
+    <tr>
+      <td class="lbl">No. Katalog :</td>
+      <td style="font-weight:bold;color:#0284c7">${esc(katalog.katalog || "-")}</td>
+      <td class="lbl">Lokasi :</td>
+      <td style="font-weight:bold;font-size:9.5px">${esc(lokasiStr)}</td>
+    </tr>
+    <tr>
+      <td class="lbl">No. Aset :</td>
+      <td style="font-weight:bold">${esc(katalog.noAset || "-")}</td>
+      <td class="lbl">Kategori :</td>
+      <td style="font-weight:bold">${esc(kategoriMaterial)}</td>
+    </tr>
+    <tr>
+      <td class="lbl">NAMA BARANG :</td>
+      <td colspan="2" style="font-weight:800;font-size:12px;color:#002b66">${esc(katalog.name || "-")}</td>
+      <td style="font-weight:bold;text-align:center"><span style="font-size:9px;color:#64748b">SATUAN</span><br/>${esc(katalog.satuan || "BH")}</td>
+    </tr>
+  </table>
+
+  <div class="media-row">
+    <div class="media-box">
+      <div class="media-title">FOTO BARANG</div>
+      ${sampleFoto ? `<img src="${sampleFoto}" style="max-width:100%;max-height:180px;object-fit:contain;border-radius:4px" alt="Foto Barang"/>` : `<div style="color:#94a3b8;font-size:11px;font-style:italic;padding:40px 0">&lt;&lt; [Foto Barang] &gt;&gt;</div>`}
+    </div>
+    <div class="media-box">
+      <div class="media-title">QR CODE</div>
+      <img src="${qrDataUrl}" style="width:160px;height:160px;display:block" alt="QR Code"/>
+    </div>
+  </div>
+</div>
+</body></html>`;
+}
+
+// Halaman 2 (Belakang): Header + Metadata + Tabel Riwayat Keluar-Masuk (SISA PERSEDIAAN: RAK / PETI / JMLH)
+export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList) {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList);
+
+  // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
+  const lokasiStr = resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList);
+  const kategoriMaterial = (stocks||[]).find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
+
+  const filledHistoryRows = history.map((h) => `
+    <tr>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${h.tgl ? fmtDateOnly(h.tgl) : "-"}</td>
+      <td style="border:1px solid #111;padding:6px 6px">${esc(h.noBon || "-")}</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold;color:#15803d">${h.masuk > 0 ? fmtNum(h.masuk) : ""}</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold;color:#b91c1c">${h.keluar > 0 ? fmtNum(h.keluar) : ""}</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${esc(h.rak || "-")}</td>
+      <td style="border:1px solid #111;padding:6px 6px">${esc(h.subGudang || "-")}</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold">${fmtNum(h.sisa)}</td>
+      <td style="border:1px solid #111;padding:6px 6px;color:#475569">${esc(h.catatan || "-")}</td>
+    </tr>
+  `);
+
+  const minRows = 14;
+  for (let i = history.length; i < minRows; i++) {
+    filledHistoryRows.push(`
+      <tr>
+        <td style="border:1px solid #111;height:26px">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+        <td style="border:1px solid #111">&nbsp;</td>
+      </tr>
+    `);
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Riwayat Keluar Masuk TUG.2 - ${esc(katalog.katalog)}</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; background: #e5e7eb; }
+  .bar { position: sticky; top: 0; background: #003087; color: #fff; padding: 8px 14px; text-align: center; font-size: 12px; font-weight: 700; z-index: 10; }
+  .bar button { background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 6px 16px; font-size: 12px; cursor: pointer; margin-left: 10px; }
+  .page { padding: 24px; background: white; max-width: 800px; margin: 0 auto 16px; min-height: 100vh; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .header-tbl { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .header-tbl td { vertical-align: top; }
+  .meta-tbl { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1.5px solid #111; }
+  .meta-tbl td { border: 1px solid #111; padding: 6px 8px; font-size: 11px; }
+  .meta-tbl .lbl { font-weight: bold; width: 110px; background: #f8fafc; }
+  .items-tbl { width: 100%; border-collapse: collapse; margin-top: 10px; border: 1.5px solid #111; }
+  .items-tbl th { background: #f1f5f9; border: 1px solid #111; padding: 6px 4px; font-size: 10px; font-weight: bold; text-align: center; }
+  .items-tbl td { border: 1px solid #111; padding: 6px 6px; font-size: 9.5px; }
+  @media print { .bar { display: none; } body { background: white; } .page { box-shadow: none; margin: 0; max-width: none; padding: 0; } }
+</style></head><body>
+<div class="bar">📄 Lembar Riwayat Keluar-Masuk (TUG.2 Belakang) siap dicetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
+<div class="page">
+  <table class="header-tbl">
+    <tr>
+      <td style="width:60px">
+        <img src="${PLN_LOGO_DATA_URI}" style="height:44px;width:auto" alt="PLN Logo"/>
+      </td>
+      <td style="padding-left:10px">
+        <div style="font-size:11px;font-weight:800;line-height:1.2">PT PLN (PERSERO)</div>
+        <div style="font-size:10px;font-weight:700;line-height:1.2">TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
+        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${UPT.toUpperCase()}</div>
+      </td>
+      <td style="text-align:right">
+        <div style="font-size:14px;font-weight:900;letter-spacing:1px">TUG. 2</div>
+      </td>
+    </tr>
+  </table>
+
+  <div style="text-align:center;margin:12px 0 14px">
+    <h2 style="font-size:16px;font-weight:900;text-decoration:underline;letter-spacing:0.5px;text-transform:uppercase">KARTU GANTUNG BARANG</h2>
+  </div>
+
+  <table class="meta-tbl">
+    <tr>
+      <td class="lbl">No. Katalog :</td>
+      <td style="font-weight:bold;color:#0284c7">${esc(katalog.katalog || "-")}</td>
+      <td class="lbl">Lokasi :</td>
+      <td style="font-weight:bold;font-size:9.5px">${esc(lokasiStr)}</td>
+    </tr>
+    <tr>
+      <td class="lbl">No. Aset :</td>
+      <td style="font-weight:bold">${esc(katalog.noAset || "-")}</td>
+      <td class="lbl">Kategori :</td>
+      <td style="font-weight:bold">${esc(kategoriMaterial)}</td>
+    </tr>
+    <tr>
+      <td class="lbl">NAMA BARANG :</td>
+      <td colspan="2" style="font-weight:800;font-size:12px;color:#002b66">${esc(katalog.name || "-")}</td>
+      <td style="font-weight:bold;text-align:center"><span style="font-size:9px;color:#64748b">SATUAN</span><br/>${esc(katalog.satuan || "BH")}</td>
+    </tr>
+  </table>
+
+  <div style="font-weight:800;font-size:11px;margin-bottom:6px;color:#002b66">RIWAYAT KELUAR - MASUK BARANG</div>
+  <table class="items-tbl">
+    <thead>
+      <tr>
+        <th style="width:75px">TGL</th>
+        <th style="width:120px">NO. BON</th>
+        <th style="width:60px">MASUK</th>
+        <th style="width:60px">KELUAR</th>
+        <th style="width:55px">RAK</th>
+        <th>LOKASI</th>
+        <th style="width:60px">JUMLAH</th>
+        <th>CATATAN</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${filledHistoryRows.join("")}
+    </tbody>
+  </table>
+</div>
+</body></html>`;
+}
+
+export async function buildTUG2HTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList) {
+  return buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList);
+}
+
+
