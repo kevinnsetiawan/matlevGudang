@@ -16,7 +16,7 @@ export function ApprovalHubTab({
   heavyEquipmentPendingCount, opnameList, stockCountPendingCount,
   approvalTypeFilter, setApprovalTypeFilter, approvalPageSize, setApprovalPageSize,
   enrichedStocks, katalogList, users,
-  approveTxn, rejectTxn, uptList,
+  approveTxn, rejectTxn, prepareReview, uptList,
   submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8,
   startCapacityApproval, rejectCapacityImport,
   approveLokasiChange, rejectLokasiChange,
@@ -95,7 +95,7 @@ export function ApprovalHubTab({
         pendingTxns={myPendingApprovals}
         stocks={enrichedStocks} katalogList={katalogList} lokasiList={lokasiList}
         users={users} sty={sty} C={C}
-        approveTxn={approveTxn} rejectTxn={rejectTxn} currentUser={currentUser}
+        approveTxn={approveTxn} rejectTxn={rejectTxn} prepareReview={prepareReview} currentUser={currentUser}
         uptList={uptList}
         submitTUG7_AdminUIT={submitTUG7_AdminUIT}
         approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik}

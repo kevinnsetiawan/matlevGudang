@@ -5,8 +5,9 @@ import { fmtDate } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { ROLES, hasRole } from "../lib/roles.js";
 import { statusMaterialBadgeStyle } from "../lib/sap.js";
+import { TugFinalReviewModal } from "./TugFinalReviewModal.jsx";
 
-export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, opnamePendingCount=0, stockCountPendingCount=0, approvalTypeFilter="ALL", approvalPageSize=10 }) {
+export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, users, sty, C, approveTxn, rejectTxn, currentUser, uptList, submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik, konfirmasiDraftTUG8, gudangCapacityImports, approveCapacityImport, rejectCapacityImport, approveLokasiChange, rejectLokasiChange, ultgList, approveTUG5_MgrULTG, rejectTUG5_MgrULTG, heavyEquipmentPendingCount, opnamePendingCount=0, stockCountPendingCount=0, approvalTypeFilter="ALL", approvalPageSize=10, prepareReview }) {
   const [rejectingId, setRejectingId] = useState(null);
   const [reason, setReason] = useState("");
   const [tug7Form, setTug7Form] = useState({});
@@ -16,6 +17,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
   const [tugPage, setTugPage] = useState(1);
   const [capPage, setCapPage] = useState(1);
   const [lokasiPage, setLokasiPage] = useState(1);
+  const [reviewingTxn, setReviewingTxn] = useState(null);
   useEffect(() => { setTugPage(1); setCapPage(1); setLokasiPage(1); }, [approvalTypeFilter, approvalPageSize]);
   const canApproveCap = hasRole(currentUser, "TL","ASMAN");
   const pendingCapacityImports = (gudangCapacityImports||[]).filter(i=>i.status==="PENDING_ASMAN");
@@ -56,7 +58,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
   function stageLabelOf(t) {
     if (t.docType==="TUG5") return t.stage==="PENDING_ASMAN"?"Menunggu Asman":"Menunggu Manager";
     if (t.docType==="TUG7") return t.stage==="DRAFT_UIT"?"Draft — Perlu dilengkapi Admin UIT":"Menunggu Mgr Logistik UIT";
-    if (t.docType==="TUG8" && t.stage==="DRAFT_TUG8") return "Draft TUG-8 — Perlu Konfirmasi";
+    if (t.docType==="TUG8" && t.stage==="DRAFT_TUG8") return "Draft TUG-8 — Lengkapi & Ajukan";
     if (t.docType==="TUG3") {
       if (t.stage==="PENDING_TL") return "Menunggu TL Logistik";
       if (t.stage==="PENDING_MANAGER") return "Menunggu Manager (TUG-4)";
@@ -66,13 +68,13 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
   }
 
   function docNoOf(t) {
-    if (!t.docNumbers) return t.id;
-    if (t.docType==="TUG5") return t.docNumbers.tug5||t.id;
-    if (t.docType==="TUG7") return t.docNumbers.tug7||t.id;
-    if (t.docType==="TUG9") return t.docNumbers.tug9||t.id;
-    if (t.docType==="TUG8") return t.docNumbers.tug8||t.id;
-    if (t.docType==="TUG10") return t.docNumbers.tug10||t.id;
-    if (t.docType==="TUG3") return t.docNumbers.tug3||t.id;
+    if (!t.docNumbers) return t.draftLabel || t.id;
+    if (t.docType==="TUG5") return t.docNumbers?.tug5||t.draftLabel||t.id;
+    if (t.docType==="TUG7") return t.docNumbers?.tug7||t.draftLabel||t.id;
+    if (t.docType==="TUG9") return t.docNumbers?.tug9||t.draftLabel||t.id;
+    if (t.docType==="TUG8") return t.docNumbers?.tug8||t.draftLabel||t.id;
+    if (t.docType==="TUG10") return t.docNumbers?.tug10||t.draftLabel||t.id;
+    if (t.docType==="TUG3") return t.docNumbers?.tug3||t.draftLabel||t.id;
     return t.id;
   }
 
@@ -142,7 +144,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
             {/* Info khusus per tipe */}
             {isTUG8Draft && (
               <div style={{background:"#f3e8ff",border:`1px solid #c4b5fd`,borderRadius:6,padding:"6px 10px",fontSize:12,color:"#7c3aed",marginBottom:8}}>
-                📦 Draft TUG-8 dari TUG-7 {t.noReferensiTug7} — UPT Pengirim: {t.lokasiPekerjaan}. Konfirmasi untuk aktifkan ke antrian approval TUG-8 biasa.
+                📦 Draft TUG-8 dari TUG-7 {t.noReferensiTug7} — UPT Pengirim: {t.lokasiPekerjaan}. Lengkapi data lalu ajukan; nomor resmi dibuat oleh server.
               </div>
             )}
             {isTUG10 && (
@@ -180,7 +182,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
               {["TUG9","TUG8"].includes(t.docType) && !isTUG8Draft && (
                 rejectingId===t.id
                   ? <><button className="approval-btn--danger" onClick={()=>{rejectTxn(t,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Konfirmasi Tolak</button><button className="approval-btn--cancel" onClick={()=>setRejectingId(null)}>Batal</button></>
-                  : <><button className="approval-btn--approve" onClick={()=>approveTxn(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setujui</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
+                  : <><button className="approval-btn--approve" onClick={()=>t.canonical ? setReviewingTxn(t) : approveTxn(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>{t.canonical ? "Periksa Transaksi" : "Setujui"}</button><button className="approval-btn--reject" onClick={()=>{setRejectingId(t.id);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button></>
               )}
               {t.docType==="TUG10" && (
                 rejectingId===t.id
@@ -189,7 +191,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
               )}
               {/* TUG-8 Draft dari TUG-7 */}
               {isTUG8Draft && hasRole(currentUser, "ADMIN","TL") && (
-                <button className="approval-btn--approve" onClick={()=>konfirmasiDraftTUG8(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Konfirmasi Draft TUG-8</button>
+                <button className="approval-btn--approve" onClick={()=>konfirmasiDraftTUG8(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Lengkapi & Ajukan TUG-8</button>
               )}
               {/* TUG-7 Draft UIT */}
               {isTUG7Draft && hasRole(currentUser, "ADMIN_UIT") && (
@@ -294,6 +296,8 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
         );
       })}
       {showLokasi && renderPager(lokasiPage, setLokasiPage, pendingLokasiChanges.length)}
+
+      {reviewingTxn && <TugFinalReviewModal txn={reviewingTxn} stocks={stocks} katalogList={katalogList} users={users} pendingTxns={pendingTxns} sty={sty} C={C} prepareReview={async txn => prepareReview ? prepareReview(txn) : { unavailable:true }} onApprove={async review => { const ok = await approveTxn(reviewingTxn, review); if (ok) setReviewingTxn(null); }} onClose={()=>setReviewingTxn(null)} />}
 
       {/* TUG-7 lengkapi modal */}
       {tug7Modal && (

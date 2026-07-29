@@ -110,6 +110,7 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
             const canApprove = t.stage==="PENDING_MGR_ULTG" && (currentUser.role==="SUPERADMIN" || (currentUser.role==="MGR_ULTG" && t.ultgId===currentUser.ultgId));
             const canAdopt = t.stage==="APPROVED_ULTG" && !t.adoptedBy && hasRole(currentUser, "ADMIN","TL") &&
               (currentUser.role==="SUPERADMIN" || ultg?.parentUptId === currentUserUptId);
+            const adoptedTug9 = t.adoptedTug9Id ? txns.find(x=>x.id===t.adoptedTug9Id) : null;
             const isExpanded = ultgExpandedId===t.id;
 
             if (!isExpanded) {
@@ -155,6 +156,9 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
                   )}
                   {canAdopt && (
                     <button style={sty.btn("primary","sm")} onClick={async()=>{ const draft = await adoptTUG5ULTG(t); if(draft) openDraftTug9(draft); }}>📋 Adopt → Buat Draft TUG-9</button>
+                  )}
+                  {adoptedTug9?.status==="DRAFT" && hasRole(currentUser, "ADMIN","TL") && (
+                    <button style={sty.btn("primary","sm")} onClick={()=>openDraftTug9(adoptedTug9)}>Lengkapi & Ajukan TUG-9</button>
                   )}
                   {(t.stage==="APPROVED_ULTG"||t.status==="APPROVED") && <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat Dokumen TUG-5</button>}
                 </div>
@@ -223,7 +227,7 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
             <div key={t.id} style={{...sty.card,borderLeft:`3px solid ${C.green}`}}>
               <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"flex-start",gap:8,marginBottom:8}}>
                 <div>
-                  <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug8||t.id}</div>
+                  <div style={{fontWeight:800,fontSize:14}}>{t.docNumbers?.tug8||t.draftLabel||t.id}</div>
                   <div style={{fontSize:12,color:C.muted}}>Berdasarkan: {t.noReferensiTug7} • Tujuan: {t.unitTujuan}</div>
                   <div style={{fontSize:12,color:C.muted}}>UPT Pengirim: {t.lokasiPekerjaan}</div>
                 </div>
@@ -235,9 +239,9 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
                   return <div key={idx} style={{fontSize:12,padding:"3px 0"}}>📦 {kat?.name||"-"} <b>x{si.qty}</b> {kat?.satuan}</div>;
                 })}
               </div>
-              <div style={{fontSize:12,color:"#92400e",background:"#fef3c7",borderRadius:6,padding:"6px 10px",marginBottom:8}}>⚠️ Draft ini perlu dikonfirmasi oleh Admin Gudang / TL UPT Pengirim sebelum masuk antrian approval TUG-8.</div>
+              <div style={{fontSize:12,color:"#92400e",background:"#fef3c7",borderRadius:6,padding:"6px 10px",marginBottom:8}}>Draft ini perlu dilengkapi dan diajukan oleh Admin Gudang / TL UPT Pengirim. Nomor resmi dibuat saat diajukan.</div>
               {hasRole(currentUser, "ADMIN","TL") && (
-                <div className="approval-actions"><button className="approval-btn--approve" onClick={()=>konfirmasiDraftTUG8(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Konfirmasi — Aktifkan TUG-8 ini</button></div>
+                <div className="approval-actions"><button className="approval-btn--approve" onClick={()=>konfirmasiDraftTUG8(t)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Lengkapi & Ajukan TUG-8</button></div>
               )}
             </div>
           ))}

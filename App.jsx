@@ -95,9 +95,14 @@ import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
+import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
+
+// Turn this on only after the reviewed self-host migration is installed. It
+// makes TUG-8/9 fail closed rather than silently reverting to browser storage.
+const CANONICAL_TUG_REQUIRED = import.meta.env.VITE_TUG_CANONICAL_REQUIRED !== "false";
 import QRCode from "qrcode";
 
 const STATUS_MATERIAL_RETUR = ["Material Sisa Baru", "Bongkaran", "Bongkaran ATTB (MTU)"]; // used in TUG-10 returns
@@ -502,6 +507,9 @@ export default function PLNWarehouse() {
   const [selectedSubGudangId, setSelectedSubGudangId] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [docPreview, setDocPreview] = useState(null); // txn object when previewing TUG-9 document
+  // One user action keeps the same RPC idempotency keys across retry after a timeout.
+  const canonicalActionKeysRef = useRef(null);
+  const canonicalDecisionKeysRef = useRef({});
   const [docPreviewDoc, setDocPreviewDoc] = useState(null); // versi docPreview dgn SIM/KTP privat sudah jadi signed URL
   const [kartuGantungDetail, setKartuGantungDetail] = useState(null);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false); // modal cetak barcode massal (Admin, Master Katalog)
@@ -703,7 +711,19 @@ export default function PLNWarehouse() {
           CLOUD.set("pln_lokasi_v4", lokasiFallback);
         }
       }
-      setTxns(ct || DEFAULT_TXNS);
+      // TUG canonical is the source of truth once the reviewed migration exists.
+      // Legacy cache remains only for non-canonical records and as a pre-migration fallback.
+      const legacyTxns = ct || DEFAULT_TXNS;
+      try {
+        const canonicalLoad = await loadCanonicalTugTransactions();
+        setTxns(canonicalLoad.unavailable ? legacyTxns : [
+          ...legacyTxns.filter(t => !t.canonical && !canonicalLoad.rows.some(c => c.id === t.id)),
+          ...canonicalLoad.rows,
+        ]);
+      } catch (err) {
+        console.warn("Canonical TUG load gagal; mempertahankan cache legacy tanpa menulis balik.", err);
+        setTxns(legacyTxns);
+      }
       setDocSeq(cseq || 196);
       // Master data organisasi/gudang (satpam/tim_mutu/uit/upt/ultg/gudang/sub_gudang)
       // — pola 3-arah eksplisit yang sama seperti katalog/stocks. Fetch GAGAL (=== null)
@@ -3687,6 +3707,7 @@ export default function PLNWarehouse() {
 
   // ── Transaction (TUG-9) ──
   function openNewTxn(docType = "TUG9") {
+    const canonicalUptId = currentUserUptId || currentUser?.uptId || "";
     const base = {
       docType,
       pekerjaan: "", namaPekerjaan: "", lokasiPekerjaan: "",
@@ -3697,6 +3718,7 @@ export default function PLNWarehouse() {
     if (docType === "TUG9") {
       setTxnForm({
         ...base,
+        uptId: canonicalUptId,
         noNodin: "", noPersetujuan: "",
         nopol: "", simKtp: "", namaPengemudi: "",
         penerimaNama: "", penerimaJabatan: "", penerimaUnit: "",
@@ -3707,6 +3729,7 @@ export default function PLNWarehouse() {
     } else if (docType === "TUG8") {
       setTxnForm({
         ...base,
+        uptId: canonicalUptId,
         unitTujuan: "",
         noNodin: "", noPersetujuan: "",
         nopol: "", simKtp: "", namaPengemudi: "",
@@ -3858,10 +3881,15 @@ export default function PLNWarehouse() {
     if (docType === "TUG9" || docType === "TUG8") {
       if (!txnForm.penerimaNama.trim()) { showToast("Nama Penerima wajib diisi!","error"); return; }
       if (docType === "TUG8" && !txnForm.unitTujuan?.trim()) { showToast("Unit/Sektor Tujuan wajib diisi untuk TUG-8!","error"); return; }
-      const validItems = txnForm.stockItems.filter(si => si.stockId && si.qty > 0);
+      const submittedItems = txnForm.stockItems || [];
+      if (submittedItems.some(si => !si.stockId || !(Number(si.qty) > 0))) {
+        showToast("Setiap baris material wajib memiliki stok dan jumlah lebih dari nol.","error"); return;
+      }
+      const validItems = submittedItems.filter(si => si.stockId && Number(si.qty) > 0);
       if (validItems.length === 0) { showToast("Minimal 1 barang harus dipilih!","error"); return; }
       for (const si of validItems) {
         const stock = enrichedStocks.find(s=>s.id===si.stockId);
+        if (!stock) { showToast("Referensi stok tidak ditemukan. Pilih ulang material dari daftar stok.","error"); return; }
         if (stock && stock.jenisBarang !== "Non-Stock" && stock.qty < si.qty) {
           showToast(`Stok ${stock.name} di ${stock.lokasi} tidak cukup! Tersedia: ${stock.qty} ${stock.unit}`,"error"); return;
         }
@@ -3909,26 +3937,50 @@ export default function PLNWarehouse() {
     }
   }
 
-  async function commitNewTxn(docType, formData) {
+  async function commitNewTxn(docType, formData, { replaceDraftId = null } = {}) {
     if (savingTxnRef.current) return;       // cegah double-submit saat upload foto berjalan
     savingTxnRef.current = true;
     setSavingTxn(true);
     setSavingInfo({ label: "Menyiapkan data...", done: 0, total: 0 });
     try {
+    // Local draft metadata must never become part of the official server document.
+    const { id:_draftId, docSeq:_draftSeq, docNumbers:_draftNumbers, status:_draftStatus,
+      stage:_draftStage, requiredApprover:_draftApprover, canonical:_draftCanonical,
+      canonicalId:_draftCanonicalId, canonicalVersion:_draftCanonicalVersion,
+      draftLabel:_draftLabel, ...submittedForm } = formData || {};
+    formData = submittedForm;
     // Upload foto base64 ke Storage dulu → blob transaksi jadi ringan. Gagal upload
     // (offline) → foto tetap base64 + _fotoPending; transaksi & dokumen tetap jadi,
     // auto-sync menyusul saat online (syncPendingTxnPhotos).
-    const txnId = `${docType}-${uid().slice(-6)}`;
+    let txnId = `${docType}-${uid().slice(-6)}`;
     const _hasFoto = formData && ([formData.fotoKendaraan,formData.fotoSimKtp,formData.fotoSuratPengembalian,formData.fotoBAPengembalian,formData.fotoSuratJalanImg,formData.fotoKontrak].some(_isDataUrl) || (formData.fotoMaterial||[]).some(fm=>_isDataUrl(fm?.img)) || (formData.stockItems||[]).some(si=>_isDataUrl(si.fotoNameplate)||_isDataUrl(si.fotoBarangRetur)));
     if (_hasFoto) setSavingInfo({ label: "Mengunggah foto...", done: 0, total: 0 });
     const { data: _fd, pending: _pend } = await processTxnPhotos(formData, txnId, (done, total) => setSavingInfo({ label: "Mengunggah foto...", done, total }));
     formData = _fd;
+    if (_pend.length && ["TUG8", "TUG9"].includes(docType)) {
+      throw new Error("Foto TUG-8/TUG-9 belum aman di Storage. Periksa koneksi lalu ajukan ulang; dokumen resmi belum dibuat.");
+    }
     if (_pend.length) showToast(`⚠️ ${_pend.length} foto belum terunggah (sinyal?). Transaksi & dokumen tetap tersimpan; foto disinkron otomatis saat online.`, "info");
 
-    const seq = docSeq;
+    let seq = docSeq;
     const docCode = (docType === "TUG10" || docType === "TUG3") ? "LOG.00.01" : "LOG.00.02";
-    const docNumbers = generateDocNumbers(seq, Date.now(), docCode);
     const docKey = docType === "TUG9" ? "tug9" : docType === "TUG8" ? "tug8" : docType === "TUG10" ? "tug10" : docType === "TUG5" ? "tug5" : "tug3";
+    let docNumbers = generateDocNumbers(seq, Date.now(), docCode);
+    let canonicalSubmission = null;
+    // TUG-8/TUG-9 uses the canonical server record when its reviewed migration
+    // is available. A deployment before the migration retains the legacy path.
+    if (["TUG8", "TUG9"].includes(docType)) {
+      canonicalActionKeysRef.current ||= newCanonicalActionKeys();
+      canonicalSubmission = await createAndSubmitCanonicalTug({ docType, formData, currentUser, idempotencyKeys: canonicalActionKeysRef.current });
+      if (canonicalSubmission.unavailable && CANONICAL_TUG_REQUIRED) {
+        throw new Error("Penyimpanan transaksi TUG canonical belum tersedia. Dokumen resmi tidak dibuat.");
+      }
+      if (!canonicalSubmission.unavailable) {
+        txnId = canonicalSubmission.id;
+        seq = Number(canonicalSubmission.docSequence);
+        docNumbers = { ...docNumbers, [docKey]: canonicalSubmission.docNumber };
+      }
+    }
 
     if (docType === "TUG5" && formData.sourceType === "ULTG") {
       // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
@@ -4008,24 +4060,44 @@ export default function PLNWarehouse() {
       return;
     }
 
-    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
+    const requiredApprover = canonicalSubmission && !canonicalSubmission.unavailable
+      ? (canonicalSubmission.stage === "PENDING_TL" ? "TL" : "ASMAN")
+      : (hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN");
+    const replacedDraft = replaceDraftId ? txns.find(t => t.id === replaceDraftId) : null;
+    const { draftLabel:_localDraftLabel, ...draftBase } = replacedDraft || {};
     const nt = {
+      ...draftBase,
       id: txnId,
       docType, docSeq: seq, docNumbers,
       ...formData,
       status: "PENDING",
+      canonical: !!canonicalSubmission && !canonicalSubmission.unavailable,
+      canonicalId: canonicalSubmission?.id || null,
+      canonicalVersion: canonicalSubmission?.version || null,
+      identitySnapshot: canonicalSubmission?.identitySnapshot || null,
+      stage: canonicalSubmission?.stage || undefined,
       requiredApprover,
       approvedBy: null, approvedAt: null,
       asmanAutoApproved: false,
       rejectedBy: null, rejectedAt: null, rejectReason: null,
       createdBy: currentUser.id, createdAt: Date.now(),
     };
-    const newTxns = [...txns, nt];
-    const newSeq = seq + 1;
-    setTxns(newTxns); setDocSeq(newSeq); setTxnModal(false);
+    const draftReplaced = replaceDraftId
+      ? txns.map(t => t.id === replaceDraftId ? nt : t)
+      : [...txns, nt];
+    // Source transactions must point at the canonical record, never a local
+    // draft id. This preserves both TUG-5 -> TUG-9 and TUG-7 -> TUG-8 chains.
+    const newTxns = replaceDraftId
+      ? draftReplaced.map(t => t.adoptedTug9Id === replaceDraftId
+        ? { ...t, adoptedTug9Id:txnId }
+        : t.tug8DraftId === replaceDraftId ? { ...t, tug8DraftId:txnId } : t)
+      : draftReplaced;
+    const newSeq = canonicalSubmission && !canonicalSubmission.unavailable ? docSeq : seq + 1;
+    setTxns(newTxns); setDocSeq(newSeq); setTxnModal(false); setEditingDraftTxnId(null);
     setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
     await saveToCloud({txns: newTxns, docSeq: newSeq});
     logAudit(currentUser, "CREATE", "txns", nt.docNumbers[docKey], { docType, jumlahBarang: (formData.stockItems||[]).length });
+    canonicalActionKeysRef.current = null;
     showToast(`Transaksi ${nt.docNumbers[docKey]} dibuat! Menunggu approval ${ROLES[requiredApprover]}. ⏳`);
     } catch (err) {
       console.error("commitNewTxn gagal:", err);
@@ -4043,14 +4115,44 @@ export default function PLNWarehouse() {
   }
 
   // ── Approval logic ──
-  // ADMIN-created  -> TL approves -> Asman auto-approved alongside
-  // TL-created     -> ASMAN approves -> directly APPROVED
-  async function approveTxn(txn) {
+  // Canonical TUG-8/9: Admin submit -> TL review -> Asman final.
+  // TL-created records carry explicit TL evidence at submit -> Asman final.
+  async function approveTxn(txn, review = null) {
     if (currentUser.role !== "SUPERADMIN" && txn.requiredApprover !== currentUser.role) {
       showToast(`Transaksi ini butuh approval dari ${ROLES[txn.requiredApprover]}, bukan kamu.`,"error"); return;
     }
     const isAdminCreated = txn.requiredApprover === "TL";
     const dKey = docKeyOf(txn);
+
+    if (txn.canonical) {
+      if (!review?.reviewToken || !review?.attestations) { showToast("Buka dan selesaikan overview server sebelum approval final.", "error"); return false; }
+      try {
+        canonicalDecisionKeysRef.current[txn.id] ||= newCanonicalActionKeys().decide;
+        const result = await decideCanonicalTug({ txn, decision:"APPROVE", reviewToken:review.reviewToken, attestations:review.attestations, idempotencyKey:canonicalDecisionKeysRef.current[txn.id] });
+        if (result.unavailable) throw new Error("Layanan transaksi canonical belum tersedia; approval final tidak dijalankan.");
+        const isFinal = result.data.status === "FINAL_APPROVED";
+        if (isFinal) {
+          const freshStocks = await loadMasterTable("stocks");
+          if (freshStocks !== null) setStocks(freshStocks);
+        }
+        setTxns(prev => prev.map(t => t.id === txn.id ? { ...t, status:isFinal ? "APPROVED" : "PENDING", stage:result.data.stage, requiredApprover:isFinal ? null : "ASMAN", canonicalVersion:result.data.version, ...(isFinal ? {approvedBy:currentUser.id,approvedAt:Date.now()} : {approvedByTL:currentUser.id,approvedAtTL:Date.now()}), asmanAutoApproved:false } : t));
+        delete canonicalDecisionKeysRef.current[txn.id];
+        logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers[dKey], {stage:result.data.stage, canonical:true});
+        showToast(isFinal ? `✅ ${txn.docNumbers[dKey]} DISETUJUI FINAL. Stok diperbarui atomik oleh server.` : `✅ ${txn.docNumbers[dKey]} disetujui TL. Menunggu Asman; stok belum berubah.`);
+        return true;
+      } catch (err) {
+        showToast(`Approval final belum dijalankan: ${err?.message||err}`, "error");
+        return false;
+      }
+    }
+
+    // Once cutover is enabled, legacy pending TUG-8/9 cannot decrement stock
+    // from browser state. They must be recreated/imported through the reviewed
+    // canonical workflow; already-approved legacy records remain history only.
+    if (CANONICAL_TUG_REQUIRED && ["TUG8", "TUG9"].includes(txn.docType)) {
+      showToast("Transaksi TUG lama tidak dapat mengubah stok setelah cutover canonical. Ajukan ulang atau lakukan migrasi baseline terkontrol.", "error");
+      return false;
+    }
 
     if (txn.docType === "TUG9" || txn.docType === "TUG8") {
       // Outgoing material: decrease Data Stok qty at the specific location row.
@@ -4070,7 +4172,7 @@ export default function PLNWarehouse() {
       await saveToCloud({stocks: newStocks, txns: newTxns}, {stocksChangedRows: newStocks.filter(s => txn.stockItems.some(si=>si.stockId===s.id))});
       logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers[dKey], {stage: txn.stage||null});
       showToast(isAdminCreated ? `✅ ${txn.docNumbers[dKey]} DISETUJUI! (Asman otomatis ikut menyetujui)` : `✅ ${txn.docNumbers[dKey]} DISETUJUI!`);
-      return;
+      return true;
     }
 
     if (txn.docType === "TUG10") {
@@ -4120,7 +4222,7 @@ export default function PLNWarehouse() {
       });
       logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers[dKey], {stage: txn.stage||null});
       showToast(isAdminCreated ? `✅ ${txn.docNumbers[dKey]} DISETUJUI! Stok bertambah. (Asman otomatis ikut menyetujui)` : `✅ ${txn.docNumbers[dKey]} DISETUJUI! Stok bertambah.`);
-      return;
+      return true;
     }
   }
   async function rejectTxn(txn, reason) {
@@ -4128,6 +4230,18 @@ export default function PLNWarehouse() {
       showToast(`Transaksi ini butuh approval dari ${ROLES[txn.requiredApprover]}, bukan kamu.`,"error"); return;
     }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
+    if (txn.canonical) {
+      try {
+        canonicalDecisionKeysRef.current[txn.id] ||= newCanonicalActionKeys().decide;
+        const result = await decideCanonicalTug({ txn, decision:"REJECT", reason, idempotencyKey:canonicalDecisionKeysRef.current[txn.id] });
+        if (result.unavailable) throw new Error("Layanan transaksi canonical belum tersedia; penolakan tidak dijalankan.");
+        setTxns(prev => prev.map(t => t.id===txn.id ? {...t,status:"REJECTED",stage:"REJECTED",canonicalVersion:result.data.version,rejectedBy:currentUser.id,rejectedAt:Date.now(),rejectReason:reason} : t));
+        delete canonicalDecisionKeysRef.current[txn.id];
+        logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers[docKeyOf(txn)], {stage:"REJECTED", alasan:reason, canonical:true});
+        showToast(`❌ ${txn.docNumbers[docKeyOf(txn)]} DITOLAK.`, "error");
+        return true;
+      } catch (err) { showToast(`Penolakan belum dijalankan: ${err?.message||err}`, "error"); return false; }
+    }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns);
     await saveToCloud({txns: newTxns});
@@ -4384,16 +4498,14 @@ export default function PLNWarehouse() {
   async function adoptTUG5ULTG(txn) {
     if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL UPT yang bisa mengadopsi pengajuan ini.","error"); return; }
     if (txn.adoptedBy) { showToast("Pengajuan ini sudah di-adopt UPT lain.","error"); return; }
-    const seq = docSeq;
-    const docCode = "LOG.00.02";
-    const docNumbers = generateDocNumbers(seq, Date.now(), docCode);
     const ultg = ultgList.find(u=>u.id===txn.ultgId);
     // Cocokkan katalogId dari pengajuan TUG-5 ULTG ke baris stok aktual (pilih stok dengan
     // qty terbesar untuk katalog tsb) — supaya list material TIDAK hilang saat masuk draft TUG-9,
     // karena form TUG-9 me-render item lewat stocks.find(s=>s.id===si.stockId), bukan katalogId.
     const draftTug9 = {
-      id: `TUG9-` + uid().slice(-6),
-      docType: "TUG9", docSeq: seq, docNumbers,
+      id: `DRAFT-TUG9-` + uid().slice(-6),
+      docType: "TUG9", draftLabel:"DRAFT — nomor resmi saat diajukan",
+      uptId: currentUserUptId || currentUser?.uptId || "",
       tug5Id: txn.id, tug5DocNo: txn.docNumbers.tug5,
       namaPekerjaan: txn.keteranganUmum || "Permintaan Material ULTG",
       lokasiPekerjaan: ultg?.nama || "ULTG",
@@ -4413,31 +4525,23 @@ export default function PLNWarehouse() {
     };
     const newTxns = txns.map(t => t.id===txn.id ? {...t, adoptedBy:currentUser.id, adoptedAt:Date.now(), adoptedTug9Id:draftTug9.id} : t);
     const allTxns = [...newTxns, draftTug9];
-    const newSeq = seq + 1;
-    setTxns(allTxns); setDocSeq(newSeq);
-    await saveToCloud({txns: allTxns, docSeq: newSeq});
+    setTxns(allTxns);
+    await saveToCloud({txns: allTxns});
     showToast(`📋 Diadopsi! Draft TUG-9 dibuat — lengkapi & edit materialnya sebelum submit.`);
     return draftTug9;
   }
-  // Buka draft TUG-9 (hasil adopt) di form TUG-9 biasa supaya bisa diedit — tambah/hapus
-  // baris material, lengkapi field yang kurang — sebelum disubmit ke approval normal.
+  // Buka draft TUG-8/9 di form biasa. Nomor resmi hanya dibuat oleh RPC canonical
+  // setelah seluruh data, stok, dan lampiran lolos validasi.
   function openDraftTug9(txn) {
-    setTxnForm({ ...txn, stockItems: txn.stockItems.length ? txn.stockItems : [{stockId:"",qty:1}] });
+    canonicalActionKeysRef.current = null;
+    setTxnForm({ ...txn, uptId:txn.uptId || currentUserUptId || currentUser?.uptId || "", stockItems: txn.stockItems.length ? txn.stockItems : [{stockId:"",qty:1}] });
     setEditingDraftTxnId(txn.id);
     setTxnModal(true);
   }
-  // Submit draft TUG-9 (hasil adopt) yang sudah dilengkapi/diedit → masuk approval normal TUG-9
+  // Submit draft turunan mengganti satu baris local draft dengan record canonical.
   async function submitDraftTug9(formData) {
-    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
-    const newTxns = txns.map(t => t.id===editingDraftTxnId ? {
-      ...t, ...formData,
-      status: "PENDING", requiredApprover,
-      approvedBy: null, approvedAt: null, asmanAutoApproved: false,
-      createdBy: currentUser.id,
-    } : t);
-    setTxns(newTxns); setTxnModal(false); setEditingDraftTxnId(null);
-    await saveToCloud({txns: newTxns});
-    showToast(`✅ TUG-9 dilengkapi & diajukan! Menunggu approval ${ROLES[requiredApprover]}.`);
+    if (!editingDraftTxnId) throw new Error("Draft transaksi tidak ditemukan.");
+    await commitNewTxn(formData.docType, formData, { replaceDraftId:editingDraftTxnId });
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -4457,21 +4561,21 @@ export default function PLNWarehouse() {
     if (!hasRole(currentUser, "MGR_LOGISTIK_UIT")) { showToast("Hanya Manager Logistik UIT yang bisa menyetujui TUG-7.","error"); return; }
     if (txn.stage !== "PENDING_MGR_LOGISTIK") { showToast("TUG-7 ini tidak dalam tahap menunggu Manager Logistik.","error"); return; }
 
-    // Auto-generate draft TUG-8 di UPT Pengirim
-    const seq = docSeq;
-    const docNumbers = generateDocNumbers(seq, Date.now(), "LOG.00.02");
+    // Auto-generate local draft TUG-8 in the sending UPT. It intentionally has
+    // no official number/sequence; the canonical RPC allocates those on submit.
     const uptPengirim = uptList.find(u=>u.id===txn.uptPengirimId);
     const tug5Ref = txns.find(t=>t.id===txn.tug5Id);
     const newTug8Draft = {
-      id: `TUG8-` + uid().slice(-6),
+      id: `DRAFT-TUG8-` + uid().slice(-6),
       docType: "TUG8",
-      docSeq: seq, docNumbers,
+      draftLabel:"DRAFT — nomor resmi saat diajukan",
       tug7Id: txn.id,
       tug5Id: txn.tug5Id,
       noReferensiTug7: txn.docNumbers.tug7,
       noReferensiTug5: tug5Ref?.docNumbers?.tug5 || "",
       unitTujuan: txn.unitPenerima || "UPT Surabaya",
       uptPengirimId: txn.uptPengirimId,
+      uptId: txn.uptPengirimId,
       namaPekerjaan: `Berdasarkan TUG-7 ${txn.docNumbers.tug7}`,
       lokasiPekerjaan: uptPengirim?.nama || "-",
       perkiraanPembebanan: "", kodePerkiraan: txn.kodeAkun||"",
@@ -4486,10 +4590,9 @@ export default function PLNWarehouse() {
     };
     const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED", status:"APPROVED", approvedByMgrLogistik:currentUser.id, approvedAtMgrLogistik:Date.now(), tug8DraftId:newTug8Draft.id} : t);
     const allTxns = [...newTxns, newTug8Draft];
-    const newSeq = seq + 1;
-    setTxns(allTxns); setDocSeq(newSeq);
-    await saveToCloud({txns: allTxns, docSeq: newSeq});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug7, {stage:"APPROVED", generated:newTug8Draft.docNumbers.tug8});
+    setTxns(allTxns);
+    await saveToCloud({txns: allTxns});
+    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug7, {stage:"APPROVED", generated:"DRAFT_TUG8"});
     showToast(`✅ TUG-7 DISETUJUI! Draft TUG-8 otomatis muncul di UPT ${uptPengirim?.nama||"Pengirim"}. 📦`);
   }
   async function rejectTUG7_MgrLogistik(txn, reason) {
@@ -4501,18 +4604,12 @@ export default function PLNWarehouse() {
     showToast(`❌ TUG-7 DITOLAK oleh Manager Logistik UIT.`, "error");
   }
 
-  // Konfirmasi draft TUG-8 dari TUG-7 oleh Admin UPT Pengirim
+  // Draft TUG-8 must be completed in the form; it may not bypass canonical
+  // create+submit or browser-side stock handling through a direct confirmation.
   async function konfirmasiDraftTUG8(txn) {
     if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin Gudang / TL yang bisa mengkonfirmasi draft TUG-8.","error"); return; }
-    const requiredApprover = hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN";
-    const newTxns = txns.map(t => t.id===txn.id ? {
-      ...t, stage:undefined, status:"PENDING",
-      requiredApprover, approvedBy:null, approvedAt:null,
-      asmanAutoApproved:false, createdBy:currentUser.id,
-    } : t);
-    setTxns(newTxns); await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug8, {stage:"KONFIRMASI_DRAFT"});
-    showToast(`✅ Draft TUG-8 dikonfirmasi! Status: PENDING, menunggu approval ${ROLES[requiredApprover]}.`);
+    openDraftTug9(txn);
+    showToast("Lengkapi TUG-8, pilih stok dan jumlah, lalu ajukan untuk membuat nomor resmi canonical.");
   }
 
   // Bangun ulang knowledge base RAG (tabel rag_chunks di Supabase) dari
@@ -5439,7 +5536,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             heavyEquipmentPendingCount={heavyEquipmentPendingCount} opnameList={opnameList} stockCountPendingCount={stockCountPendingCount}
             approvalTypeFilter={approvalTypeFilter} setApprovalTypeFilter={setApprovalTypeFilter} approvalPageSize={approvalPageSize} setApprovalPageSize={setApprovalPageSize}
             enrichedStocks={enrichedStocks} katalogList={katalogList} users={users}
-            approveTxn={approveTxn} rejectTxn={rejectTxn} uptList={uptList}
+            approveTxn={approveTxn} rejectTxn={rejectTxn} prepareReview={prepareCanonicalTugReview} uptList={uptList}
             submitTUG7_AdminUIT={submitTUG7_AdminUIT} approveTUG7_MgrLogistik={approveTUG7_MgrLogistik} rejectTUG7_MgrLogistik={rejectTUG7_MgrLogistik} konfirmasiDraftTUG8={konfirmasiDraftTUG8}
             startCapacityApproval={startCapacityApproval} rejectCapacityImport={rejectCapacityImport}
             approveLokasiChange={approveLokasiChange} rejectLokasiChange={rejectLokasiChange}

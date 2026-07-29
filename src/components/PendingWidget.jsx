@@ -7,7 +7,7 @@ export function PendingWidget({ myPendingApprovals, C, sty, setTab }) {
     <div className="dashboard-pending-widget" style={{...sty.card,borderLeft:`4px solid #f59e0b`,marginBottom:16}}>
       <h3 style={{fontSize:13,fontWeight:700,color:"#92400e",marginBottom:10}}><Hourglass weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Butuh Tindakan ({myPendingApprovals.length})</h3>
       {myPendingApprovals.slice(0,4).map(t=>{
-        const docNo = t.docNumbers?.[t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":t.docType==="TUG10"?"tug10":t.docType==="TUG5"?"tug5":t.docType==="TUG7"?"tug7":"tug3"]||t.id;
+        const docNo = t.docNumbers?.[t.docType==="TUG9"?"tug9":t.docType==="TUG8"?"tug8":t.docType==="TUG10"?"tug10":t.docType==="TUG5"?"tug5":t.docType==="TUG7"?"tug7":"tug3"]||t.draftLabel||t.id;
         const label = t.docType==="TUG5"?t.keteranganUmum||"Permintaan Material":t.docType==="TUG7"?`TUG-7 → ${t.unitPenerima||"UPT"}`:t.namaPekerjaan||"-";
         return (
           <div key={t.id} className="dashboard-pending-widget__row" style={{borderBottom:`1px solid ${C.border}`}}>

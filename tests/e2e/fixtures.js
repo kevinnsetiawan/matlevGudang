@@ -85,7 +85,8 @@ const EXPECTED_OFFLINE_CONSOLE_ERRORS = [
 const test = base.extend({
   actorProfile: [E2E_PROFILE, { option:true }],
   cloudOverrides: [{}, { option:true }],
-  isolatedPage: async ({ page, context, actorProfile, cloudOverrides }, use) => {
+  expectedConsoleErrorPrefixes: [[], { option:true }],
+  isolatedPage: async ({ page, context, actorProfile, cloudOverrides, expectedConsoleErrorPrefixes }, use) => {
     const forbiddenRequests = [];
     const pageErrors = [];
     const consoleErrors = [];
@@ -93,6 +94,7 @@ const test = base.extend({
     page.on("console", message => {
       if (message.type() !== "error") return;
       if (EXPECTED_OFFLINE_CONSOLE_ERRORS.some(prefix => message.text().startsWith(prefix))) return;
+      if (expectedConsoleErrorPrefixes.some(prefix => message.text().startsWith(prefix))) return;
       consoleErrors.push(message.text());
     });
     await context.addInitScript(({ profile, cloud }) => {

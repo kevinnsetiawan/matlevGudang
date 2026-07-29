@@ -18,12 +18,15 @@ export function buildTUG9HTML(txn, stocks, users, satpamList) {
   const docKey = isTUG8 ? "tug8" : "tug9";
   const creator = users.find(u=>u.id===txn.createdBy) || {};
   const actualApprover = users.find(u=>u.id===txn.approvedBy) || {};
-  // "Mengetahui" on the Bon Pemakaian is ALWAYS Asman Konstruksi, per baku format.
-  // Whether Asman approved it directly or it was auto-approved alongside TL's
-  // approval, the on-file Asman Konstruksi user always signs this slot.
-  const asmanUser = users.find(u => u.role === "ASMAN") || {};
-  // "Yang Menyerahkan" is always TL Logistik (whoever holds that role / actually approved if TL)
-  const menyerahkanUser = txn.requiredApprover === "TL" ? actualApprover : (users.find(u=>u.role==="TL")||{});
+  // Canonical documents show Asman only after that account explicitly approves.
+  const asmanUser = txn.canonical
+    ? (txn.status === "APPROVED" ? (users.find(u => u.id === txn.approvedBy && u.role === "ASMAN") || {}) : {})
+    : (users.find(u => u.role === "ASMAN") || {});
+  // Canonical TUG documents freeze the responsible TL at creation. Legacy
+  // documents fall back only to a TL from the same UPT, never an arbitrary TL.
+  const snapshotTl = txn.identitySnapshot?.tl_name ? { name:txn.identitySnapshot.tl_name, officialPhone:txn.identitySnapshot.tl_phone, jabatan:txn.identitySnapshot.tl_jabatan } : null;
+  const scopedTl = users.find(u => u.role === "TL" && (!txn.uptId || u.uptId === txn.uptId)) || {};
+  const menyerahkanUser = snapshotTl || (actualApprover.role === "TL" ? actualApprover : scopedTl);
   const satpamUser = (satpamList||[]).find(sp => sp.id === txn.satpamId) || {};
   const itemRows = txn.stockItems.map(si => {
     const stock = stocks.find(s=>s.id===si.stockId) || {};
@@ -149,9 +152,9 @@ table.items td{padding:6px 6px;border-bottom:1px solid #ddd;font-size:10px}
   <div class="sig-row">
     <div class="sig-col">Yang Menerima,<br>${txn.penerimaUnit||"-"}<div class="sig-space"></div><div class="sig-name">${txn.penerimaNama||"....................."}</div></div>
     <div class="sig-col">Mengetahui,<br>${asmanUser.jabatan||"ASMAN KONSTRUKSI " + UPT}<div class="sig-space"></div><div class="sig-name">${asmanUser.name||"....................."}</div></div>
-    <div class="sig-col">Yang Menyerahkan,<br>${menyerahkanUser.jabatan||"TL LOGISTIK " + UPT}<div class="sig-space"></div><div class="sig-name">${menyerahkanUser.name||"....................."}</div></div>
+    <div class="sig-col">Yang Menyerahkan,<br>${menyerahkanUser.jabatan||"TL LOGISTIK " + UPT}${menyerahkanUser.officialPhone ? `<br><span style="font-size:8px">${menyerahkanUser.officialPhone}</span>` : ""}<div class="sig-space"></div><div class="sig-name">${menyerahkanUser.name||"....................."}</div></div>
   </div>
-  ${txn.requiredApprover==="TL" ? `<div style="font-size:9px;color:#16a34a;text-align:center;margin-top:6px;font-style:italic">* Disetujui oleh TL Logistik, Asman Konstruksi turut menyetujui sesuai ketentuan internal</div>` : ""}
+  ${txn.requiredApprover==="TL" && !txn.canonical ? `<div style="font-size:9px;color:#16a34a;text-align:center;margin-top:6px;font-style:italic">* Disetujui oleh TL Logistik, Asman Konstruksi turut menyetujui sesuai ketentuan internal</div>` : ""}
 </div>
 
 ${hasAnyAttachment ? `

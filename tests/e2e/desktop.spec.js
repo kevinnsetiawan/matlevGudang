@@ -2,6 +2,49 @@ const { test, expect } = require("./fixtures");
 const { openApp, openRoute } = require("./support/responsive");
 
 test.describe("WARNOTO desktop preservation smoke", () => {
+  test.describe("canonical derived TUG-8 draft", () => {
+    test.use({
+      expectedConsoleErrorPrefixes: ["commitNewTxn gagal:"],
+      cloudOverrides: {
+        pln_txns_v3: [{
+          id:"DRAFT-TUG8-E2E", docType:"TUG8", stage:"DRAFT_TUG8", status:"DRAFT",
+          draftLabel:"DRAFT — nomor resmi saat diajukan", namaPekerjaan:"Pengiriman material E2E",
+          lokasiPekerjaan:"UPT Surabaya", unitTujuan:"ULTG E2E", keteranganBarang:"Material E2E",
+          uptId:"UPT-SBY",
+          penerimaNama:"Penerima E2E", fotoMaterial:[], fotoKendaraan:null, fotoSimKtp:null,
+          fotoSuratPengembalian:null, nopol:"", namaPengemudi:"", simKtp:"", satpamId:"",
+          stockItems:[{ stockId:"ST-E2E-01", qty:1 }], docNumbers:undefined,
+        }],
+      },
+    });
+
+    test("draft without docNumbers renders and opens canonical completion form", async ({ isolatedPage:page }) => {
+      await openApp(page);
+      await openRoute(page, { tab:"approval", menuPath:["Approval"], readySelector:".approval-queue" });
+      const card = page.locator(".approval-card").filter({ hasText:"Pengiriman material E2E" });
+      await expect(card).toBeVisible();
+      await expect(card.getByText("DRAFT — nomor resmi saat diajukan", { exact:true })).toBeVisible();
+      await card.getByRole("button", { name:"Lengkapi & Ajukan TUG-8", exact:true }).click();
+      const dialog = page.locator('[role="dialog"]').filter({ hasText:"DRAFT — nomor resmi saat diajukan" });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText("DRAFT — nomor resmi saat diajukan", { exact:true })).toBeVisible();
+    });
+
+    test("canonical submit fails closed and keeps draft form open", async ({ isolatedPage:page }) => {
+      await openApp(page);
+      await openRoute(page, { tab:"approval", menuPath:["Approval"], readySelector:".approval-queue" });
+      const card = page.locator(".approval-card").filter({ hasText:"Pengiriman material E2E" });
+      await card.getByRole("button", { name:"Lengkapi & Ajukan TUG-8", exact:true }).click();
+      const dialog = page.locator('[role="dialog"]').filter({ hasText:"DRAFT — nomor resmi saat diajukan" });
+      await expect(dialog).toBeVisible();
+      const before = await page.evaluate(() => localStorage.getItem("warnoto_pln_stocks_v4"));
+      await dialog.getByRole("button", { name:/Ajukan|Simpan/ }).click();
+      await expect(dialog).toBeVisible();
+      await expect(page.getByText(/Penyimpanan transaksi TUG canonical belum tersedia/)).toBeVisible();
+      await expect(page.evaluate(() => localStorage.getItem("warnoto_pln_stocks_v4"))).resolves.toBe(before);
+    });
+  });
+
   test.describe("Data Stok photo detail", () => {
     test.use({
       cloudOverrides: {
