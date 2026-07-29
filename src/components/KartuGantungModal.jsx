@@ -2,23 +2,26 @@
 import { useState } from "react";
 import { fmtDate, fmtDateOnly } from "../lib/utils.js";
 import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
-import { buildKartuGantungHistory, getSAPBadgeStyle, jenisBarangAccentColor } from "../lib/sap.js";
+import { buildKartuGantungHistory, resolveLokasiLengkap, getSAPBadgeStyle, jenisBarangAccentColor } from "../lib/sap.js";
 import { buildTUG2FrontHTML, buildTUG2BackHTML } from "../lib/docBuilders.js";
+import { resolveStockPhotoUrl } from "../lib/stockCache.js";
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
 import { UPT } from "../constants.js";
 
-export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangList, sty, C, onClose }) {
+export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangList, subGudangList, sty, C, onClose }) {
   const [view, setView] = useState("front"); // "front" | "back"
-  const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList);
-  const lokasiTerkait = [...new Set((stocks||[]).filter(s=>s.katalogId===katalog.id).map(s=>s.lokasiId))].map(lid=>lokasiList.find(l=>l.id===lid)?.kode).filter(Boolean);
-  const sampleFoto = stocks.find(s=>s.katalogId===katalog.id && s.img)?.img || null;
-  const currentStockQty = (stocks||[]).filter(s=>s.katalogId===katalog.id).reduce((a,s)=>a+(s.qty||0),0);
+  const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList);
+  // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
+  const gudangStr = resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList);
+  const sampleStock = stocks.find(s=>s.katalogId===katalog.id && s.fotoKeseluruhan);
+  const sampleFoto = sampleStock ? resolveStockPhotoUrl(sampleStock.fotoKeseluruhan) : null;
+  const kategoriMaterial = stocks.find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
 
   const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
   const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(scanUrl)}`;
 
   const handlePrintFront = async () => {
-    const html = await buildTUG2FrontHTML(katalog, stocks, lokasiList);
+    const html = await buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList);
     const w = window.open("", "_blank");
     if (w) {
       w.document.write(html);
@@ -27,7 +30,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
   };
 
   const handlePrintBack = async () => {
-    const html = await buildTUG2BackHTML(katalog, stocks, txns, lokasiList);
+    const html = await buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList);
     const w = window.open("", "_blank");
     if (w) {
       w.document.write(html);
@@ -106,13 +109,13 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc",width:110}}>No. Katalog :</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:800,color:"#0284c7"}}>{katalog.katalog || "-"}</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc",width:90}}>Lokasi :</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700}}>{lokasiTerkait.length>0 ? lokasiTerkait.join(", ") : "-"}</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,fontSize:9.5}}>{gudangStr}</td>
                   </tr>
                   <tr>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>No. Aset :</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{katalog.noAset || "-"}</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>KARTU No. :</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{katalog.kartuNo || "-"}</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>Kategori :</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{kategoriMaterial}</td>
                   </tr>
                   <tr>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>NAMA BARANG :</td>
@@ -181,13 +184,13 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc",width:110}}>No. Katalog :</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:800,color:"#0284c7"}}>{katalog.katalog || "-"}</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc",width:90}}>Lokasi :</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700}}>{lokasiTerkait.length>0 ? lokasiTerkait.join(", ") : "-"}</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,fontSize:9.5}}>{gudangStr}</td>
                   </tr>
                   <tr>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>No. Aset :</td>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{katalog.noAset || "-"}</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>KARTU No. :</td>
-                    <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{katalog.kartuNo || "-"}</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>Kategori :</td>
+                    <td style={{border:"1px solid #0f172a",padding:"6px 8px"}}>{kategoriMaterial}</td>
                   </tr>
                   <tr>
                     <td style={{border:"1px solid #0f172a",padding:"6px 8px",fontWeight:700,background:"#f8fafc"}}>NAMA BARANG :</td>
@@ -197,26 +200,22 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                 </tbody>
               </table>
 
-              {/* Header Tabel Riwayat Keluar-Masuk (SISA PERSEDIAAN: RAK / PETI / JMLH) */}
-              <div style={{fontWeight:800,fontSize:11,marginBottom:6,color:"#0f172a",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span>RIWAYAT KELUAR - MASUK BARANG</span>
-                <span style={{fontSize:11,color:"#0284c7",fontWeight:700}}>Stok Saat Ini: {fmtNum(currentStockQty)} {katalog.satuan||"BH"}</span>
+              {/* Header Tabel Riwayat Keluar-Masuk */}
+              <div style={{fontWeight:800,fontSize:11,marginBottom:6,color:"#0f172a"}}>
+                RIWAYAT KELUAR - MASUK BARANG
               </div>
               <div style={{overflowX:"auto"}}>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,border:"1.5px solid #0f172a"}}>
                   <thead>
                     <tr style={{background:"#f1f5f9",color:"#0f172a"}}>
-                      <th rowSpan={2} style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:75}}>TGL</th>
-                      <th rowSpan={2} style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"left"}}>NO. BON</th>
-                      <th rowSpan={2} style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:55}}>MASUK</th>
-                      <th rowSpan={2} style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:55}}>KELUAR</th>
-                      <th colSpan={3} style={{border:"1px solid #0f172a",padding:"5px 6px",textAlign:"center"}}>SISA PERSEDIAAN</th>
-                      <th rowSpan={2} style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"left"}}>CATATAN</th>
-                    </tr>
-                    <tr style={{background:"#f1f5f9",color:"#0f172a"}}>
-                      <th style={{border:"1px solid #0f172a",padding:"4px 4px",textAlign:"center",width:45}}>RAK</th>
-                      <th style={{border:"1px solid #0f172a",padding:"4px 4px",textAlign:"center",width:45}}>PETI</th>
-                      <th style={{border:"1px solid #0f172a",padding:"4px 4px",textAlign:"center",width:55}}>JMLH</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:75}}>TGL</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"left"}}>NO. BON</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:55}}>MASUK</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:55}}>KELUAR</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:55}}>RAK</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"left"}}>LOKASI</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",width:60}}>JUMLAH</th>
+                      <th style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"left"}}>CATATAN</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -237,12 +236,12 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                       }
                       return (
                         <tr key={idx} style={{borderBottom:"1px solid #0f172a"}}>
-                          <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center"}}>{fmtDateOnly(h.tgl)}</td>
+                          <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center"}}>{h.tgl ? fmtDateOnly(h.tgl) : "-"}</td>
                           <td style={{border:"1px solid #0f172a",padding:"6px 6px",fontWeight:600}}>{h.noBon||"-"}</td>
                           <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",color:"#15803d",fontWeight:700}}>{h.masuk>0?fmtNum(h.masuk):""}</td>
                           <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",color:"#b91c1c",fontWeight:700}}>{h.keluar>0?fmtNum(h.keluar):""}</td>
-                          <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center"}}>{fmtNum(h.sisa)}</td>
-                          <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center"}}>-</td>
+                          <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center"}}>{h.rak||"-"}</td>
+                          <td style={{border:"1px solid #0f172a",padding:"6px 6px"}}>{h.subGudang||"-"}</td>
                           <td style={{border:"1px solid #0f172a",padding:"6px 6px",textAlign:"center",fontWeight:700}}>{fmtNum(h.sisa)}</td>
                           <td style={{border:"1px solid #0f172a",padding:"6px 6px",color:"#475569"}}>{h.catatan||"-"}</td>
                         </tr>

@@ -5762,7 +5762,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {kartuGantungDetail && (
         <KartuGantungModal
           katalog={kartuGantungDetail}
-          stocks={stocks} txns={txns} lokasiList={lokasiList} gudangList={gudangList}
+          stocks={stocks} txns={txns} lokasiList={lokasiList} gudangList={gudangList} subGudangList={subGudangList}
           sty={sty} C={C}
           onClose={()=>setKartuGantungDetail(null)}
         />

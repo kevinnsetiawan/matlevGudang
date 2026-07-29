@@ -7,7 +7,8 @@ import { fmtNum, getSAPLabel } from "./ragShared.mjs";
 import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari } from "./utils.js";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE } from "../constants.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt } from "./heavyEquipment.js";
-import { buildKartuGantungHistory } from "./sap.js";
+import { buildKartuGantungHistory, resolveLokasiLengkap } from "./sap.js";
+import { resolveStockPhotoUrl } from "./stockCache.js";
 
 // ─── TUG-9 DOCUMENT HTML BUILDER (Surat Jalan + Bon TUG-9 + Lampiran Foto) ────
 // Returns a full standalone HTML string. Used for both in-app preview
@@ -920,16 +921,16 @@ export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
 // ─── TUG-2 DOCUMENT HTML BUILDERS (Kartu Gantung Barang TUG. 2 - Depan & Belakang) ────
 
 // Halaman 1 (Depan): Header + Metadata + Foto Barang + QR Code
-export async function buildTUG2FrontHTML(katalog, stocks, lokasiList) {
+export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
   const qrDataUrl = await QRCode.toDataURL(scanUrl, { margin: 1, width: 280 });
 
-  const lokasiTerkait = [...new Set((stocks||[]).filter(s=>s.katalogId===katalog.id).map(s=>s.lokasiId))]
-    .map(lid => (lokasiList||[]).find(l=>l.id===lid)?.kode)
-    .filter(Boolean);
-  const lokasiStr = lokasiTerkait.length > 0 ? lokasiTerkait.join(", ") : "-";
-  const sampleFoto = (stocks||[]).find(s=>s.katalogId===katalog.id && s.img)?.img || null;
+  // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
+  const lokasiStr = resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList);
+  const sampleStock = (stocks||[]).find(s=>s.katalogId===katalog.id && s.fotoKeseluruhan);
+  const sampleFoto = sampleStock ? resolveStockPhotoUrl(sampleStock.fotoKeseluruhan) : null;
+  const kategoriMaterial = (stocks||[]).find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Kartu Gantung Depan TUG.2 - ${esc(katalog.katalog)}</title>
 <style>
@@ -976,13 +977,13 @@ export async function buildTUG2FrontHTML(katalog, stocks, lokasiList) {
       <td class="lbl">No. Katalog :</td>
       <td style="font-weight:bold;color:#0284c7">${esc(katalog.katalog || "-")}</td>
       <td class="lbl">Lokasi :</td>
-      <td style="font-weight:bold">${esc(lokasiStr)}</td>
+      <td style="font-weight:bold;font-size:9.5px">${esc(lokasiStr)}</td>
     </tr>
     <tr>
       <td class="lbl">No. Aset :</td>
       <td style="font-weight:bold">${esc(katalog.noAset || "-")}</td>
-      <td class="lbl">KARTU No. :</td>
-      <td style="font-weight:bold">${esc(katalog.kartuNo || "-")}</td>
+      <td class="lbl">Kategori :</td>
+      <td style="font-weight:bold">${esc(kategoriMaterial)}</td>
     </tr>
     <tr>
       <td class="lbl">NAMA BARANG :</td>
@@ -1006,23 +1007,22 @@ export async function buildTUG2FrontHTML(katalog, stocks, lokasiList) {
 }
 
 // Halaman 2 (Belakang): Header + Metadata + Tabel Riwayat Keluar-Masuk (SISA PERSEDIAAN: RAK / PETI / JMLH)
-export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList) {
+export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
-  const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList);
-  
-  const lokasiTerkait = [...new Set((stocks||[]).filter(s=>s.katalogId===katalog.id).map(s=>s.lokasiId))]
-    .map(lid => (lokasiList||[]).find(l=>l.id===lid)?.kode)
-    .filter(Boolean);
-  const lokasiStr = lokasiTerkait.length > 0 ? lokasiTerkait.join(", ") : "-";
+  const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList);
+
+  // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
+  const lokasiStr = resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList);
+  const kategoriMaterial = (stocks||[]).find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
 
   const filledHistoryRows = history.map((h) => `
     <tr>
-      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${fmtDateOnly(h.tgl)}</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${h.tgl ? fmtDateOnly(h.tgl) : "-"}</td>
       <td style="border:1px solid #111;padding:6px 6px">${esc(h.noBon || "-")}</td>
       <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold;color:#15803d">${h.masuk > 0 ? fmtNum(h.masuk) : ""}</td>
       <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold;color:#b91c1c">${h.keluar > 0 ? fmtNum(h.keluar) : ""}</td>
-      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${fmtNum(h.sisa)}</td>
-      <td style="border:1px solid #111;padding:6px 6px;text-align:center">-</td>
+      <td style="border:1px solid #111;padding:6px 6px;text-align:center">${esc(h.rak || "-")}</td>
+      <td style="border:1px solid #111;padding:6px 6px">${esc(h.subGudang || "-")}</td>
       <td style="border:1px solid #111;padding:6px 6px;text-align:center;font-weight:bold">${fmtNum(h.sisa)}</td>
       <td style="border:1px solid #111;padding:6px 6px;color:#475569">${esc(h.catatan || "-")}</td>
     </tr>
@@ -1089,13 +1089,13 @@ export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList) {
       <td class="lbl">No. Katalog :</td>
       <td style="font-weight:bold;color:#0284c7">${esc(katalog.katalog || "-")}</td>
       <td class="lbl">Lokasi :</td>
-      <td style="font-weight:bold">${esc(lokasiStr)}</td>
+      <td style="font-weight:bold;font-size:9.5px">${esc(lokasiStr)}</td>
     </tr>
     <tr>
       <td class="lbl">No. Aset :</td>
       <td style="font-weight:bold">${esc(katalog.noAset || "-")}</td>
-      <td class="lbl">KARTU No. :</td>
-      <td style="font-weight:bold">${esc(katalog.kartuNo || "-")}</td>
+      <td class="lbl">Kategori :</td>
+      <td style="font-weight:bold">${esc(kategoriMaterial)}</td>
     </tr>
     <tr>
       <td class="lbl">NAMA BARANG :</td>
@@ -1108,17 +1108,14 @@ export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList) {
   <table class="items-tbl">
     <thead>
       <tr>
-        <th rowspan="2" style="width:75px">TGL</th>
-        <th rowspan="2" style="width:120px">NO. BON</th>
-        <th rowspan="2" style="width:60px">MASUK</th>
-        <th rowspan="2" style="width:60px">KELUAR</th>
-        <th colspan="3">SISA PERSEDIAAN</th>
-        <th rowspan="2">CATATAN</th>
-      </tr>
-      <tr>
-        <th style="width:45px">RAK</th>
-        <th style="width:45px">PETI</th>
-        <th style="width:55px">JMLH</th>
+        <th style="width:75px">TGL</th>
+        <th style="width:120px">NO. BON</th>
+        <th style="width:60px">MASUK</th>
+        <th style="width:60px">KELUAR</th>
+        <th style="width:55px">RAK</th>
+        <th>LOKASI</th>
+        <th style="width:60px">JUMLAH</th>
+        <th>CATATAN</th>
       </tr>
     </thead>
     <tbody>
@@ -1129,8 +1126,8 @@ export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList) {
 </body></html>`;
 }
 
-export async function buildTUG2HTML(katalog, stocks, txns, lokasiList, gudangList) {
-  return buildTUG2FrontHTML(katalog, stocks, lokasiList);
+export async function buildTUG2HTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList) {
+  return buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList);
 }
 
 

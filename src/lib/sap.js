@@ -1,6 +1,7 @@
 // SAP status detection + Pencarian Material (sinonim-aware PLN) — dipindah dari
 // App.jsx (refactor Fase 3c). Pure string/data ops, tanpa React/state/supabase.
 // CATEGORY_SYNONYMS/QUERY_SYNONYMS dipakai internal oleh mesin pencarian.
+import { subGudangKodeMap } from "./masterSync.js";
 
 // ─── PENCARIAN MATERIAL: struktur nama (KATEGORI;SUBTIPE;SPEK...) di katalog
 // TIDAK diubah — hanya cara membandingkannya saat search yang disesuaikan,
@@ -244,8 +245,20 @@ export function jenisBarangAccentColor(jenisBarang) {
 // - TUG10/TUG3 items reference katalogId directly when katalogMode==="existing".
 //   For katalogMode==="new" items, the transaction itself doesn't retain the
 //   auto-created katalogId, so we match by name against the current katalogList entry instead.
-export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
+export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList) {
   const katalogId = katalog.id;
+  // Sub Gudang (LOKASI) untuk sebuah lokasi record: kode singkatan 3-huruf subGudangKodeMap
+  // (kolom LOKASI tabel Riwayat sempit, nama Sub Gudang penuh terlalu lebar) kalau ada
+  // subGudangId, fallback ke nama gudangList lewat gudangId, fallback "-".
+  const resolveSubGudang = (lok) => {
+    if (!lok) return "-";
+    if (lok.subGudangId) {
+      const subsOfGudang = (subGudangList||[]).filter(sg=>sg.gudangId===lok.gudangId);
+      return subGudangKodeMap(subsOfGudang)[lok.subGudangId] || "-";
+    }
+    if (lok.gudangId) return (gudangList||[]).find(g=>g.id===lok.gudangId)?.nama || "-";
+    return "-";
+  };
   const events = [];
   (txns||[]).forEach(t => {
     if (t.status !== "APPROVED" && !(t.docType==="TUG3" && t.stage==="APPROVED")) return;
@@ -254,7 +267,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
         const stockRow = (stocks||[]).find(s=>s.id===si.stockId);
         if (stockRow && stockRow.katalogId === katalogId) {
           const lok = (lokasiList||[]).find(l=>l.id===stockRow.lokasiId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, lokasi: lok?.kode||"-", catatan: t.namaPekerjaan||"-" });
+          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG10") {
@@ -262,7 +275,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===t.lokasiTujuanId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, lokasi: lok?.kode||"-", catatan: t.namaPekerjaan||"-" });
+          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG3" && t.stage === "APPROVED") {
@@ -270,7 +283,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===si.lokasiTujuanId);
-          events.push({ tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, lokasi: lok?.kode||"-", catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
+          events.push({ tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
         }
       });
     }
@@ -286,7 +299,32 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList) {
     withSisa[i] = { ...events[i], sisa: running };
     running -= (events[i].masuk - events[i].keluar);
   }
-  return withSisa;
+  // Baris baseline "Migrasi Data" — belum ada arsip lama yang diimpor, jadi saldo awal
+  // (running setelah loop mundur = saldo sebelum event tertua) diisi sebagai satu baris
+  // keterangan migrasi, bukan detail transaksi nyata. RAK/LOKASI diisi dari lokasi stok
+  // material ini saat ini di Data Stok (representatif, sama pola dengan field single-value
+  // lain seperti foto/kategori di KartuGantungModal).
+  const baselineStock = (stocks||[]).find(s=>s.katalogId===katalogId);
+  const baselineLok = baselineStock ? (lokasiList||[]).find(l=>l.id===baselineStock.lokasiId) : null;
+  const baselineRow = { tgl: null, noBon: "-", masuk: 0, keluar: 0, rak: baselineLok?.kode||"-", subGudang: resolveSubGudang(baselineLok), catatan: "Migrasi Data", sisa: running };
+  return [baselineRow, ...withSisa];
+}
+
+// "Lokasi :" ringkas di header Kartu Gantung TUG.2 (Depan & Belakang) — gabungan Gudang +
+// Sub Gudang + Blok Gudang per lokasi unik stok katalog ini, dipisah bullet, level kosong
+// diskip. Beberapa kombinasi lokasi unik digabung dengan ", ". Dipakai di JSX preview
+// (KartuGantungModal) & HTML print (docBuilders buildTUG2FrontHTML/BackHTML).
+export function resolveLokasiLengkap(katalog, stocks, lokasiList, subGudangList, gudangList) {
+  const katalogId = katalog.id;
+  const lokasiIds = [...new Set((stocks||[]).filter(s=>s.katalogId===katalogId).map(s=>s.lokasiId))];
+  const combos = lokasiIds.map(lid => {
+    const lok = (lokasiList||[]).find(l=>l.id===lid);
+    if (!lok) return null;
+    const gudangNama = (gudangList||[]).find(g=>g.id===lok.gudangId)?.nama;
+    const subGudangNama = lok.subGudangId ? (subGudangList||[]).find(sg=>sg.id===lok.subGudangId)?.nama : null;
+    return [gudangNama, subGudangNama, lok.kode].filter(Boolean).join(" • ");
+  }).filter(Boolean);
+  return [...new Set(combos)].join(", ") || "-";
 }
 
 // Normalisasi nomor katalog (buang zero-padding) untuk pencocokan — dipindah dari App.jsx Fase 5c.
