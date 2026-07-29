@@ -30,6 +30,91 @@ test("TUG-15 exposes combined-history controls and material drawer", async ({ is
   if (process.env.TUG15_VISUAL_AUDIT === "1") await page.screenshot({ path:testInfo.outputPath("tug15-history-drawer.png"), fullPage:false });
 });
 
+test.describe("TUG-15 complete history direction filter", () => {
+  test.use({
+    cloudOverrides:{
+      pln_txns_v3:[
+        {
+          id:"TUG9-HISTORY-OUT", docType:"TUG9", status:"APPROVED",
+          createdAt:1777507200000, approvedAt:1777507200000,
+          namaPekerjaan:"Pemakaian keluar", docNumbers:{ tug9:"TUG-9/HISTORY/OUT" },
+          stockItems:[{ stockId:"ST-E2E-01", qty:2 }],
+        },
+        {
+          id:"TUG10-HISTORY-IN", docType:"TUG10", status:"APPROVED",
+          createdAt:1777593600000, approvedAt:1777593600000,
+          namaPekerjaan:"Pengembalian masuk", docNumbers:{ tug10:"TUG-10/HISTORY/IN" },
+          stockItems:[{ katalogMode:"existing", katalogId:"KAT-E2E-01", qty:3, statusMaterial:"BAIK" }],
+        },
+        {
+          id:"TUG9-HISTORY-OTHER", docType:"TUG9", status:"APPROVED",
+          createdAt:1777680000000, approvedAt:1777680000000,
+          namaPekerjaan:"Material lain", docNumbers:{ tug9:"TUG-9/HISTORY/OTHER" },
+          stockItems:[{ stockId:"ST-E2E-02", qty:4 }],
+        },
+      ],
+    },
+  });
+
+  test("marks incoming green and outgoing red, then filters the visible timeline", async ({ isolatedPage:page }, testInfo) => {
+    await openApp(page);
+    await openRoute(page, {
+      tab:"transaction",
+      menuPath:["TUG", "Laporan"],
+      readySelector:".tug-page",
+    });
+
+    await page.getByRole("button", { name:"Riwayat lengkap", exact:true }).first().click();
+    const dialog = page.getByRole("dialog", { name:"Riwayat lengkap material" });
+    await expect(dialog).toBeVisible();
+    const inbound = dialog.locator('[data-history-direction="MASUK"]');
+    const outbound = dialog.locator('[data-history-direction="KELUAR"]');
+    await expect(inbound).toHaveCount(1);
+    await expect(outbound).toHaveCount(1);
+    await expect(inbound).toHaveCSS("border-left-color", "rgb(22, 163, 74)");
+    await expect(outbound).toHaveCSS("border-left-color", "rgb(220, 38, 38)");
+    if (process.env.TUG15_VISUAL_AUDIT === "1") await dialog.screenshot({ path:testInfo.outputPath("tug15-history-direction.png") });
+
+    await dialog.getByRole("button", { name:"Masuk", exact:true }).click();
+    await expect(inbound).toHaveCount(1);
+    await expect(outbound).toHaveCount(0);
+    await expect(dialog.getByText("Total masuk").locator("..")).toContainText("3");
+
+    await dialog.getByRole("button", { name:"Keluar", exact:true }).click();
+    await expect(inbound).toHaveCount(0);
+    await expect(outbound).toHaveCount(1);
+    await expect(dialog.getByText("Total keluar").locator("..")).toContainText("2");
+  });
+
+  test("row shows one transaction while its history button shows the full material history", async ({ isolatedPage:page }) => {
+    await openApp(page);
+    await openRoute(page, {
+      tab:"transaction",
+      menuPath:["TUG", "Laporan"],
+      readySelector:".tug-page",
+    });
+
+    const selectedRow = page.getByRole("button", { name:"Buka detail transaksi Isolator Keramik 150 kV" }).first();
+    await selectedRow.click();
+    const detailDialog = page.getByRole("dialog", { name:"Detail transaksi material" });
+    await expect(detailDialog).toContainText("Isolator Keramik 150 kV");
+    await expect(detailDialog).toContainText("TUG-9/HISTORY/OUT");
+    await expect(detailDialog).not.toContainText("TUG-10/HISTORY/IN");
+    await expect(detailDialog).not.toContainText("TUG-9/HISTORY/OTHER");
+    await expect(detailDialog.getByRole("group", { name:"Filter jenis riwayat" })).toHaveCount(0);
+
+    await detailDialog.getByRole("button", { name:"Tutup riwayat" }).click();
+    await selectedRow.getByRole("button", { name:"Riwayat lengkap", exact:true }).click();
+    const historyDialog = page.getByRole("dialog", { name:"Riwayat lengkap material" });
+    await expect(historyDialog).toContainText("Isolator Keramik 150 kV");
+    await expect(historyDialog).toContainText("TUG-9/HISTORY/OUT");
+    await expect(historyDialog).toContainText("TUG-10/HISTORY/IN");
+    await expect(historyDialog).not.toContainText("TUG-9/HISTORY/OTHER");
+    await expect(historyDialog).not.toContainText("Lightning Arrester 150 kV");
+    await expect(historyDialog.getByRole("group", { name:"Filter jenis riwayat" })).toBeVisible();
+  });
+});
+
 test("combined mutation rows keep legacy separate and search across dates", async ({ isolatedPage:page }) => {
   await openApp(page);
   const result = await page.evaluate(async () => {
