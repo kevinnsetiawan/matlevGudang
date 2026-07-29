@@ -118,13 +118,13 @@ export function ApprovalHubTab({
         approvalPageSize={approvalPageSize}
       />
 
-      {/* Legacy recovery untuk pengajuan ADMIN lama yang masih menunggu TL; perubahan baru ADMIN tidak lagi membuat antrian ini. */}
+      {/* Perpindahan gudang oleh ADMIN wajib direview TL. */}
       {(approvalTypeFilter==="ALL"||approvalTypeFilter==="STOK") && hasRole(currentUser, "TL") && stocks.some(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL") && (()=>{
         const list = stocks.filter(s=>s.lokasiMovePending && s.lokasiMoveApprover==="TL");
         const paged = list.slice((approvalStokPage-1)*approvalPageSize, approvalStokPage*approvalPageSize);
         return (
           <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
-            <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📦 Pemindahan Blok Data Stok ({list.length})</div>
+            <div style={{fontWeight:800,fontSize:14,marginBottom:10}}>📦 Pemindahan Gudang Data Stok ({list.length})</div>
             {paged.map(s=>{
               const pemohon = users.find(u=>u.id===s.moveRequestedBy);
               const lokAsal = lokasiList.find(l=>l.id===s.lokasiId);

@@ -8,6 +8,7 @@ import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, R
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
 import { leanStocksForCache, resolveStockPhotoUrl } from "./src/lib/stockCache.js";
+import { approveStockLocationMove, rejectStockLocationMove } from "./src/lib/stockLocationApproval.js";
 import { applyStockRealtimeEvent, applyStockRealtimeEvents, stockListsEqual } from "./src/lib/stockRealtime.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { logAudit } from "./src/lib/audit.js";
@@ -94,6 +95,7 @@ import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
+import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
@@ -1965,25 +1967,29 @@ export default function PLNWarehouse() {
     showToast("❌ Perubahan Blok Lokasi ditolak.");
   }
 
-  // Approve/reject pengajuan pemindahan blok Data Stok (khusus role TL) — 1 per 1, bukan bulk
+  // Approve/reject pengajuan pemindahan gudang Data Stok — 1 per 1, bukan bulk.
   async function approveStockMove(id) {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.lokasiMovePending) return;
     const lokSel = lokasiList.find(l=>l.id===st.pendingLokasiId);
     const lokAsal = lokasiList.find(l=>l.id===st.lokasiId);
-    const ns = stocks.map(s=>s.id===id ? {...s, lokasiId:st.pendingLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, pendingLokasiId:null, pendingLokasiKode:null, moveApprovedBy:currentUser.id, moveApprovedAt:Date.now()} : s);
+    if (!lokSel) {
+      showToast("Lokasi tujuan tidak ditemukan. Pengajuan tidak diubah.", "error");
+      return;
+    }
+    const ns = stocks.map(s=>s.id===id ? approveStockLocationMove(s, lokSel, currentUser.id) : s);
     setStocks(ns); await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
     await logApprovalHistory({type:"STOCK_MOVE", decision:"APPROVED", title:`${st.name}: ${lokAsal?.kode||"—"} → ${st.pendingLokasiKode}`, requestedBy:st.moveRequestedBy, requestedAt:st.moveRequestedAt});
-    showToast(`✅ Pemindahan blok ${st.name} disetujui.`);
+    showToast(`✅ Pemindahan gudang ${st.name} disetujui.`);
   }
   async function rejectStockMove(id) {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.lokasiMovePending) return;
     const lokAsal = lokasiList.find(l=>l.id===st.lokasiId);
     await logApprovalHistory({type:"STOCK_MOVE", decision:"REJECTED", title:`${st.name}: ${lokAsal?.kode||"—"} → ${st.pendingLokasiKode}`, requestedBy:st.moveRequestedBy, requestedAt:st.moveRequestedAt});
-    const ns = stocks.map(s=>s.id===id ? {...s, lokasiMovePending:false, pendingLokasiId:null, pendingLokasiKode:null} : s);
+    const ns = stocks.map(s=>s.id===id ? rejectStockLocationMove(s) : s);
     setStocks(ns); await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
-    showToast(`❌ Pemindahan blok ${st.name} ditolak.`);
+    showToast(`❌ Pemindahan gudang ${st.name} ditolak.`);
   }
 
   // Kartu kecil untuk 1 Blok Lokasi — dipakai di halaman Master Gudang (per gudang & blok tanpa gudang)
@@ -3319,9 +3325,12 @@ export default function PLNWarehouse() {
     }
   }
 
-  function handleImg(e, setter) {
+  function handleImg(e, setter, onError) {
     const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader(); r.onload = ev => setter(ev.target.result); r.readAsDataURL(f);
+    const r = new FileReader();
+    r.onload = ev => setter(ev.target.result);
+    r.onerror = () => onError?.(new Error("browser tidak dapat membaca file"));
+    try { r.readAsDataURL(f); } catch (error) { onError?.(error); }
   }
   // Foto satpam disimpan inline di jsonb (bukan bucket) → wajib dikompres kecil (maks 400px)
   // supaya tidak membengkakkan master jsonb & localStorage.
@@ -3356,12 +3365,15 @@ export default function PLNWarehouse() {
     // dipindahkan pada penyimpanan berikutnya, walau pengguna tidak memilih file baru.
     const isPhotoChanged = updates.foto !== alat.foto || needsPhotoStorage;
     if (needsPhotoStorage) {
+      let compressedPhoto;
+      try { compressedPhoto = await compressImage(updates.foto, {maxBytes:1_000_000}); }
+      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
       try {
-        const url = await _withTimeout(uploadPhotoToStorage(await compressImage(updates.foto, {maxBytes:1_000_000}), "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
+        const url = await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
         upd = { ...upd, foto: url };
       } catch (e) {
         console.warn("Upload foto alat berat gagal:", equipmentId, e?.message||e);
-        showToast("Gagal upload foto ke server, coba lagi.","error"); return false;
+        showToast(getHeavyEquipmentUploadErrorMessage(e),"error"); return false;
       }
     }
     if (isPhotoChanged && !_isDataUrl(updates.foto)) upd = { ...upd, foto: updates.foto || null };
@@ -3380,8 +3392,11 @@ export default function PLNWarehouse() {
     const now = Date.now();
     let item = normalizeHeavyEquipmentRecord({ ...form, id:`HE-${uid().slice(-8)}`, availabilityStatus:"TERSEDIA", createdAt:now, createdBy:currentUser.id, updatedAt:now, updatedBy:currentUser.id, source:"Input Admin Gudang" });
     if (_isDataUrl(item.foto) && !isDemoMode()) {
-      try { item = { ...item, foto: await _withTimeout(uploadPhotoToStorage(await compressImage(item.foto, {maxBytes:1_000_000}), "tug-photos", `alat-berat/${item.id}.jpg`), 30_000, "unggah foto") }; }
-      catch (e) { console.warn("Upload foto alat berat gagal:", item.id, e?.message||e); showToast("Gagal upload foto ke server, coba lagi.", "error"); return false; }
+      let compressedPhoto;
+      try { compressedPhoto = await compressImage(item.foto, {maxBytes:1_000_000}); }
+      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
+      try { item = { ...item, foto: await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${item.id}.jpg`), 30_000, "unggah foto") }; }
+      catch (e) { console.warn("Upload foto alat berat gagal:", item.id, e?.message||e); showToast(getHeavyEquipmentUploadErrorMessage(e), "error"); return false; }
     }
     const next = [item, ...heavyEquipmentList];
     const ok = await saveToCloud({heavyEquipmentList: next}, {heavyEquipmentChangedRows:[item]});

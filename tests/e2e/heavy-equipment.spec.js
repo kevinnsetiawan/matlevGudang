@@ -5,6 +5,7 @@ const { openApp, openRoute } = require("./support/responsive");
 
 const ADMIN = { id:"e2e-admin", name:"E2E Admin", username:"admin-e2e", role:"ADMIN", jabatan:"Admin Gudang", avatar:"AD", upt:"Surabaya", gudangIds:null };
 const TL = { id:"e2e-tl", name:"E2E TL", username:"tl-e2e", role:"TL", jabatan:"Team Leader", avatar:"TL", upt:"Surabaya", gudangIds:null };
+const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XwG6WQAAAABJRU5ErkJggg==", "base64");
 
 async function openFleetAsDemo(page) {
   // E2E sengaja tanpa Supabase. Mode demo mempertahankan seluruh alur UI/save
@@ -44,6 +45,58 @@ test.describe("Alat Berat — otorisasi dan kontrak simpan", () => {
       await expect(card).toContainText("TestLift");
       await expect(card).toContainText("E2E-NEW-01");
       await expect(card).toContainText("SIA-E2E-01");
+    });
+
+    test("format foto tidak didukung ditolak tanpa menghapus isian form", async ({ isolatedPage:page }) => {
+      await openFleetAsDemo(page);
+      await page.getByRole("button", { name:"Edit data alat", exact:true }).first().click();
+      const dialog = page.getByRole("dialog", { name:"Edit Alat Berat" });
+      await dialog.getByLabel("Nama", { exact:true }).fill("Nama tetap tersimpan");
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name:"alat.heic",
+        mimeType:"image/heic",
+        buffer:Buffer.from("unsupported-heic"),
+      });
+      await expect(page.getByText(/Format foto tidak didukung/)).toBeVisible();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Nama", { exact:true })).toHaveValue("Nama tetap tersimpan");
+    });
+
+    test("gagal upload Storage mempertahankan modal, foto, dan perubahan data", async ({ isolatedPage:page }) => {
+      // Tanpa mode demo, Supabase sengaja tidak dibentuk oleh E2E_MODE. Foto
+      // tetap diproses browser, lalu upload gagal secara aman tanpa menyentuh production.
+      await openApp(page);
+      await openRoute(page, { tab:"heavyEquipment", menuPath:["Alat Berat"], readySelector:".heavy-equipment-page" });
+      await page.getByRole("button", { name:"Edit data alat", exact:true }).first().click();
+      const dialog = page.getByRole("dialog", { name:"Edit Alat Berat" });
+      await dialog.getByLabel("Nama", { exact:true }).fill("Nama jangan hilang saat upload gagal");
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name:"alat.png",
+        mimeType:"image/png",
+        buffer:ONE_PIXEL_PNG,
+      });
+      await expect(dialog.locator("img")).toBeVisible();
+      await dialog.getByRole("button", { name:/Simpan/ }).click();
+      await expect(page.getByText(/Gagal upload foto ke server/)).toBeVisible();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.locator("img")).toBeVisible();
+      await expect(dialog.getByLabel("Nama", { exact:true })).toHaveValue("Nama jangan hilang saat upload gagal");
+    });
+
+    test("foto valid tetap memungkinkan Admin memperbarui data alat", async ({ isolatedPage:page }) => {
+      await openFleetAsDemo(page);
+      await page.getByRole("button", { name:"Edit data alat", exact:true }).first().click();
+      const dialog = page.getByRole("dialog", { name:"Edit Alat Berat" });
+      await dialog.getByLabel("Nama", { exact:true }).fill("Truck Crane Foto Valid");
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name:"alat.png",
+        mimeType:"image/png",
+        buffer:ONE_PIXEL_PNG,
+      });
+      await expect(dialog.locator("img")).toBeVisible();
+      await dialog.getByRole("button", { name:/Simpan/ }).click();
+      await expect(dialog).toBeHidden();
+      await expect(page.locator(".equipment-card", { hasText:"Truck Crane Foto Valid" })).toBeVisible();
     });
   });
 

@@ -5,6 +5,7 @@ import { hasRole, getUserUptScope } from "../lib/roles.js";
 import { downloadHeavyEquipmentLoanHTML } from "../lib/docBuilders.js";
 import { canApproveHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanJobName, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanRuntimeStatus, getHeavyEquipmentLoanStartDate, isPendingHeavyEquipmentLoan, normalizeHeavyEquipmentLoanStatus } from "../lib/heavyEquipment.js";
 import { OperationsHero } from "./OperationsHero.jsx";
+import { validateHeavyEquipmentPhotoFile } from "../lib/heavyEquipmentPhoto.js";
 
 const EQUIPMENT_FORM_FIELDS = [
   ["upt", "UPT"], ["lokasi", "Lokasi"], ["nama", "Nama"], ["jenis", "Jenis"],
@@ -20,14 +21,20 @@ function EquipmentFields({ form, setForm, sty }) {
   </div>;
 }
 
-function EquipmentPhotoInput({ foto, nama, handleImg, setForm, sty, C }) {
+function EquipmentPhotoInput({ foto, nama, handleImg, setForm, sty, C, showToast }) {
   return <>
     <div style={{height:150,borderRadius:10,background:"#f3f4f6",border:`1px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:12}}>
       {foto ? <img src={foto} alt={nama} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <div style={{fontSize:38,color:"#9ca3af"}}>🚜</div>}
     </div>
     <label style={{...sty.btn("ghost","sm"),textAlign:"center",display:"block",marginBottom:16}}>
       📷 {foto?"Ganti Foto":"Upload Foto"}
-      <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{handleImg(e, img=>setForm(current=>({...current,foto:img})));e.target.value="";}}/>
+      <input type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" capture="environment" style={{display:"none"}} onChange={e=>{
+        const file = e.target.files?.[0];
+        const validation = validateHeavyEquipmentPhotoFile(file);
+        if (!validation.ok) { showToast?.(validation.message, "error"); e.target.value=""; return; }
+        handleImg(e, img=>setForm(current=>({...current,foto:img})), error=>showToast?.(`Gagal memproses foto: ${error?.message || "file tidak dapat dibaca"}.`, "error"));
+        e.target.value="";
+      }}/>
     </label>
   </>;
 }
@@ -461,7 +468,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
               <h3 style={{fontSize:16,fontWeight:800,marginBottom:4}}>✏️ Edit Alat</h3>
               <div style={{fontSize:12,color:C.muted,marginBottom:16}}>{eq.nama} — {eq.upt}</div>
               {canEditAll && <EquipmentFields form={editForm} setForm={setEditForm} sty={sty}/>}
-              <EquipmentPhotoInput foto={editForm.foto} nama={eq.nama} handleImg={handleImg} setForm={setEditForm} sty={sty} C={C}/>
+              <EquipmentPhotoInput foto={editForm.foto} nama={eq.nama} handleImg={handleImg} setForm={setEditForm} sty={sty} C={C} showToast={showToast}/>
               <div style={{marginBottom:16}}>
                 <label style={sty.label}>Status Alat</label>
                 <select style={sty.select} value={editForm.statusAlat} onChange={e=>setEditForm(f=>({...f,statusAlat:e.target.value}))}>
@@ -482,7 +489,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
         <div role="dialog" aria-label="Tambah Alat Berat" style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
           <h3 style={{fontSize:16,fontWeight:800,marginBottom:12}}>Tambah Alat Berat</h3>
           <EquipmentFields form={addForm} setForm={setAddForm} sty={sty}/>
-          <EquipmentPhotoInput foto={addForm.foto} nama={addForm.nama||"Alat berat baru"} handleImg={handleImg} setForm={setAddForm} sty={sty} C={C}/>
+          <EquipmentPhotoInput foto={addForm.foto} nama={addForm.nama||"Alat berat baru"} handleImg={handleImg} setForm={setAddForm} sty={sty} C={C} showToast={showToast}/>
           <label style={{...sty.label,marginTop:10}}>Status Alat
             <select style={sty.select} value={addForm.statusAlat} onChange={e=>setAddForm(form=>({...form,statusAlat:e.target.value}))}>{STATUS_ALAT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>
           </label>
