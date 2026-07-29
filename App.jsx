@@ -5273,7 +5273,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
             openNewTxn={openNewTxn}
             txns={txns} filteredTxns={filteredTxns} users={users} enrichedStocks={enrichedStocks} stocks={stocks}
-            katalogList={katalogList} lokasiList={lokasiList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
+            katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
             tug15Filter={tug15Filter} setTug15Filter={setTug15Filter}
             setDocPreview={setDocPreview} handleImg={handleImg}
             approveTUG3_TL={approveTUG3_TL} rejectTUG3_TL={rejectTUG3_TL}

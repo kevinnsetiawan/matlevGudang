@@ -1,18 +1,17 @@
 // Komponen TUG15Tab — dipindah dari App.jsx (refactor Fase 5g).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { JENIS_BARANG, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { getSAPBadgeStyle } from "../lib/sap.js";
-import { buildMutasiRows, buildTUG15HTML, loadLegacyHistoryArchive, resolveLegacyPrivateUrl, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase } from "../lib/supabaseSync.js";
-import * as XLSX from "xlsx";
+import { buildMutasiRows, loadLegacyHistoryArchive, resolveLegacyPrivateUrl, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase } from "../lib/supabaseSync.js";
+import { buildMonitoringWorkbook, buildTUG15ReportModel } from "../lib/tug15Report.js";
 
-export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasiList }) {
+export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasiList, gudangList }) {
   const [legacy, setLegacy] = useState({ rows:[], documents:[], loading:true, error:null });
-  const [syncState, setSyncState] = useState({ loading:false, msg:"" });
+  const autoSyncedRef = useRef(false);
   const [historyItem, setHistoryItem] = useState(null);
   const [attachmentState, setAttachmentState] = useState({ loading:false, error:"" });
-  const [quickQuery, setQuickQuery] = useState("");
-  const [quickMaterial, setQuickMaterial] = useState("");
+  const [exportState, setExportState] = useState({ kind:"", error:"" });
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
 
@@ -27,19 +26,14 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     return () => { active = false; };
   }, []);
 
-  const rows = buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacy.rows);
+  const rows = buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacy.rows, { gudangList });
   const allHistoryRows = useMemo(() => buildMutasiRows(txns, katalogList, stocks, {
     ...filter, dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"",
     docTypes:["TUG9","TUG8","TUG10","TUG3","TUG5"],
-  }, lokasiList, legacy.rows), [txns, katalogList, stocks, filter, lokasiList, legacy.rows]);
+  }, lokasiList, legacy.rows, { gudangList }), [txns, katalogList, stocks, filter, lokasiList, legacy.rows, gudangList]);
   const selectedHistoryRows = useMemo(() => historyItem
     ? allHistoryRows.filter(row => row.materialKey === historyItem.materialKey).sort((a,b)=>(b.ts||0)-(a.ts||0))
     : [], [allHistoryRows, historyItem]);
-  const materialOptions = useMemo(() => {
-    const map = new Map();
-    allHistoryRows.forEach(r => { if (!map.has(r.materialKey)) map.set(r.materialKey, `${r.deskripsi} — ${r.katalog}`); });
-    return [...map.entries()].sort((a,b)=>a[1].localeCompare(b[1]));
-  }, [allHistoryRows]);
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return rows.slice(start, start + pageSize);
@@ -50,12 +44,6 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     setPage(current => Math.min(current, maxPage));
   }, [rows.length, pageSize]);
 
-  function runQuickFinder(materialKey) {
-    const key = materialKey || quickMaterial;
-    if (!key) return;
-    const row = [...allHistoryRows].reverse().find(r => r.materialKey === key);
-    if (row) { setHistoryItem(row); setQuickMaterial(key); }
-  }
   const documentsByKey = useMemo(() => new Map(legacy.documents.map(doc => [`${doc.doc_type}|${doc.doc_id}`, doc])), [legacy.documents]);
 
   async function openAttachment(url) {
@@ -72,107 +60,86 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   }
 
   async function handleSyncSupabase() {
-    setSyncState({ loading:true, msg:"" });
     try {
       // Arsip legacy bersifat read-only dan tidak boleh masuk ke histori transaksi live.
-      const liveRows = rows.filter(row => row.source !== "LAMA");
-      const histRes = await syncTUG15ToSupabase(liveRows, katalogList);
-      const stockRes = await syncStockQtyToSupabase(stocks, katalogList);
-      const fotoRes = await syncFotoMaterialToSupabase(stocks, katalogList);
-      const parts = [];
-      parts.push(histRes.historyCount>0 ? `${histRes.historyCount} baris histori baru` : "tidak ada histori baru");
-      parts.push(`qty ${stockRes.stockCount} katalog`);
-      if (fotoRes.uploadCount>0) parts.push(`${fotoRes.uploadCount} foto baru diupload`);
-      setSyncState({ loading:false, msg: `✓ Tersinkron: ${parts.join(", ")}.` });
+      // Pakai allHistoryRows (rentang & filter penuh), BUKAN rows (bisa dipersempit filter UI).
+      const liveRows = allHistoryRows.filter(row => row.source !== "LAMA");
+      await syncTUG15ToSupabase(liveRows, katalogList);
+      await syncStockQtyToSupabase(stocks, katalogList);
+      await syncFotoMaterialToSupabase(stocks, katalogList);
     } catch (err) {
-      setSyncState({ loading:false, msg: `✗ Gagal sync: ${err.message}` });
+      console.warn("Sync TUG-15 ke Supabase gagal:", err);
     }
   }
 
-  function downloadTUG15() {
-    const html = buildTUG15HTML(rows, filter, katalogList);
-    const blob = new Blob([html], {type:"text/html"});
+  // Sync otomatis diam-diam (background) begitu arsip legacy selesai dimuat — bukan lagi dipicu klik user.
+  // Guard useRef supaya hanya jalan sekali per mount, tidak retry-loop kalau gagal.
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    if (legacy.loading) return;
+    if (allHistoryRows.length === 0) return;
+    autoSyncedRef.current = true;
+    handleSyncSupabase();
+  }, [legacy.loading, allHistoryRows]);
+
+  function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `TUG15_Mutasi_${filter.dateFrom||"all"}_${filter.dateTo||"all"}.html`;
+    a.download = filename;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  function downloadTUG15Excel() {
-    try {
-      const headers = ["No","Sumber","No Katalog","Deskripsi Material","Status SAP","Jenis Barang","Merk","Type","Satuan","Valuasi","Saldo Awal","Stok Masuk","Stok Keluar","Saldo Akhir","UPT","TUG/BA & Tgl","Keterangan","Tanggal Mutasi"];
-      const dataRows = rows.map(r=>[
-        r.no, r.sourceLabel||"Baru", r.katalog, r.deskripsi, r.sapStatus||"", r.jenisBarang||"",
-        r.merk||"-", r.type||"-", r.satuan, r.valuasi||0,
-        r.saldoAwal, r.masuk, r.keluar, r.saldoAkhir,
-        r.upt, r.tugBaDoc, r.keterangan, r.tanggalMutasi
-      ]);
-      const totalRow = ["TOTAL","","","","","","","","","","",
-        rows.reduce((a,r)=>a+r.masuk,0),
-        rows.reduce((a,r)=>a+r.keluar,0),
-        "","","","",""
-      ];
-      const wsData = [headers, ...dataRows, totalRow];
-      const ws = XLSX.utils.aoa_to_sheet(wsData);
-      ws["!cols"] = [5,10,12,30,10,12,8,8,7,14,10,10,10,10,12,18,20,12].map(w=>({wch:w}));
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "TUG-15 Mutasi Stok");
-      const infoData = [
-        ["LAPORAN MUTASI STOK MATERIAL - TUG 15"],
-        ["PT PLN (PERSERO) UPT SURABAYA"],
-        [""],
-        ["Periode", `${filter.dateFrom||"Semua"} s/d ${filter.dateTo||"Semua"}`],
-        ["Kategori SAP", filter.sapStatus==="ALL"?"SAP + Non-SAP":filter.sapStatus],
-        ["Jenis Barang", filter.jenisBarang==="ALL"?"Semua":filter.jenisBarang],
-        ["Sumber", filter.source==="ALL"?"Transaksi baru + arsip lama":filter.source],
-        ["Total Baris", rows.length],
-        ["Total Masuk", rows.reduce((a,r)=>a+r.masuk,0)],
-        ["Total Keluar", rows.reduce((a,r)=>a+r.keluar,0)],
-        ["Digenerate", new Date().toLocaleString("id-ID")],
-      ];
-      const wsInfo = XLSX.utils.aoa_to_sheet(infoData);
-      wsInfo["!cols"] = [{wch:20},{wch:40}];
-      XLSX.utils.book_append_sheet(wb, wsInfo, "Info Laporan");
-      XLSX.writeFile(wb, `TUG15_Mutasi_${filter.dateFrom||"all"}_${filter.dateTo||"all"}.xlsx`);
-    } catch(err) {
-      alert("Export Excel gagal: " + err.message + ". Gunakan format HTML/PDF sebagai alternatif.");
+  async function downloadTUG15() {
+    if (exportState.kind) return;
+    if (!filter.dateFrom || !filter.dateTo) {
+      if (!confirm("Anda belum memilih rentang tanggal — export akan mencakup SELURUH riwayat (bisa sangat besar). Lanjutkan?")) return;
     }
+    setExportState({ kind:"pdf", error:"" });
+    try {
+      // Library generator hanya dimuat saat user mengunduh, bukan initial chunk.
+      const [{ jsPDF }, pdfRenderer] = await Promise.all([
+        import("jspdf"), import("../lib/tug15Pdf.js"),
+      ]);
+      const report = buildTUG15ReportModel(rows, filter);
+      const doc = new jsPDF({ orientation:"landscape", unit:"mm", format:"a4", compress:true });
+      pdfRenderer.renderTUG15Pdf(doc, report);
+      const blob = doc.output("blob");
+      // Metadata non-serialized untuk observabilitas download; isi PDF tetap Blob asli.
+      blob.__warnotoPdfPageCount = doc.getNumberOfPages();
+      if (blob.type !== "application/pdf") throw new Error("Generator tidak menghasilkan berkas PDF.");
+      downloadBlob(blob, `TUG15_Ringkasan_${filter.dateFrom||"all"}_${filter.dateTo||"all"}.pdf`);
+    } catch (err) {
+      setExportState({ kind:"", error:err?.message || "PDF tidak dapat dibuat." });
+      return;
+    }
+    setExportState({ kind:"", error:"" });
   }
 
-  const docTypeLabels = {TUG9:"TUG-9",TUG8:"TUG-8",TUG10:"TUG-10",TUG3:"TUG-3",TUG5:"TUG-5"};
+  async function downloadTUG15Excel() {
+    if (exportState.kind) return;
+    if (!filter.dateFrom || !filter.dateTo) {
+      if (!confirm("Anda belum memilih rentang tanggal — export akan mencakup SELURUH riwayat (bisa sangat besar). Lanjutkan?")) return;
+    }
+    setExportState({ kind:"excel", error:"" });
+    try {
+      const XLSX = await import("xlsx");
+      const report = buildTUG15ReportModel(rows, filter);
+      const wb = buildMonitoringWorkbook(XLSX, report);
+      XLSX.writeFile(wb, `TUG15_Monitoring_Persediaan_${filter.dateFrom||"all"}_${filter.dateTo||"all"}.xlsx`);
+    } catch(err) {
+      setExportState({ kind:"", error:err?.message || "Excel tidak dapat dibuat." });
+      return;
+    }
+    setExportState({ kind:"", error:"" });
+  }
 
   return (
     <div>
-      <div style={{...sty.card, marginBottom:16, border:`2px solid ${C.accent}`, background:"#eff6ff"}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.sidebar,marginBottom:8}}>Cari Riwayat Material</div>
-        <div className="tug15-quick-finder" style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <input list="tug15-material-options" aria-label="Cari Riwayat Material" style={{...sty.input,flex:1,minWidth:220,fontSize:15,padding:12}} value={quickQuery} placeholder="Ketik nama material atau nomor katalog" onChange={e=>{setQuickQuery(e.target.value); const hit=materialOptions.find(([,label])=>label.toLowerCase().includes(e.target.value.toLowerCase())); setQuickMaterial(hit?.[0]||"");}} onKeyDown={e=>{if(e.key==="Enter") runQuickFinder();}} />
-          <datalist id="tug15-material-options">{materialOptions.map(([key,label])=><option key={key} value={label}/>)}</datalist>
-          <button type="button" style={sty.btn("primary")} disabled={!quickMaterial} onClick={()=>runQuickFinder()}>Cari / Lihat Riwayat</button>
-          <button type="button" aria-label="Hapus pencarian riwayat" style={sty.btn("ghost")} onClick={()=>{setQuickQuery("");setQuickMaterial("");}}>Clear</button>
-        </div>
-        <div style={{fontSize:11,color:C.muted,marginTop:6}}>Menampilkan seluruh timeline material terpilih, tanpa terpengaruh filter laporan.</div>
-      </div>
       {/* Filter Panel */}
       <div style={{...sty.card,marginBottom:16,background:"#f8fafc"}}>
         <div style={{fontSize:12,fontWeight:800,color:C.accent,marginBottom:12}}>🔍 Filter Laporan TUG-15</div>
-        <div className="tug15-date-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-          <div>
-            <label style={sty.label}>Dari Tanggal</label>
-            <input type="date" style={sty.input} value={filter.dateFrom} onChange={e=>setFilter(f=>({...f,dateFrom:e.target.value}))}/>
-          </div>
-          <div>
-            <label style={sty.label}>Sampai Tanggal</label>
-            <input type="date" style={sty.input} value={filter.dateTo} onChange={e=>setFilter(f=>({...f,dateTo:e.target.value}))}/>
-          </div>
-        </div>
-        <div style={{marginBottom:12}}>
-          <label style={sty.label}>Cari di Seluruh Riwayat</label>
-          <input style={sty.input} value={filter.searchText||""} placeholder="Pekerjaan, lokasi, vendor/ULTG, tanggal, dokumen, SPK/kontrak, atau catatan" onChange={e=>setFilter(f=>({...f,searchText:e.target.value}))}/>
-          <div style={{fontSize:11,color:C.muted,marginTop:4}}>Bisa memakai beberapa kata sekaligus. Pencarian mengabaikan rentang tanggal agar history lama dan baru ditemukan bersama.</div>
-        </div>
         <div style={{marginBottom:12}}>
           <label style={sty.label}>Sumber Data</label>
           <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
@@ -206,36 +173,33 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             </select>
           </div>
         </div>
-        <div style={{marginBottom:12}}>
-          <label style={sty.label}>Filter Jenis Transaksi</label>
-          <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
-            {["TUG9","TUG8","TUG10","TUG3","TUG5"].map(dt=>{
-              const active = (filter.docTypes||[]).includes(dt);
-              return (
-                <button key={dt} type="button" style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${active?C.accent:C.border}`,background:active?C.accent:"white",color:active?"white":C.muted,fontSize:12,cursor:"pointer",fontWeight:active?700:400}}
-                  onClick={()=>setFilter(f=>({...f,docTypes:active?(f.docTypes||[]).filter(x=>x!==dt):[...(f.docTypes||[]),dt]}))}>
-                  {docTypeLabels[dt]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
         <div className="tug15-action-row" style={{display:"flex",gap:10,alignItems:"center"}}>
           <div className="tug15-action-summary" style={{display:"flex",gap:10,alignItems:"center"}}>
             <button style={{...sty.btn("ghost","sm")}} onClick={()=>setFilter({dateFrom:"",dateTo:"",katalogId:"ALL",jenisBarang:"ALL",sapStatus:"ALL",source:"ALL",searchText:"",docTypes:["TUG9","TUG8","TUG10","TUG3","TUG5"]})}>↺ Reset Filter</button>
             <span style={{fontSize:12,color:C.muted}}>{rows.length} baris ditemukan</span>
           </div>
-          <div className="tug15-export-actions" style={{marginLeft:"auto",display:"flex",gap:8}}>
-            <button style={{...sty.btn("ghost"),border:`1px solid #0ea5e9`,color:"#0ea5e9"}} onClick={handleSyncSupabase} disabled={rows.length===0||syncState.loading}>
-              {syncState.loading?"⏳ Sinkron...":"☁️ Sync ke Supabase"}
-            </button>
-            <button style={{...sty.btn("ghost"),border:`1px solid ${C.green}`,color:C.green}} onClick={downloadTUG15Excel} disabled={rows.length===0}>📊 Download Excel (.xlsx)</button>
-            <button style={sty.btn("success")} onClick={downloadTUG15} disabled={rows.length===0}>⬇️ Download HTML/PDF</button>
-          </div>
         </div>
-        {syncState.msg && <div style={{marginTop:10,fontSize:12,color:syncState.msg.startsWith("✗")?C.red||"#dc2626":"#0ea5e9",fontWeight:600}}>{syncState.msg}</div>}
         {legacy.loading && <div style={{marginTop:10,fontSize:12,color:C.muted}}>Memuat arsip history lama…</div>}
         {legacy.error && <div style={{marginTop:10,fontSize:12,color:C.red||"#dc2626"}}>Arsip history lama belum dapat dimuat: {legacy.error.message || "periksa koneksi atau ketersediaan tabel arsip."}</div>}
+      </div>
+
+      <div style={{...sty.card, marginBottom:16, border:`2px solid ${C.accent}`, background:"#eff6ff"}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.sidebar,marginBottom:8}}>Cari Riwayat Material</div>
+        <div className="tug15-date-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div><label style={sty.label}>Dari Tanggal</label><input type="date" style={sty.input} value={filter.dateFrom} onChange={e=>setFilter(f=>({...f,dateFrom:e.target.value}))}/></div>
+          <div><label style={sty.label}>Sampai Tanggal</label><input type="date" style={sty.input} value={filter.dateTo} onChange={e=>setFilter(f=>({...f,dateTo:e.target.value}))}/></div>
+        </div>
+        <div className="tug15-quick-finder" style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input aria-label="Cari di Seluruh Riwayat" style={{...sty.input,flex:1,minWidth:220,fontSize:15,padding:12}} value={filter.searchText||""} placeholder="Pekerjaan, lokasi, vendor/ULTG, tanggal, dokumen, SPK/kontrak, atau catatan" onChange={e=>setFilter(f=>({...f,searchText:e.target.value}))}/>
+          <button type="button" style={sty.btn("primary")} onClick={()=>setFilter(f=>({...f,searchText:f.searchText||""}))}>Cari</button>
+        </div>
+        <div style={{fontSize:11,color:C.muted,marginTop:6}}>Bisa memakai beberapa kata sekaligus. Jika tanggal dan kata pencarian diisi, keduanya diterapkan bersama.</div>
+        {exportState.error && <div role="alert" style={{marginTop:10,fontSize:12,color:C.red||"#dc2626"}}>Unduhan laporan gagal: {exportState.error}</div>}
+        {exportState.kind && <div role="status" style={{marginTop:8,fontSize:12,color:C.muted}}>Menyiapkan {exportState.kind === "pdf" ? "PDF asli" : "workbook Excel"}...</div>}
+        <div className="tug15-export-actions" aria-busy={Boolean(exportState.kind)} style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button style={{...sty.btn("ghost"),border:`1px solid ${C.green}`,color:C.green}} onClick={downloadTUG15Excel} disabled={rows.length===0}>Download Excel (.xlsx)</button>
+          <button style={sty.btn("success")} onClick={downloadTUG15} disabled={rows.length===0}>Download Ringkasan (PDF)</button>
+        </div>
       </div>
 
       {/* Preview Tabel */}
@@ -294,8 +258,8 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
         </div>
       )}
       {historyItem && (
-        <div role="dialog" aria-modal="true" aria-label="Riwayat lengkap material" style={{position:"fixed",inset:0,zIndex:10000,background:"rgba(15,23,42,.48)",display:"flex",justifyContent:"flex-end"}} onMouseDown={()=>setHistoryItem(null)}>
-          <aside style={{width:"min(620px,100%)",height:"100%",overflowY:"auto",background:"white",padding:20,boxShadow:"-10px 0 24px rgba(15,23,42,.18)"}} onMouseDown={e=>e.stopPropagation()}>
+        <div role="dialog" aria-modal="true" aria-label="Riwayat lengkap material" style={{position:"fixed",inset:0,zIndex:10000,background:"rgba(15,23,42,.48)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onMouseDown={()=>setHistoryItem(null)}>
+          <aside style={{width:"min(760px,100%)",maxHeight:"min(86vh,760px)",overflowY:"auto",background:C.surface||"white",borderRadius:16,padding:24,boxShadow:"0 24px 60px rgba(15,23,42,.28)",border:`1px solid ${C.border}`}} onMouseDown={e=>e.stopPropagation()}>
             <div style={{display:"flex",gap:12,alignItems:"start",marginBottom:16}}>
               <div style={{flex:1}}>
                 <div style={{fontSize:17,fontWeight:800,color:C.sidebar}}>Riwayat lengkap</div>
