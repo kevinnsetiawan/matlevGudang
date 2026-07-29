@@ -2,6 +2,7 @@
 // Murni relokasi tab "Data Stok" (tab==="stock"); JSX/logic tidak berubah.
 import { JENIS_BARANG } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
+import { buildAdminStockLocationUpdate } from "../lib/stockLocationApproval.js";
 import { getSAPBadgeStyle } from "../lib/sap.js";
 import { hasRole } from "../lib/roles.js";
 import { getLokasiPetaInfo } from "../lib/masterSync.js";
@@ -176,11 +177,10 @@ export function DataStokTab({
                               onChange={async e=>{
                                 const v = e.target.value;
                                 setStockGudangFilter(prev=>({...prev,[st.id]:v}));
-                                // Simpan langsung (bukan cuma filter lokal) supaya tidak hilang kalau
-                                // Gudang ini ternyata tidak punya Blok terdaftar sama sekali.
-                                const ns = stocks.map(s=>s.id===st.id?{...s, gudangId: v||null}:s);
-                                setStocks(ns);
-                                await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===st.id)});
+                                // Gudang selector only scopes the target Blok options. The
+                                // canonical stock gudang/location changes together when a
+                                // concrete Blok is selected below; this prevents an approval
+                                // from combining a new gudang with the old lokasi.
                               }}>
                               <option value="">-- Pilih Gudang --</option>
                               {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
@@ -198,18 +198,8 @@ export function DataStokTab({
                                 onChange={async e=>{
                                   const newLokasiId = e.target.value;
                                   const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  const updated = {
-                                    ...st,
-                                    lokasiId:newLokasiId,
-                                    lokasi:lokSel?.kode||"-",
-                                    gudangId:lokSel?.gudangId ?? st.gudangId ?? null,
-                                    lokasiMovePending:false,
-                                    lokasiMoveApprover:null,
-                                    pendingLokasiId:null,
-                                    pendingLokasiKode:null,
-                                    moveRequestedBy:null,
-                                    moveRequestedAt:null,
-                                  };
+                                  const sourceLocation = lokasiList.find(l=>l.id===st.lokasiId) || (st.lokasiId ? { gudangId: st.gudangId } : null);
+                                  const updated = buildAdminStockLocationUpdate(st, sourceLocation, lokSel, currentUser.id);
                                   const ns = stocks.map(s=>s.id===st.id?updated:s);
                                   setStocks(ns);
                                   // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).

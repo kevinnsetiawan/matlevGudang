@@ -1595,6 +1595,21 @@
 
   .equipment-loan-dates { grid-template-columns: minmax(0,1fr) !important; }
 
+  .tug15-action-row { align-items: stretch !important; flex-direction: column; }
+  .tug15-action-summary { width: 100%; justify-content: space-between; }
+  .tug15-action-summary button { min-width: 104px; min-height: 44px; white-space: nowrap; }
+  .tug15-quick-finder input { flex-basis: 100% !important; min-width: 0 !important; width: 100%; }
+  .tug15-quick-finder button { flex: 1 1 0; min-height: 44px; }
+  .tug15-history-detail-grid { grid-template-columns: minmax(0,1fr) !important; gap: 7px !important; }
+  .tug15-export-actions {
+    display: grid !important;
+    width: 100%;
+    margin-left: 0 !important;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  .tug15-export-actions button { width: 100%; min-height: 44px; white-space: normal; line-height: 1.25; }
+  .tug15-export-actions button:first-child { grid-column: 1/-1; }
+
   .demo-banner {
     right: 12px;
     bottom: max(12px,env(safe-area-inset-bottom));

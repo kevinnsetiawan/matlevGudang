@@ -16,7 +16,7 @@ export function TransactionHubTab({
   filterStatus, setFilterStatus,
   openNewTxn,
   txns, filteredTxns, users, enrichedStocks, stocks,
-  katalogList, lokasiList, timMutuList, uitList, uptList, ultgList,
+  katalogList, lokasiList, gudangList, timMutuList, uitList, uptList, ultgList,
   tug15Filter, setTug15Filter,
   setDocPreview, handleImg,
   approveTUG3_TL, rejectTUG3_TL,
@@ -33,7 +33,9 @@ export function TransactionHubTab({
               <div className="tug-summary-banner__context">
                 <div className="tug-summary-banner__copy">
                   <span>{(TUG_GROUP_UI[tugGroup]||{}).label}</span>
-                  <strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
+                  <strong>{tugSubTab==="TUG15"
+                    ? `${(TUG_UI[tugSubTab]||{}).code || "TUG-15"} — ${(TUG_UI[tugSubTab]||{}).title || "Laporan Mutasi Stok"}`
+                    : (TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong>
                   <small>{(TUG_UI[tugSubTab]||{}).desc || ""}</small>
                 </div>
               </div>
@@ -48,7 +50,7 @@ export function TransactionHubTab({
               )}
             </section>
 
-            <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
+            {tugSubTab!=="TUG15" && <section className="tug-process-tabs" aria-label="Pilihan jenis transaksi TUG">
               <div className="tug-process-tabs__header">
                 <strong>Pilih jenis transaksi</strong>
                 <span>Klik kartu untuk membuka proses yang dibutuhkan</span>
@@ -69,19 +71,19 @@ export function TransactionHubTab({
                   );
                 })}
               </div>
-            </section>
+            </section>}
             {(can(currentUser, "aksi.buatTransaksi", rolePerms) || hasRole(currentUser, "ADMIN_ULTG")) && (tugSubTab==="TUG3"||tugSubTab==="TUG10"||tugSubTab==="TUG9"||tugSubTab==="TUG8"||tugSubTab==="TUG5") && (
               <div className="tug-action-row">
                 <div><span>Aksi transaksi aktif</span><strong>{(TUG_UI[tugSubTab]||{}).title || "Dokumen TUG"}</strong></div>
                 <button className="tug-primary-action" onClick={()=>openNewTxn(tugSubTab)}>{(TUG_UI[tugSubTab]||{}).buat || "Buat Baru"}</button>
               </div>
             )}
-            <div className="tug-status-filter">
+            {tugSubTab!=="TUG15" && <div className="tug-status-filter">
               <span>Status dokumen</span>
               {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
                 <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
               ))}
-            </div>
+            </div>}
 
             {tugSubTab==="TUG3" ? (
               <TUG3Tab
@@ -115,8 +117,8 @@ export function TransactionHubTab({
               <TUG15Tab
                 txns={txns} katalogList={katalogList} stocks={stocks}
                 sty={sty} C={C}
-                filter={tug15Filter} setFilter={setTug15Filter}
-                lokasiList={lokasiList}
+                filter={{...tug15Filter, ultgList, uitList}} setFilter={setTug15Filter}
+                lokasiList={lokasiList} gudangList={gudangList}
               />
             ) : (
             <div style={{display:"flex",flexDirection:"column",gap:10}}>

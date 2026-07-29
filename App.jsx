@@ -8,6 +8,7 @@ import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, R
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
 import { leanStocksForCache, resolveStockPhotoUrl } from "./src/lib/stockCache.js";
+import { approveStockLocationMove, rejectStockLocationMove } from "./src/lib/stockLocationApproval.js";
 import { applyStockRealtimeEvent, applyStockRealtimeEvents, stockListsEqual } from "./src/lib/stockRealtime.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { logAudit } from "./src/lib/audit.js";
@@ -95,6 +96,7 @@ import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
+import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis } from "./src/lib/analytics.js";
 import QRCode from "qrcode";
@@ -403,7 +405,9 @@ export default function PLNWarehouse() {
     katalogId: "ALL",
     jenisBarang: "ALL",
     sapStatus: "ALL",  // "ALL" | "SAP" | "Non-SAP"
-    docTypes: ["TUG9","TUG8","TUG10","TUG3"],
+    source: "ALL", // "ALL" | "BARU" | "LAMA"
+    searchText: "",
+    docTypes: ["TUG9","TUG8","TUG10","TUG3","TUG5"],
   });
   const [topN, setTopN] = useState(10);
   const [pemakaianMode, setPemakaianMode] = useState("frekuensi"); // "frekuensi" | "qty"
@@ -1172,7 +1176,12 @@ export default function PLNWarehouse() {
     // Alat Berat/Peminjaman UPT — sebelumnya localStorage/CLOUD-only (ditemukan saat
     // audit 2026-07-06), sekarang auto-backup ke Supabase tiap kali berubah (lihat
     // schema.sql section 21).
-    if (overrides.heavyEquipmentList !== undefined) syncTasks.push({ label: "Alat Berat", promise: syncMasterTable("heavy_equipment", he, e => ({ upt: e.upt || null })) });
+    if (overrides.heavyEquipmentList !== undefined) {
+      const heHint = hints.heavyEquipmentChangedRows;
+      syncTasks.push({ label: "Alat Berat", promise: (Array.isArray(heHint) && heHint.length > 0)
+        ? syncMasterTableRows("heavy_equipment", heHint, e => ({ upt: e.upt || null }))
+        : syncMasterTable("heavy_equipment", he, e => ({ upt: e.upt || null })) });
+    }
     if (overrides.heavyEquipmentLoans !== undefined) syncTasks.push({ label: "Peminjaman Alat Berat", promise: syncMasterTable("heavy_equipment_loans", hel, l => ({
       equipment_id: l.equipmentId || null,
       status: l.status || null,
@@ -1196,6 +1205,7 @@ export default function PLNWarehouse() {
 
     // Auto-sync warnoto_state + RAG (bot WA/Telegram) kalau ada perubahan stocks/txns —
     // debounced 90 detik supaya tidak spam Cohere embed API tiap 1 saveToCloud.
+    const cloudSyncOk = failedLabels.length === 0;
     if ((overrides.stocks !== undefined || overrides.txns !== undefined) && supabase) {
       if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
       autoSyncTimerRef.current = setTimeout(async () => {
@@ -1208,6 +1218,7 @@ export default function PLNWarehouse() {
         }
       }, 90000);
     }
+    return cloudSyncOk;
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
@@ -1983,25 +1994,29 @@ export default function PLNWarehouse() {
     showToast("❌ Perubahan Blok Lokasi ditolak.");
   }
 
-  // Approve/reject pengajuan pemindahan blok Data Stok (khusus role TL) — 1 per 1, bukan bulk
+  // Approve/reject pengajuan pemindahan gudang Data Stok — 1 per 1, bukan bulk.
   async function approveStockMove(id) {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.lokasiMovePending) return;
     const lokSel = lokasiList.find(l=>l.id===st.pendingLokasiId);
     const lokAsal = lokasiList.find(l=>l.id===st.lokasiId);
-    const ns = stocks.map(s=>s.id===id ? {...s, lokasiId:st.pendingLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, pendingLokasiId:null, pendingLokasiKode:null, moveApprovedBy:currentUser.id, moveApprovedAt:Date.now()} : s);
+    if (!lokSel) {
+      showToast("Lokasi tujuan tidak ditemukan. Pengajuan tidak diubah.", "error");
+      return;
+    }
+    const ns = stocks.map(s=>s.id===id ? approveStockLocationMove(s, lokSel, currentUser.id) : s);
     setStocks(ns); await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
     await logApprovalHistory({type:"STOCK_MOVE", decision:"APPROVED", title:`${st.name}: ${lokAsal?.kode||"—"} → ${st.pendingLokasiKode}`, requestedBy:st.moveRequestedBy, requestedAt:st.moveRequestedAt});
-    showToast(`✅ Pemindahan blok ${st.name} disetujui.`);
+    showToast(`✅ Pemindahan gudang ${st.name} disetujui.`);
   }
   async function rejectStockMove(id) {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.lokasiMovePending) return;
     const lokAsal = lokasiList.find(l=>l.id===st.lokasiId);
     await logApprovalHistory({type:"STOCK_MOVE", decision:"REJECTED", title:`${st.name}: ${lokAsal?.kode||"—"} → ${st.pendingLokasiKode}`, requestedBy:st.moveRequestedBy, requestedAt:st.moveRequestedAt});
-    const ns = stocks.map(s=>s.id===id ? {...s, lokasiMovePending:false, pendingLokasiId:null, pendingLokasiKode:null} : s);
+    const ns = stocks.map(s=>s.id===id ? rejectStockLocationMove(s) : s);
     setStocks(ns); await saveToCloud({stocks:ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
-    showToast(`❌ Pemindahan blok ${st.name} ditolak.`);
+    showToast(`❌ Pemindahan gudang ${st.name} ditolak.`);
   }
 
   // Kartu kecil untuk 1 Blok Lokasi — dipakai di halaman Master Gudang (per gudang & blok tanpa gudang)
@@ -3337,9 +3352,12 @@ export default function PLNWarehouse() {
     }
   }
 
-  function handleImg(e, setter) {
+  function handleImg(e, setter, onError) {
     const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader(); r.onload = ev => setter(ev.target.result); r.readAsDataURL(f);
+    const r = new FileReader();
+    r.onload = ev => setter(ev.target.result);
+    r.onerror = () => onError?.(new Error("browser tidak dapat membaca file"));
+    try { r.readAsDataURL(f); } catch (error) { onError?.(error); }
   }
   // Foto satpam disimpan inline di jsonb (bukan bucket) → wajib dikompres kecil (maks 400px)
   // supaya tidak membengkakkan master jsonb & localStorage.
@@ -3350,30 +3368,70 @@ export default function PLNWarehouse() {
     catch { showToast("Gagal memproses foto.","error"); }
   }
   async function saveHeavyEquipmentEdit(equipmentId, updates) {
-    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengubah data alat.","error"); return; }
+    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengubah data alat.","error"); return false; }
     const alat = heavyEquipmentList.find(eq=>eq.id===equipmentId);
-    if (!alat) return;
+    if (!alat) return false;
     if (["MAINTENANCE","KIR"].includes(updates.statusAlat) && alat.availabilityStatus==="DIPINJAM") {
-      showToast("Alat sedang dipinjam, tidak bisa diubah ke status ini.","error"); return;
+      showToast("Alat sedang dipinjam, tidak bisa diubah ke status ini.","error"); return false;
     }
     // Foto ke Storage dulu (pola sama dengan Data Stok — JANGAN base64 mentah masuk
     // jsonb heavy_equipment.data, cegah pola insiden 2026-07-23 & 2026-07-28 terulang
     // di tabel lain). Bucket reuse "tug-photos" (sudah publik), folder alat-berat/.
-    let upd = updates;
-    if (_isDataUrl(updates.foto)) {
+    const canEditAllHeavyEquipment = hasRole(currentUser, "ADMIN");
+    // Jangan menyebarkan properti yang tidak memiliki input (id, availabilityStatus,
+    // metadata audit, dst.) ketika Admin membuka form lengkap. Untuk TL, payload
+    // sengaja hanya dua field yang memang diizinkan.
+    const editableFields = ["upt","lokasi","nama","jenis","merkType","kapasitas","nomorSeri","tahun","kondisi","suratIzinAlat","statusAlat"];
+    let upd = canEditAllHeavyEquipment
+      ? Object.fromEntries(editableFields.map(key => [key, updates[key] ?? alat[key] ?? ""]))
+      : { statusAlat: updates.statusAlat ?? alat.statusAlat };
+    // URL lama bukan perubahan foto. Ini menghindari metadata foto berubah hanya
+    // karena TL/Admin membuka lalu menyimpan status alat.
+    const needsPhotoStorage = _isDataUrl(updates.foto) && !isDemoMode();
+    // Foto lama berbentuk data URL (dari sebelum migrasi Storage) harus ikut
+    // dipindahkan pada penyimpanan berikutnya, walau pengguna tidak memilih file baru.
+    const isPhotoChanged = updates.foto !== alat.foto || needsPhotoStorage;
+    if (needsPhotoStorage) {
+      let compressedPhoto;
+      try { compressedPhoto = await compressImage(updates.foto, {maxBytes:1_000_000}); }
+      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
       try {
-        const url = await _withTimeout(uploadPhotoToStorage(await compressImage(updates.foto, {maxBytes:1_000_000}), "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
-        upd = { ...updates, foto: url };
+        const url = await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
+        upd = { ...upd, foto: url };
       } catch (e) {
         console.warn("Upload foto alat berat gagal:", equipmentId, e?.message||e);
-        showToast("Gagal upload foto ke server, coba lagi.","error"); return;
+        showToast(getHeavyEquipmentUploadErrorMessage(e),"error"); return false;
       }
     }
-    const next = heavyEquipmentList.map(eq => eq.id === equipmentId ? { ...eq, ...upd, ...(upd.foto!==undefined ? {fotoUpdatedAt:Date.now(), fotoUpdatedBy:currentUser.id} : {}) } : eq);
+    if (isPhotoChanged && !_isDataUrl(updates.foto)) upd = { ...upd, foto: updates.foto || null };
+    upd = { ...upd, updatedAt:Date.now(), updatedBy:currentUser.id };
+    const next = heavyEquipmentList.map(eq => eq.id === equipmentId ? { ...eq, ...upd, ...(isPhotoChanged ? {fotoUpdatedAt:Date.now(), fotoUpdatedBy:currentUser.id} : {}) } : eq);
+    const ok = await saveToCloud({heavyEquipmentList: next}, {heavyEquipmentChangedRows:[next.find(eq=>eq.id===equipmentId)]});
+    if (!ok) return false;
     setHeavyEquipmentList(next);
-    await saveToCloud({heavyEquipmentList: next});
     logAudit(currentUser, "UPDATE", "heavy_equipment", equipmentId, {nama:alat.nama});
     showToast("✅ Data alat berat disimpan.");
+    return true;
+  }
+  async function createHeavyEquipment(form) {
+    if (!hasRole(currentUser, "ADMIN")) { showToast("Hanya Admin Gudang yang bisa menambah alat.", "error"); return false; }
+    if (!form?.upt || !form?.nama?.trim() || !form?.lokasi?.trim()) { showToast("UPT, nama, dan lokasi wajib diisi.", "error"); return false; }
+    const now = Date.now();
+    let item = normalizeHeavyEquipmentRecord({ ...form, id:`HE-${uid().slice(-8)}`, availabilityStatus:"TERSEDIA", createdAt:now, createdBy:currentUser.id, updatedAt:now, updatedBy:currentUser.id, source:"Input Admin Gudang" });
+    if (_isDataUrl(item.foto) && !isDemoMode()) {
+      let compressedPhoto;
+      try { compressedPhoto = await compressImage(item.foto, {maxBytes:1_000_000}); }
+      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
+      try { item = { ...item, foto: await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${item.id}.jpg`), 30_000, "unggah foto") }; }
+      catch (e) { console.warn("Upload foto alat berat gagal:", item.id, e?.message||e); showToast(getHeavyEquipmentUploadErrorMessage(e), "error"); return false; }
+    }
+    const next = [item, ...heavyEquipmentList];
+    const ok = await saveToCloud({heavyEquipmentList: next}, {heavyEquipmentChangedRows:[item]});
+    if (!ok) return false;
+    setHeavyEquipmentList(next);
+    logAudit(currentUser, "CREATE", "heavy_equipment", item.id, {nama:item.nama});
+    showToast("✅ Alat berat ditambahkan.");
+    return true;
   }
   async function createHeavyEquipmentLoan(form) {
     if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengajukan peminjaman alat.","error"); return; }
@@ -5323,7 +5381,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
             openNewTxn={openNewTxn}
             txns={txns} filteredTxns={filteredTxns} users={users} enrichedStocks={enrichedStocks} stocks={stocks}
-            katalogList={katalogList} lokasiList={lokasiList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
+            katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
             tug15Filter={tug15Filter} setTug15Filter={setTug15Filter}
             setDocPreview={setDocPreview} handleImg={handleImg}
             approveTUG3_TL={approveTUG3_TL} rejectTUG3_TL={rejectTUG3_TL}
@@ -5346,6 +5404,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             C={C}
             handleImg={handleImg}
             saveEdit={saveHeavyEquipmentEdit}
+            createEquipment={createHeavyEquipment}
             createLoan={createHeavyEquipmentLoan}
             approveLoan={approveHeavyEquipmentLoan}
             rejectLoan={rejectHeavyEquipmentLoan}
