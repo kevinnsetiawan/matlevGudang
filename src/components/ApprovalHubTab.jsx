@@ -331,9 +331,10 @@ export function ApprovalHubTab({
 
       {/* ── BAGIAN: Riwayat Approval (gabungan semua jenis, terbaru di atas) ── */}
       {(()=>{
+        const docKeyMap = {TUG3:"tug3",TUG5:"tug5",TUG7:"tug7",TUG8:"tug8",TUG9:"tug9",TUG10:"tug10"};
         const histTUG = txns.filter(t=>t.status==="APPROVED"||t.status==="REJECTED").map(t=>({
           id:`TUG-${t.id}`, type:"TUG", decision:t.status,
-          title:`${t.docType||"TUG"} • ${t.id}`,
+          title:`${t.docType||"TUG"} • ${t.docNumbers?.[docKeyMap[t.docType]] || t.id}`,
           decidedBy: t.status==="REJECTED" ? t.rejectedBy : t.approvedBy,
           decidedAt: t.status==="REJECTED" ? t.rejectedAt : t.approvedAt,
         }));
