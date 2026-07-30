@@ -17,7 +17,10 @@ import pandas as pd
 from prophet import Prophet
 from supabase import create_client
 
-MIN_DATA_POINTS = 10   # minimal baris histori per katalog sebelum dianggap cukup buat training
+from lib.normalize_katalog_code import normalize_katalog_code
+
+MIN_DATA_POINTS = 5   # diturunkan sementara dari 10: histori transaksi live masih sedikit,
+                       # dinaikkan lagi setelah data tug15_history terkumpul lebih banyak
 FORECAST_DAYS = 30
 MODEL_VERSION = "prophet-v1"
 
@@ -36,6 +39,38 @@ def fetch_history(sb):
 def fetch_stock_current(sb):
     res = sb.table("stock_current").select("katalog_id, qty").execute()
     return {row["katalog_id"]: row["qty"] for row in res.data}
+
+
+def fetch_legacy_history(sb):
+    """Histori KELUAR arsip AppSheet lama (UPT Surabaya), dipetakan ke katalog_id sekarang
+    lewat normalize_katalog_code. Baris yang kodenya tidak match katalog manapun di-skip."""
+    legacy_res = (
+        sb.table("legacy_history_archive")
+        .select("no_katalog, tanggal, qty")
+        .eq("jenis_transaksi", "KELUAR")
+        .ilike("source_upt", "%Surabaya%")
+        .execute()
+    )
+    legacy_df = pd.DataFrame(legacy_res.data)
+
+    katalog_res = sb.table("katalog").select("id, data").execute()
+    code_to_id = {
+        normalize_katalog_code(row["data"].get("katalog")): row["id"]
+        for row in katalog_res.data
+        if row.get("data", {}).get("katalog")
+    }
+
+    rows = []
+    total = len(legacy_df)
+    for _, row in legacy_df.iterrows():
+        kid = code_to_id.get(normalize_katalog_code(row["no_katalog"]))
+        if kid is None:
+            continue
+        rows.append({"katalog_id": kid, "tanggal": row["tanggal"], "qty": row["qty"]})
+
+    matched = len(rows)
+    print(f"Legacy history: {matched} baris cocok katalog (dari {total} baris KELUAR UPT Surabaya), {total - matched} diabaikan (kode tidak match).")
+    return pd.DataFrame(rows, columns=["katalog_id", "tanggal", "qty"])
 
 
 def train_one_katalog(df_katalog):
@@ -58,6 +93,8 @@ def train_one_katalog(df_katalog):
 def main():
     sb = get_client()
     history = fetch_history(sb)
+    legacy = fetch_legacy_history(sb)
+    history = pd.concat([history, legacy], ignore_index=True)
     if history.empty:
         print("Tidak ada data tug15_history sama sekali. Berhenti.")
         return
