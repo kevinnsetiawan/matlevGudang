@@ -2285,11 +2285,13 @@ export default function PLNWarehouse() {
   function openEditSatpam(sp) { setSatpamForm({...sp}); setSatpamModal("edit"); }
   async function saveSatpam() {
     if (!satpamForm.name?.trim()) { showToast("Nama Satpam tidak boleh kosong!","error"); return; }
+    const prevList = satpamList;
     let nsp;
     if (satpamModal==="edit") nsp = satpamList.map(s=>s.id===satpamForm.id?{...satpamForm}:s);
     else nsp = [...satpamList, {...satpamForm, createdAt:Date.now()}];
     setSatpamList(nsp); setSatpamModal(null);
-    await syncMasterTable("satpam", nsp);
+    const ok = await syncMasterTable("satpam", nsp);
+    if (!ok) { setSatpamList(prevList); showToast("Gagal menyimpan ke server, perubahan Satpam DIBATALKAN. Coba lagi.","error"); return; }
     CLOUD.set("pln_satpam_v1", nsp);
     logAudit(currentUser, satpamModal==="edit"?"UPDATE":"CREATE", "satpam", satpamForm.id, {nama:satpamForm.name});
     showToast(satpamModal==="edit" ? "Data Satpam diupdate!" : "Satpam baru ditambahkan!");
@@ -2301,8 +2303,11 @@ export default function PLNWarehouse() {
       message: <>Apakah Anda yakin ingin menghapus data Satpam <b>{s?.name||"-"}</b>?</>,
       warning: "Tindakan ini tidak bisa dibatalkan.",
       onConfirm: async () => {
+        const prevList = satpamList;
         const nsp = satpamList.filter(x=>x.id!==id);
-        setSatpamList(nsp); await syncMasterTable("satpam", nsp);
+        setSatpamList(nsp);
+        const ok = await syncMasterTable("satpam", nsp);
+        if (!ok) { setSatpamList(prevList); showToast("Gagal menghapus di server, data Satpam DIKEMBALIKAN. Coba lagi.","error"); return; }
         CLOUD.set("pln_satpam_v1", nsp);
         logAudit(currentUser, "DELETE", "satpam", id, {nama:s?.name});
         showToast("Satpam dihapus.");
