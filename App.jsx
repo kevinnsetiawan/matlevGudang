@@ -93,7 +93,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "./src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
@@ -4750,15 +4750,20 @@ export default function PLNWarehouse() {
         ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
       ];
       if (chunks.length===0) { if (!silent) showToast("Tidak ada data untuk di-index.", "error"); if (!silent) setRagSyncing(false); return; }
+      // Skip chunk yang kontennya identik dengan yang sudah tersimpan — hemat kuota Cohere
+      // trial, sama seperti nightly_sync.mjs. Hapus-basi di bawah tetap pakai `chunks` penuh.
+      const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "txn", "faq"]);
+      const existingContentById = new Map((existingChunks||[]).map(r=>[r.id, r.content]));
+      const toEmbed = splitChunksForEmbed(chunks, existingContentById);
       // Cohere embed API maks ~96 teks per request — kirim per batch.
       const BATCH = 90;
-      for (let i=0; i<chunks.length; i+=BATCH) {
-        const batch = chunks.slice(i, i+BATCH);
+      for (let i=0; i<toEmbed.length; i+=BATCH) {
+        const batch = toEmbed.slice(i, i+BATCH);
         const vectors = await cohereEmbed(batch.map(c=>c.content), "search_document");
         const rows = batch.map((c,idx)=>({ ...c, embedding: vectors[idx], updated_at: new Date().toISOString() }));
         const { error } = await supabase.from("rag_chunks").upsert(rows, { onConflict: "id" });
         if (error) throw error;
-        onProgress?.(Math.min(i+BATCH, chunks.length), chunks.length);
+        onProgress?.(Math.min(i+BATCH, toEmbed.length), toEmbed.length);
       }
       // Hapus hanya chunk lama milik sinkron browser (katalog/txn/FAQ). Chunk
       // `mutasi` dibuat nightly_sync.mjs dan tidak boleh ikut terhapus di sini.
@@ -4767,7 +4772,7 @@ export default function PLNWarehouse() {
       const toDelete = (existing||[]).filter(r=>!currentIds.has(r.id)).map(r=>r.id);
       if (toDelete.length) await supabase.from("rag_chunks").delete().in("id", toDelete);
       setRagLastSync(Date.now());
-      if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${chunks.length} item (${katalogList.length} katalog, ${txnRelevant.length} transaksi, ${(faqRows||[]).length} FAQ).`);
+      if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${toEmbed.length}/${chunks.length} item di-embed ulang (${chunks.length - toEmbed.length} tidak berubah, di-skip), ${katalogList.length} katalog, ${txnRelevant.length} transaksi, ${(faqRows||[]).length} FAQ.`);
     } catch (err) {
       if (!silent) showToast("Gagal sinkron Knowledge Base: " + err.message, "error");
       else console.error("Auto-sync RAG gagal:", err.message);

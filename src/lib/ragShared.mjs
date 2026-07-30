@@ -36,6 +36,14 @@ export function getKritisAgg(stocks) {
   return Object.values(g).filter((m) => m.minQty > 0 && m.qty <= m.minQty);
 }
 
+// Pisahkan chunk yang perlu di-embed ulang (baru atau content beda dari yang tersimpan di
+// rag_chunks) dari yang sudah identik persis (skip total, hemat kuota Cohere trial). Dipakai
+// baik oleh App.jsx (syncRagChunks, tombol manual + auto-sync debounced) maupun
+// nightly_sync.mjs (cron malam) supaya keduanya konsisten skip chunk yang tidak berubah.
+export function splitChunksForEmbed(allChunks, existingContentById) {
+  return allChunks.filter((c) => existingContentById.get(c.id) !== c.content);
+}
+
 // Isi 1 chunk RAG "katalog": nama, kode, kategori, status SAP, qty + harga Rupiah, lokasi fisik.
 export function buildKatalogRagContent(k, stockInfo) {
   const sap = getSAPLabel(k.katalog);

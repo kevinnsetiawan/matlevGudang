@@ -1,4 +1,4 @@
-// WARNOTO — Sinkron Knowledge Base bot WA/Telegram, jalan tiap malam via GitHub Actions
+// WARNOTO — Sinkron Knowledge Base bot WA/Telegram, jalan tiap 3 hari via GitHub Actions
 // (jaminan cadangan tanpa perlu browser Admin terbuka sama sekali).
 //
 // ARSITEKTUR (revisi 2026-07-12):
@@ -24,11 +24,17 @@
 // Nightly ini SENGAJA hanya menghapus chunk source_type katalog/faq/mutasi (bukan 'txn' —
 // itu domain sinkron client-side App.jsx, punya siklus hidup sendiri).
 //
+// OPTIMASI KUOTA COHERE (2026-07-30): dulu SEMUA chunk di-re-embed tiap malam meski isinya
+// tidak berubah — boros trial key (limit 1000 call/bulan), gabung dgn call live query bot
+// bikin limit kepotong duluan. Sekarang chunk dibandingkan dgn `content` yang sudah tersimpan
+// di rag_chunks; yang identik persis di-skip total (tidak diembed, tidak diupsert), cuma yang
+// baru/berubah yang dipanggil ke Cohere.
+//
 // Env vars (GitHub Secrets, sama seperti ml/train_forecast.py):
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg } from "../src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "../src/lib/ragShared.mjs";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -152,9 +158,14 @@ async function main() {
   const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks];
   console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi)`);
 
+  const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "faq", "mutasi"]);
+  const existingContentById = new Map((existingChunks || []).map((r) => [r.id, r.content]));
+  const toEmbed = splitChunksForEmbed(allChunks, existingContentById);
+  console.log(`Chunk berubah/baru: ${toEmbed.length}, tidak berubah (skip): ${allChunks.length - toEmbed.length}`);
+
   const BATCH = 90;
-  for (let i = 0; i < allChunks.length; i += BATCH) {
-    const batch = allChunks.slice(i, i + BATCH);
+  for (let i = 0; i < toEmbed.length; i += BATCH) {
+    const batch = toEmbed.slice(i, i + BATCH);
     const vectors = await cohereEmbed(batch.map((c) => c.content), "search_document", COHERE_API_KEY);
     const rows = batch.map((c, idx) => ({ ...c, embedding: vectors[idx], updated_at: new Date().toISOString() }));
     const { error } = await supabase.from("rag_chunks").upsert(rows, { onConflict: "id" });
