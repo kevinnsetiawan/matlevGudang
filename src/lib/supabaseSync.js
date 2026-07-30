@@ -654,6 +654,48 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     }
   });
 
+  // Baris baseline "Migrasi Data" — sama semangatnya dengan buildKartuGantungHistory():
+  // material yang stoknya sudah ada sejak sebelum aplikasi ini dipakai tidak punya
+  // transaksi masuk apa pun, jadi "Total masuk" di Riwayat lengkap selalu 0. Saldo awal
+  // dihitung MUNDUR dari qty stok nyata (bukan qty stok polos) supaya tidak dobel-hitung
+  // kalau material sudah punya transaksi tercatat. Hanya untuk katalog yang benar-benar
+  // tidak punya arsip lama — kalau ada arsip, arsip itulah awal mulanya.
+  const legacyKatalogCodes = new Set(legacyRows.map(item => String(item.no_katalog || "").trim()).filter(c => c && c !== "-"));
+  const liveByKatalog = new Map();
+  rows.forEach(r => {
+    if (r.source !== "BARU" || r.affectsSaldo === false) return;
+    if (!r.katalogId || r.katalogId === "-") return;
+    if (legacyKatalogCodes.has(String(r.katalog || "").trim())) return;
+    if (!liveByKatalog.has(r.katalogId)) liveByKatalog.set(r.katalogId, []);
+    liveByKatalog.get(r.katalogId).push(r);
+  });
+  liveByKatalog.forEach((events, kid) => {
+    const currentQty = (stocks || []).filter(s => s.katalogId === kid).reduce((a, s) => a + (s.qty || 0), 0);
+    let running = currentQty;
+    for (let i = events.length - 1; i >= 0; i--) running -= ((events[i].masuk || 0) - (events[i].keluar || 0));
+    if (running <= 0) return;
+    const ref = [...events].sort((a, b) => a.ts - b.ts)[0];
+    rows.push(addLiveSearchFields({
+      katalog: ref.katalog, deskripsi: ref.deskripsi, merk: ref.merk, type: ref.type,
+      satuan: ref.satuan, valuasi: 0,
+      masuk: running, keluar: 0,
+      upt: ref.upt,
+      tugBaDoc: "Migrasi Data",
+      keterangan: "Migrasi Data",
+      tanggalMutasi: "-", ts: 0,
+      katalogId: kid,
+      sapStatus: ref.sapStatus, sapLabel: ref.sapLabel, jenisBarang: ref.jenisBarang,
+      docType: "-", lokasiId: "", lokasiKode: "-",
+      warehouseName: ref.warehouseName,
+      source: "BARU", sourceLabel: "Baru",
+      materialKey: historyMaterialKey(ref.katalog, ref.deskripsi, "live", `baseline:${kid}`),
+    }, {
+      eventKind: "MASUK",
+      documentNo: "-",
+      notes: "Saldo awal sebelum transaksi tercatat di aplikasi (migrasi data).",
+    }));
+  });
+
   if (source !== "BARU") {
     legacyRows.forEach(item => {
       if (!docTypes.includes(item.doc_type)) return;

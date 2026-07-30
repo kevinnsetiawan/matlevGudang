@@ -41,10 +41,14 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     return selectedHistoryRows.filter(row => row.eventKind === historyTypeFilter);
   }, [selectedHistoryRows, historyTypeFilter]);
   const displayedHistoryRows = historyViewMode === "ROW" && historyItem ? [historyItem] : visibleHistoryRows;
+  // rows dari buildMutasiRows() sengaja ascending (lama→baru) untuk perhitungan saldo
+  // berjalan & export PDF/Excel (ledger kronologis). Tabel di layar dibalik supaya
+  // transaksi terbaru tampil di atas, tanpa mengubah rows asli yang dipakai downloadTUG15.
+  const displayRows = useMemo(() => [...rows].reverse(), [rows]);
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize]);
+    return displayRows.slice(start, start + pageSize);
+  }, [displayRows, page, pageSize]);
   useEffect(() => { setPage(1); }, [filter, legacy.rows]);
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(rows.length / pageSize));
