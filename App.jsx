@@ -1552,6 +1552,22 @@ export default function PLNWarehouse() {
     if (currentUser && tab !== "dashboard" && !can(currentUser, "menu." + tab, rolePerms)) setTab("dashboard");
   }, [tab, currentUser, rolePerms]);
 
+  // Refresh transaksi TUG canonical dari server tiap kali tab Approval dibuka.
+  // tug_transactions TIDAK punya realtime subscription (beda dari stocks) dan cuma
+  // di-load sekali saat login — kalau approver lain (mis. TL) baru approve di
+  // sesi/tab lain, versi lokal di sini basi dan approve/reject berikutnya ditolak
+  // server (TUG_VERSION_MISMATCH) walau kartunya masih tampil seolah pending di UI.
+  // Refetch saat buka tab ini menutup celah itu tanpa perlu realtime penuh.
+  useEffect(() => {
+    if (tab !== "approval" || !currentUser) return;
+    let alive = true;
+    loadCanonicalTugTransactions().then(res => {
+      if (!alive || res.unavailable) return;
+      setTxns(prev => [...prev.filter(t => !t.canonical), ...res.rows]);
+    }).catch(err => console.warn("Refresh TUG canonical gagal saat buka tab Approval.", err));
+    return () => { alive = false; };
+  }, [tab, currentUser]);
+
   // Simpan tab aktif ke sessionStorage supaya refresh halaman tetap di menu yang
   // sama (per-tab-browser, sama seperti pola Mode Demo di src/lib/demo.js).
   useEffect(() => {
@@ -3879,6 +3895,11 @@ export default function PLNWarehouse() {
     }
 
     if (docType === "TUG9" || docType === "TUG8") {
+      // Canonical TUG8/9 (tugCanonical.js) selalu menulis ke RPC server sungguhan,
+      // tidak ada jalur simulasi mode demo untuk dokumen resmi ini — blokir di sini
+      // (pola sama dengan larangan mode demo lain di file ini) daripada diam-diam
+      // menulis data uji ke server produksi.
+      if (isDemoMode()) { showToast("Mode demo: TUG-8/TUG-9 (dokumen resmi) tidak bisa dibuat di sini — akan menulis ke server sungguhan. Nonaktifkan mode demo untuk transaksi ini.","error"); return; }
       if (!txnForm.penerimaNama.trim()) { showToast("Nama Penerima wajib diisi!","error"); return; }
       if (docType === "TUG8" && !txnForm.unitTujuan?.trim()) { showToast("Unit/Sektor Tujuan wajib diisi untuk TUG-8!","error"); return; }
       const submittedItems = txnForm.stockItems || [];
