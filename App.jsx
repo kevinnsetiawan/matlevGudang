@@ -1311,7 +1311,7 @@ export default function PLNWarehouse() {
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const result = await supabase.auth.signInWithPassword(payload);
+          const result = await _withTimeout(supabase.auth.signInWithPassword(payload), 15000, "login");
           error = result?.error || null;
         } catch (err) {
           error = err;
