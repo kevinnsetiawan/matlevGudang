@@ -121,15 +121,22 @@ export function canonicalRowToTxn(row) {
 
 export async function loadCanonicalTugTransactions() {
   if (!supabase) return { rows: [], unavailable: true };
-  const { data, error } = await supabase
-    .from("tug_transactions")
-    .select("*, tug_items(*), tug_approvals(*)")
-    .order("created_at", { ascending: false });
-  if (error) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await supabase
+      .from("tug_transactions")
+      .select("*, tug_items(*), tug_approvals(*)")
+      .order("created_at", { ascending: false });
+    if (!error) return { rows: (data || []).map(canonicalRowToTxn), unavailable: false };
     if (isCanonicalUnavailable(error)) return { rows: [], unavailable: true };
+    // Sesaat setelah login, request ini bisa sempat tertembak sebelum token sesi
+    // baru melekat di client (race), muncul sebagai "permission denied" karena
+    // diperlakukan anon. Retry sekali setelah jeda singkat sebelum menyerah.
+    if (attempt === 0 && /permission denied/i.test(error.message || "")) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      continue;
+    }
     throw new Error(error.message || "Gagal membaca transaksi TUG canonical");
   }
-  return { rows: (data || []).map(canonicalRowToTxn), unavailable: false };
 }
 
 // Legacy records are never auto-imported.  Only explicitly chosen final records
