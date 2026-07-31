@@ -12,6 +12,7 @@ import { approveStockLocationMove, rejectStockLocationMove } from "./src/lib/sto
 import { applyStockRealtimeEvent, applyStockRealtimeEvents, stockListsEqual } from "./src/lib/stockRealtime.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
 import { normalizeKatalogCode } from "./src/lib/normalizeKatalogCode.js";
+import { expandMonthlySeriesFromMap, tsbMonthlyForecast } from "./src/lib/tsbForecast.js";
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
@@ -5128,8 +5129,12 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
       .flatMap(r=>(r.items||[]).map(i=>({...i,noKontrak:r.noKontrak,supplier:r.supplier,tanggalSerahTerima:r.tanggalSerahTerima})))
       .filter(i=>i.katalogId===katalog.id);
 
-    // Metrik terhitung: rata-rata, tren, estimasi habis (dipakai di prompt & fallback lokal)
-    const rataRataBulanan = history.length===0 ? 0 : history.reduce((a,[,q])=>a+q,0)/history.length;
+    // Metrik terhitung: rata-rata, tren, estimasi habis (dipakai di prompt & fallback lokal).
+    // Rata-rata pakai TSB (bukan flat total/jumlah bulan) -- konsisten dengan getRisk() di
+    // ForecastStokPage.jsx, lihat src/lib/tsbForecast.js untuk alasan lengkap (pola pemakaian
+    // material gudang PLN intermiten/lumpy, rata-rata flat bias oleh panjang jendela observasi).
+    const { forecastPerPeriod } = tsbMonthlyForecast(expandMonthlySeriesFromMap(historyMap));
+    const rataRataBulanan = Math.floor(forecastPerPeriod);
     let trenPersen = null, trenLabel = "data terlalu sedikit untuk tren";
     if (history.length>=4) {
       const mid = Math.floor(history.length/2);

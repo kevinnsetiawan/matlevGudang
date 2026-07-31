@@ -5,6 +5,7 @@ import { fmtNum } from "../lib/ragShared.mjs";
 import { supabase } from "../supabaseClient.js";
 import { Sparkline } from "./Sparkline.jsx";
 import { MaterialCadangTab } from "./MaterialCadangTab.jsx";
+import { buildMonthlyDemandSeries, tsbMonthlyForecast } from "../lib/tsbForecast.js";
 
 const RISK_FILTERS = [
   {key:"critical",label:"Kritis"},
@@ -76,11 +77,12 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
         if (stock?.katalogId===katalog.id) usageItems.push({qty:item.qty||0,ts:txn.approvedAt||txn.createdAt});
       });
     });
-    const totalUsage = usageItems.reduce((sum,item)=>sum+item.qty,0);
-    const oldest = usageItems.length ? Math.min(...usageItems.map(item=>item.ts)) : Date.now();
-    const months = Math.max(1,(Date.now()-oldest)/(30*24*60*60*1000));
-    const averageMonthly = totalUsage/months;
-    const estimatedDays = averageMonthly>0 ? Math.round(totalQty/(averageMonthly/30)) : Infinity;
+    // TSB (bukan rata-rata flat) -- material gudang PLN pola pemakaiannya intermiten/lumpy
+    // (berbulan-bulan 0 lalu keluar banyak sekaligus), rata-rata flat gampang bias oleh
+    // panjang jendela observasi. Lihat src/lib/tsbForecast.js untuk penjelasan lengkap.
+    const monthlySeries = buildMonthlyDemandSeries(usageItems);
+    const { forecastPerPeriod } = tsbMonthlyForecast(monthlySeries);
+    const estimatedDays = forecastPerPeriod>0 ? Math.round(totalQty/(forecastPerPeriod/30)) : Infinity;
     const critical = minQty>0 && totalQty<=minQty;
     if (critical || estimatedDays<=30) return {key:"critical",label:"Kritis",days:estimatedDays};
     if (estimatedDays<=90) return {key:"attention",label:"Perhatian",days:estimatedDays};
