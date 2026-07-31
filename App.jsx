@@ -11,6 +11,7 @@ import { leanStocksForCache, resolveStockPhotoUrl } from "./src/lib/stockCache.j
 import { approveStockLocationMove, rejectStockLocationMove } from "./src/lib/stockLocationApproval.js";
 import { applyStockRealtimeEvent, applyStockRealtimeEvents, stockListsEqual } from "./src/lib/stockRealtime.js";
 import { isDemoMode, enterDemoMode, exitDemoMode } from "./src/lib/demo.js";
+import { normalizeKatalogCode } from "./src/lib/normalizeKatalogCode.js";
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
@@ -5092,7 +5093,36 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         historyMap[bulanKey]+=si.qty||0;
       });
     });
-    const history = Object.entries(historyMap).sort().slice(-12);
+    // Perkaya histori dengan arsip TUG-15 lama (AppSheet) — hanya baris yang no_katalog-nya
+    // (setelah normalisasi kode lama->baru) cocok dengan katalog yang sedang dianalisa.
+    // Query terpisah try/catch dari pemanggilan Groq di bawah: gagal tidak boleh
+    // menggagalkan analisa utama, cukup lanjut dengan histori live (txns) saja.
+    const liveMonthsCount = Object.keys(historyMap).length;
+    let legacyMonthsAdded = 0;
+    try {
+      const { data: legacyRows, error: legacyErr } = await supabase
+        .from("legacy_history_archive")
+        .select("tanggal, qty, no_katalog")
+        .eq("jenis_transaksi", "KELUAR")
+        .ilike("source_upt", "%Surabaya%")
+        // ponytail: no_katalog lama formatnya tidak seragam (perlu normalisasi baru bisa
+        // dibandingkan ke katalog.katalog), jadi filter kecocokan dilakukan di JS, bukan SQL.
+        // .limit sbg pengaman kalau tabel ini membesar.
+        .limit(5000);
+      if (legacyErr) throw legacyErr;
+      const targetCode = normalizeKatalogCode(katalog.katalog);
+      (legacyRows||[]).forEach(row=>{
+        if (!targetCode || normalizeKatalogCode(row.no_katalog) !== targetCode) return;
+        const tgl = new Date(row.tanggal);
+        const bulanKey = `${tgl.getFullYear()}-${String(tgl.getMonth()+1).padStart(2,"0")}`;
+        if (historyMap[bulanKey] === undefined) { historyMap[bulanKey] = 0; legacyMonthsAdded++; }
+        historyMap[bulanKey] += row.qty||0;
+      });
+    } catch (legacyError) {
+      console.error("Forecast: gagal ambil histori arsip TUG-15 lama, lanjut dengan histori live saja:", legacyError.message);
+    }
+
+    const history = Object.entries(historyMap).sort().slice(-18);
     const totalQty = stockRows.reduce((a,s)=>a+(s.qty||0),0);
     const rencana = rencanaKedatanganList
       .flatMap(r=>(r.items||[]).map(i=>({...i,noKontrak:r.noKontrak,supplier:r.supplier,tanggalSerahTerima:r.tanggalSerahTerima})))
@@ -5120,7 +5150,7 @@ Satuan: ${katalog.satuan}
 Stok saat ini: ${totalQty} ${katalog.satuan}
 Min stok: ${stockRows[0]?.minQty||0}
 
-History pemakaian per bulan (${history.length} bulan):
+History pemakaian per bulan (${history.length} bulan${legacyMonthsAdded>0?`, ${liveMonthsCount} bulan dari data live + ${legacyMonthsAdded} bulan dari arsip histori TUG-15 lama katalog cocok`:""}):
 ${history.length===0?"Belum ada data pemakaian":history.map(([b,q])=>`${b}: ${q} ${katalog.satuan}`).join('\n')}
 
 Ringkasan terhitung:
