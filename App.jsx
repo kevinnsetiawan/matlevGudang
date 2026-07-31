@@ -551,6 +551,7 @@ export default function PLNWarehouse() {
   const [forecastDetailLoading, setForecastDetailLoading] = useState(false);
   const showToastRef = useRef(null);
   const lastSyncErrorToastRef = useRef(0);
+  const lastBotSyncErrorToastRef = useRef(0);
   const maturityMigrationPromptedRef = useRef({ assessments:false, audits:false });
   // Hanya aktif setelah bootstrap untuk user ini selesai. Ref mencegah channel
   // sempat terbuka saat login ulang sebelum effect loadCloud sempat set state refresh.
@@ -1229,6 +1230,14 @@ export default function PLNWarehouse() {
           await syncWarnotoState(true);
         } catch (e) {
           console.error("Auto-sync bot WA/Telegram gagal:", e);
+          // Jangan silent — kalau gagal (mis. Fortinet intercept warnoto.com), bot bisa
+          // baca data basi berhari-hari tanpa Admin sadar. Throttle 10 menit sama seperti
+          // auto-sync Supabase lain, supaya tidak spam toast tiap 90 detik selama down.
+          const now = Date.now();
+          if (now - (lastBotSyncErrorToastRef.current||0) > 10*60*1000) {
+            lastBotSyncErrorToastRef.current = now;
+            showToastRef.current && showToastRef.current(`⚠️ Auto-sync bot WA/Telegram gagal: ${e.message}`, "error");
+          }
         }
       }, 90000);
     }
@@ -5089,6 +5098,19 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
       .flatMap(r=>(r.items||[]).map(i=>({...i,noKontrak:r.noKontrak,supplier:r.supplier,tanggalSerahTerima:r.tanggalSerahTerima})))
       .filter(i=>i.katalogId===katalog.id);
 
+    // Metrik terhitung: rata-rata, tren, estimasi habis (dipakai di prompt & fallback lokal)
+    const rataRataBulanan = history.length===0 ? 0 : history.reduce((a,[,q])=>a+q,0)/history.length;
+    let trenPersen = null, trenLabel = "data terlalu sedikit untuk tren";
+    if (history.length>=4) {
+      const mid = Math.floor(history.length/2);
+      const avgAwal = history.slice(0,mid).reduce((a,[,q])=>a+q,0)/mid;
+      const avgAkhir = history.slice(mid).reduce((a,[,q])=>a+q,0)/(history.length-mid);
+      trenPersen = avgAwal===0 ? (avgAkhir===0?0:100) : Math.round(((avgAkhir-avgAwal)/avgAwal)*100);
+      trenLabel = `${trenPersen>=0?"naik":"turun"} ${fmtNum(Math.abs(trenPersen))}%`;
+    }
+    const estimasiHari = rataRataBulanan>0 ? Math.round(totalQty/(rataRataBulanan/30)) : null;
+    const estimasiHariText = estimasiHari===null ? "tidak dapat dihitung (belum ada data pemakaian)" : `${fmtNum(estimasiHari)} hari`;
+
     const prompt = `Analisis mendalam untuk material berikut:
 
 Material: ${katalog.name}
@@ -5101,10 +5123,15 @@ Min stok: ${stockRows[0]?.minQty||0}
 History pemakaian per bulan (${history.length} bulan):
 ${history.length===0?"Belum ada data pemakaian":history.map(([b,q])=>`${b}: ${q} ${katalog.satuan}`).join('\n')}
 
+Ringkasan terhitung:
+- Rata-rata pemakaian: ${fmtNum(rataRataBulanan)} ${katalog.satuan} per bulan
+- Tren: ${trenLabel} dibanding periode sebelumnya
+- Estimasi stok habis dalam: ${estimasiHariText}
+
 Rencana kedatangan:
 ${rencana.length===0?"Tidak ada rencana kedatangan":rencana.map(r=>`- ${r.jumlah} ${r.satuan} dari ${r.supplier} (${r.tanggalSerahTerima})`).join('\n')}
 
-Berikan analisis forecast dalam format:
+Gunakan angka-angka pada "Ringkasan terhitung" di atas apa adanya (jangan menghitung ulang rata-rata/tren dari history mentah). Berikan analisis forecast dalam format:
 
 📊 DATA
 [ringkasan data pemakaian, rata-rata, tren]
@@ -5119,16 +5146,36 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
     try {
       const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
+      if (!groqKey) throw new Error("Konfigurasi layanan AI belum tersedia.");
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
         body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:1200,messages:[{role:"user",content:prompt}]})
       });
       const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
       const result = data.choices?.[0]?.message?.content||"Tidak ada hasil.";
       setForecastDetailResult(result);
-    } catch {
-      setForecastDetailResult("❌ Gagal koneksi ke AI.");
+    } catch (error) {
+      console.error("Forecast drill-down beralih ke mode data lokal:", error.message);
+      const rekomendasi = estimasiHari===null
+        ? "pantau berkala, belum mendesak (belum ada data pemakaian untuk dihitung)"
+        : estimasiHari<30 ? "pengadaan mendesak"
+        : estimasiHari<=90 ? "mulai proses pengadaan"
+        : "pantau berkala, belum mendesak";
+      setForecastDetailResult(`Layanan AI sedang tidak tersedia, jadi ringkasan berikut dihitung langsung dari data WARNOTO (tanpa AI).
+
+📊 DATA
+- Stok saat ini: ${fmtNum(totalQty)} ${katalog.satuan}
+- Rata-rata pemakaian: ${fmtNum(rataRataBulanan)} ${katalog.satuan} per bulan (${history.length} bulan data)
+- Tren: ${trenLabel}
+
+🔍 ANALISIS
+- Estimasi stok habis dalam: ${estimasiHariText}
+- Rencana kedatangan: ${rencana.length===0?"tidak ada":rencana.map(r=>`${fmtNum(r.jumlah)} ${r.satuan} dari ${r.supplier} (${r.tanggalSerahTerima})`).join(', ')}
+
+💡 REKOMENDASI
+- ${rekomendasi}`);
     }
     setForecastDetailLoading(false);
   }

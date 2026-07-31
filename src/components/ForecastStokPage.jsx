@@ -179,7 +179,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
                 </div>
                 <div className="forecast-sparkline"><span>Tren prediksi 30 hari</span><Sparkline data={ml.series} color="#7c3aed" w={300} h={58}/></div>
                 <small className="forecast-model-update">Pembaruan terakhir {fmtDate(new Date(ml.updatedAt).getTime())}</small>
-              </> : <div className="forecast-analysis-empty">Minimal 10 transaksi keluar diperlukan sebelum prediksi ML tersedia.</div>}
+              </> : <div className="forecast-analysis-empty">Minimal 5 transaksi keluar diperlukan sebelum prediksi ML tersedia.</div>}
             </div>
           </section>
         </div>
