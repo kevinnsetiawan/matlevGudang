@@ -16,7 +16,7 @@ const HISTORY_STATUS_LABEL = {
 
 export function MaturityDashboardTab({
   C, sty, currentUser, isMobile, hasRole,
-  maturityAudits, maturityAuditHistory = [], selectedMaturityUpt, setSelectedMaturityUpt, canSwitchMaturityUpt,
+  maturityAudits, maturityAuditHistory = [], maturity5SAssessments = [], selectedMaturityUpt, setSelectedMaturityUpt, canSwitchMaturityUpt,
   maturitySubTab, setMaturitySubTab,
   maturityAuditModal, setMaturityAuditModal,
   auditListPage, setAuditListPage,
@@ -26,7 +26,7 @@ export function MaturityDashboardTab({
   activeAspectId, setActiveAspectId,
   aspectPage, setAspectPage,
   maturityAuditSaving,
-  saveMaturityAudit, deleteMaturityAudit, createMaturityAudit, openMaturityAudit, exportMaturityAuditExcel,
+  saveMaturityAudit, saveMaturity5SAssessment, deleteMaturityAudit, createMaturityAudit, openMaturityAudit, exportMaturityAuditExcel,
   calculateItemLevel, calcMaturityScore,
   gudangList, askConfirmDelete,
   MATURITY_LEVELS, MATURITY_WORKFLOW_LABEL, MATURITY_WORKFLOW_COLOR,
@@ -664,6 +664,7 @@ export function MaturityDashboardTab({
               {/*  FORM PENGISIAN 5S  */}
               {maturitySubTab === "5s" && (
                 <Form5STab C={C} sty={sty} currentUser={currentUser} gudangList={gudangList}
+                  maturity5SAssessments={maturity5SAssessments} saveMaturity5SAssessment={saveMaturity5SAssessment}
                   setMaturityAuditEvidence={setMaturityAuditEvidence} isMobile={isMobile} selectedUpt={selectedMaturityUpt}
                   askConfirmDelete={askConfirmDelete} />
               )}

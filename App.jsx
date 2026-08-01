@@ -25,7 +25,7 @@ import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, at
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
 import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
-import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
+import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, insertMaturity5SAssessment, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -291,6 +291,7 @@ export default function PLNWarehouse() {
   const [maturityAssessments, setMaturityAssessments] = useState(() => readCachedList("pln_maturity_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [maturityAudits, setMaturityAudits] = useState(() => readCachedList("pln_maturity_audits_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory()); // cache/fallback read-only; DB adalah canonical
+  const [maturity5SAssessments, setMaturity5SAssessments] = useState(() => readCachedList("pln_maturity_5s_assessments_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
   const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
   const [attbList, setAttbList] = useState(() => readCachedList("pln_attb_v1") ?? []);
@@ -580,10 +581,10 @@ export default function PLNWarehouse() {
       const loadFailures = [];
       // Semua cache dibaca paralel. Pada browser dengan window.storage asinkron ini
       // menghilangkan waterfall sebelum request REST bahkan dimulai.
-      const [cs, ckat, clokLocal, ct, cseq, crk, copn, csc, cah, cma, cmau, cmah, che, chel, cattb, cmcd, cmch, cmcai, cgcap, cgcapi, cmig, cmpr] = await Promise.all([
+      const [cs, ckat, clokLocal, ct, cseq, crk, copn, csc, cah, cma, cmau, cmah, cm5s, che, chel, cattb, cmcd, cmch, cmcai, cgcap, cgcapi, cmig, cmpr] = await Promise.all([
         CLOUD.get("pln_stocks_v4"), CLOUD.get("pln_katalog_v4"), CLOUD.get("pln_lokasi_v4"), CLOUD.get("pln_txns_v3"), CLOUD.get("pln_docseq_v3"),
         CLOUD.get("pln_rencana_v1"), CLOUD.get("pln_opname_v1"), CLOUD.get("pln_stockcount_v1"), CLOUD.get("pln_approval_history_v1"), CLOUD.get("pln_maturity_v1"),
-        CLOUD.get("pln_maturity_audits_v1"), CLOUD.get("pln_maturity_audit_history_v1"), CLOUD.get("pln_heavy_equipment_v1"), CLOUD.get("pln_heavy_equipment_loans_v1"), CLOUD.get("pln_attb_v1"),
+        CLOUD.get("pln_maturity_audits_v1"), CLOUD.get("pln_maturity_audit_history_v1"), CLOUD.get("pln_maturity_5s_assessments_v1"), CLOUD.get("pln_heavy_equipment_v1"), CLOUD.get("pln_heavy_equipment_loans_v1"), CLOUD.get("pln_attb_v1"),
         CLOUD.get("pln_material_cadang_v1"), CLOUD.get("pln_material_cadang_health_v1"), CLOUD.get("pln_material_cadang_ai_insights_v1"),
         CLOUD.get("pln_gudang_capacity_v1"), CLOUD.get("pln_gudang_capacity_imports_v1"), CLOUD.get("pln_migrated_tug15_v1"), CLOUD.get("pln_migrasi_pending_review_v1"),
       ]);
@@ -611,7 +612,7 @@ export default function PLNWarehouse() {
         loadMasterTable("attb_list"),
       ];
       // Maturity punya tabel typed khusus; jangan lewat masterSync/blob warnoto_state.
-      const maturityLoads = [loadMaturityAssessments(), loadMaturityAudits(), loadMaturityAuditHistory()];
+      const maturityLoads = [loadMaturityAssessments(), loadMaturityAudits(), loadMaturityAuditHistory(), loadMaturity5SAssessments()];
 
       // Hanya tiga dataset ini diperlukan untuk layar kerja pertama. Request
       // non-kritis tetap berjalan paralel dan diproses dengan invariant null/
@@ -622,7 +623,7 @@ export default function PLNWarehouse() {
       if (initialStocks !== null) setStocks(initialStocks?.length ? dedupeById(initialStocks).list : (cs || DEFAULT_STOCKS));
       setLoading(false);
 
-      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote, cmahRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
+      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote, cmahRemote, cm5sRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
 
       if (cs && ckat && clok) {
@@ -861,6 +862,15 @@ export default function PLNWarehouse() {
         setMaturityAuditHistory(cmahRemote);
         CLOUD.set("pln_maturity_audit_history_v1", cmahRemote);
       }
+      // Form 5S mengikuti aturan yang sama: remote yang berhasil (termasuk
+      // kosong) adalah canonical; cache hanya ditampilkan ketika load gagal.
+      if (cm5sRemote === null) {
+        setMaturity5SAssessments(cm5s || []);
+        loadFailures.push("Form 5S");
+      } else {
+        setMaturity5SAssessments(cm5sRemote);
+        CLOUD.set("pln_maturity_5s_assessments_v1", cm5sRemote);
+      }
       if (maturityMigrationCandidates.length > 0) {
         const migrationSummary = maturityMigrationCandidates.map(item => `${item.cached.length} ${item.label}`).join(" dan ");
         askConfirmDelete({
@@ -998,7 +1008,7 @@ export default function PLNWarehouse() {
   // to the latest React state via stateRef (always up to date, avoids stale
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
-  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
+  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
 
   // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
   // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
@@ -1833,6 +1843,82 @@ export default function PLNWarehouse() {
 
   // ─── Penilaian Maturity — audit berjenjang (UPT → UIT → Pusat) ─────────
   // Skor per-aspek: dari rasio bukti ter-upload, atau override manual UIT/Pusat.
+  // Form 5S bersifat append-only supaya audit ulang pada periode yang sama
+  // tetap mempunyai jejak tersendiri. State/cache baru diperbarui setelah
+  // INSERT self-host berhasil, bukan ketika pengguna hanya menekan tombol.
+  async function saveMaturity5SAssessment(form) {
+    const entry = {
+      ...form,
+      id: `M5S-${uid().slice(-10)}`,
+      upt: form.upt || selectedMaturityUpt || "UPT Surabaya",
+      createdAt: Date.now(),
+      createdBy: currentUser?.id || null,
+    };
+    const saved = await insertMaturity5SAssessment(entry);
+    if (!saved) {
+      showToast("Checklist 5S belum tersimpan karena server tidak dapat dihubungi.", "error");
+      return null;
+    }
+    setMaturity5SAssessments(current => {
+      const next = [saved, ...current.filter(item => item.id !== saved.id)];
+      CLOUD.set("pln_maturity_5s_assessments_v1", next);
+      return next;
+    });
+    logAudit(currentUser, "CREATE", "maturity_5s_assessment", saved.id, {
+      upt: saved.upt, gudang: saved.gudangNama, tahun: saved.tahun,
+      bulan: saved.bulan, scorePercent: saved.scorePercent,
+    });
+    return saved;
+  }
+
+  function getCurrentMonth5SEvidence(upt) {
+    const nowD = new Date();
+    const latest = maturity5SAssessments
+      .filter(item => (item.upt || "UPT Surabaya") === (upt || selectedMaturityUpt || "UPT Surabaya")
+        && item.tahun === nowD.getFullYear() && item.bulan === nowD.getMonth() + 1)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    if (!latest) return [];
+    const savedAt = latest.createdAt || Date.now();
+    const timestamp = new Date(savedAt).toLocaleString("id-ID");
+    const user = latest.auditor || "Pengguna";
+    const checklistEvidence = {
+      id: "k3_5s_chk",
+      name: `Checklist 5S — ${latest.gudangNama || "Gudang"}, ${latest.bulan}/${latest.tahun} (${Number(latest.scorePercent || 0).toFixed(1)}%)`,
+      url: `#form-5s-history-${latest.id}`,
+      size: 0,
+      auto: true,
+      source: "Form Pengisian 5S",
+      assessment5SId: latest.id,
+      meta: `Diisi oleh: ${user} | Skor: ${Number(latest.scorePercent || 0).toFixed(2)}% (${latest.totalChecked}/${latest.totalItems}) | Disimpan: ${timestamp}`,
+      savedAt,
+    };
+    const photos = (latest.samplePhotos || []).map((photo, index) => ({
+      id: "k3_5s_foto",
+      name: `Foto Sampling 5S ${index + 1} — ${photo.name || "Foto"}`,
+      url: photo.url,
+      size: photo.size || 0,
+      auto: true,
+      source: "Form Pengisian 5S",
+      assessment5SId: latest.id,
+      meta: `Referensi Form 5S: ${latest.id} | Disimpan: ${timestamp}`,
+    }));
+    return [checklistEvidence, ...photos];
+  }
+
+  function mergeCurrentMonth5SEvidence(evidence, upt) {
+    const existing = Object.entries(evidence || {}).reduce((next, [aspectId, files]) => {
+      next[aspectId] = Array.isArray(files) ? [...files] : [];
+      return next;
+    }, {});
+    const current5S = getCurrentMonth5SEvidence(upt);
+    if (!current5S.length) return existing;
+    // Bukti otomatis 5S mewakili rekam periode berjalan yang paling baru;
+    // bukti manual 4.5 tetap utuh. Ini mencegah skor maturity menghitung
+    // beberapa Form 5S sebagai evidence yang berbeda.
+    const nonCurrent5S = (existing["4.5"] || []).filter(file => file?.source !== "Form Pengisian 5S");
+    return { ...existing, "4.5": [...current5S, ...nonCurrent5S] };
+  }
+
   function calculateItemLevel(uploadedCount, totalRequired) {
     if (uploadedCount === 0) return 1;
     if (uploadedCount === totalRequired) return 5;
@@ -1856,7 +1942,7 @@ export default function PLNWarehouse() {
     const scores = {};
     AUDIT_ASPECTS.forEach(a => { scores[a.id] = { upt:0, uit:0, pusat:0 }; });
     setMaturityAuditForm({ aspekScores: scores, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
-    setMaturityAuditEvidence({});
+    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence({}, selectedMaturityUpt));
     setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
     setActiveAspectId(null);
     setAspectPage(1);
@@ -1865,7 +1951,7 @@ export default function PLNWarehouse() {
   }
   function openMaturityAudit(audit) {
     setMaturityAuditForm({ aspekScores: JSON.parse(JSON.stringify(audit.aspekScores || {})), catatanUPT: audit.catatanUPT || "", catatanUIT: audit.catatanUIT || "", catatanPusat: audit.catatanPusat || "", fileUrl: audit.fileUrl || "", fileNama: audit.fileNama || "" });
-    setMaturityAuditEvidence(JSON.parse(JSON.stringify(audit.evidence || {})));
+    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence(JSON.parse(JSON.stringify(audit.evidence || {})), audit.upt));
     setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
     setActiveAspectId(null);
     setAspectPage(1);
@@ -5700,6 +5786,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               hasRole={hasRole}
               maturityAudits={maturityAudits}
               maturityAuditHistory={maturityAuditHistory}
+              maturity5SAssessments={maturity5SAssessments}
               selectedMaturityUpt={selectedMaturityUpt}
               setSelectedMaturityUpt={setSelectedMaturityUpt}
               canSwitchMaturityUpt={canSwitchMaturityUpt}
@@ -5713,6 +5800,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               setMaturityAuditForm={setMaturityAuditForm}
               maturityAuditEvidence={maturityAuditEvidence}
               setMaturityAuditEvidence={setMaturityAuditEvidence}
+              saveMaturity5SAssessment={saveMaturity5SAssessment}
               expandedAspek={expandedAspek}
               setExpandedAspek={setExpandedAspek}
               activeAspectId={activeAspectId}

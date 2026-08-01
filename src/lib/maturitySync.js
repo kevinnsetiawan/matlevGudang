@@ -75,6 +75,26 @@ function auditHistoryRowToItem(row) {
   };
 }
 
+function maturity5SRowToItem(row) {
+  return {
+    id: row.id,
+    upt: row.upt || "UPT Surabaya",
+    gudangId: row.gudang_id || "",
+    gudangNama: row.gudang_nama || "",
+    bulan: Number(row.bulan),
+    tahun: Number(row.tahun),
+    auditor: row.auditor || "",
+    checklist: Array.isArray(row.checklist) ? row.checklist : [],
+    samplePhotos: Array.isArray(row.sample_photos) ? row.sample_photos : [],
+    totalItems: Number(row.total_items) || 0,
+    totalChecked: Number(row.total_checked) || 0,
+    scorePercent: Number(row.score_percent) || 0,
+    catatan: row.catatan || "",
+    createdAt: asEpoch(row.created_at),
+    createdBy: row.created_by ?? null,
+  };
+}
+
 function assessmentItemToRow(item) {
   return {
     id: item.id,
@@ -102,6 +122,26 @@ function auditItemToRow(item) {
     status,
     level: Math.min(5, Math.max(1, Number(item.level) || 1)),
     updated_by: asOptionalUuid(item.updatedBy),
+  };
+}
+
+function maturity5SItemToRow(item) {
+  return {
+    id: item.id,
+    upt: item.upt || "UPT Surabaya",
+    gudang_id: item.gudangId || null,
+    gudang_nama: item.gudangNama || "",
+    bulan: Math.min(12, Math.max(1, Number(item.bulan) || 1)),
+    tahun: Math.min(2100, Math.max(2000, Number(item.tahun) || new Date().getFullYear())),
+    auditor: item.auditor || "",
+    checklist: Array.isArray(item.checklist) ? item.checklist : [],
+    sample_photos: Array.isArray(item.samplePhotos) ? item.samplePhotos.filter(photo => !isBinaryUrl(photo?.url)) : [],
+    total_items: Math.max(0, Number(item.totalItems) || 0),
+    total_checked: Math.max(0, Number(item.totalChecked) || 0),
+    score_percent: Math.min(100, Math.max(0, Number(item.scorePercent) || 0)),
+    catatan: item.catatan || "",
+    created_at: asEpoch(item.createdAt, Date.now()),
+    created_by: asOptionalUuid(item.createdBy),
   };
 }
 
@@ -148,12 +188,27 @@ async function deleteRow(table, id) {
   return true;
 }
 
+async function insertRow(table, row, mapRow) {
+  if (isDemoMode()) return mapRow(row);
+  if (!supabase) return null;
+  const { data, error } = await supabase.from(table).insert(row).select().single();
+  if (error) {
+    console.error(`insert ${table}: ${error.message}`, error);
+    return null;
+  }
+  return mapRow(data);
+}
+
 export const loadMaturityAssessments = () => loadRows("maturity_assessments", assessmentRowToItem);
 export const loadMaturityAudits = () => loadRows("maturity_audits", auditRowToItem);
 export const loadMaturityAuditHistory = () => loadRows("maturity_audit_history", auditHistoryRowToItem);
+export const loadMaturity5SAssessments = () => loadRows("maturity_5s_assessments", maturity5SRowToItem);
 export const upsertMaturityAssessment = item => upsertRow("maturity_assessments", assessmentItemToRow(item));
 export const upsertMaturityAudit = item => upsertRow("maturity_audits", auditItemToRow(item));
 export const upsertMaturityAssessments = items => upsertRows("maturity_assessments", items.map(assessmentItemToRow));
 export const upsertMaturityAudits = items => upsertRows("maturity_audits", items.map(auditItemToRow));
 export const deleteMaturityAssessment = id => deleteRow("maturity_assessments", id);
 export const deleteMaturityAuditRow = id => deleteRow("maturity_audits", id);
+// Form 5S adalah riwayat append-only: gunakan insert, bukan upsert, agar
+// inspeksi berulang pada periode yang sama tetap dapat diaudit.
+export const insertMaturity5SAssessment = item => insertRow("maturity_5s_assessments", maturity5SItemToRow(item), maturity5SRowToItem);

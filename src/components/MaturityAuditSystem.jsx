@@ -992,7 +992,99 @@ const SUBHDR_BG = "#f8fafc";
 const ROW_ALT = "#f8fafc";
 const BORDER_CLR = "#e2e8f0";
 
-export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAuditEvidence, onBack, isMobile, selectedUpt, askConfirmDelete }) {
+function build5SChecklistSnapshot(checks) {
+  return FORM_5S.map(category => ({
+    id: category.id,
+    label: category.label,
+    definition: category.definition,
+    indicators: category.indicators.map((label, index) => ({ label, checked: Boolean(checks[category.id]?.[index]) })),
+  }));
+}
+
+function format5SDate(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function Form5SHistory({ C, sty, isMobile, assessments, selectedUpt, gudangList }) {
+  const [gudangFilter, setGudangFilter] = useState("");
+  const [tahunFilter, setTahunFilter] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
+  const scoped = (assessments || []).filter(item => (item.upt || "UPT Surabaya") === (selectedUpt || "UPT Surabaya"));
+  const years = [...new Set(scoped.map(item => item.tahun).filter(Boolean))].sort((a, b) => b - a);
+  const history = scoped
+    .filter(item => !gudangFilter || item.gudangId === gudangFilter)
+    .filter(item => !tahunFilter || String(item.tahun) === tahunFilter)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const selected = history.find(item => item.id === selectedId) || history[0] || null;
+
+  return (
+    <div>
+      <div style={{ ...sty.card, marginBottom: 18 }}>
+        <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginBottom: 5 }}>History Audit 5S</div>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 14 }}>Riwayat disimpan permanen dan tidak mengubah hasil audit maturity semester.</div>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 260px))", gap: 12 }}>
+          <div>
+            <label style={sty.label}>Filter Gudang</label>
+            <select style={sty.select} value={gudangFilter} onChange={event => { setGudangFilter(event.target.value); setSelectedId(null); }}>
+              <option value="">Semua Gudang</option>
+              {gudangList.map(gudang => <option key={gudang.id} value={gudang.id}>{gudang.nama}{gudang.kode ? ` (${gudang.kode})` : ""}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={sty.label}>Filter Tahun</label>
+            <select style={sty.select} value={tahunFilter} onChange={event => { setTahunFilter(event.target.value); setSelectedId(null); }}>
+              <option value="">Semua Tahun</option>
+              {years.map(year => <option key={year} value={year}>{year}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {history.length === 0 ? (
+        <div style={{ ...sty.card, textAlign: "center", padding: "36px 20px", color: C.muted }}>
+          Belum ada hasil Form 5S untuk filter ini.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(260px, .75fr) minmax(0, 1.25fr)", gap: 18, alignItems: "start" }}>
+          <div style={{ ...sty.card, padding: 8 }}>
+            {history.map(item => {
+              const active = selected?.id === item.id;
+              return <button key={item.id} onClick={() => setSelectedId(item.id)} style={{ width: "100%", textAlign: "left", padding: "12px", marginBottom: 5, borderRadius: 9, border: `1px solid ${active ? C.accent : C.border}`, background: active ? "#eff6ff" : C.surface, color: C.text, cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontWeight: 850 }}><span>{MONTH_LABELS[(item.bulan || 1) - 1]} {item.tahun}</span><span style={{ color: Number(item.scorePercent) >= 80 ? C.green : C.accent }}>{Number(item.scorePercent || 0).toFixed(1)}%</span></div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 5 }}>{item.gudangNama || "Gudang belum diisi"} · {item.auditor || "Auditor belum diisi"}</div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{format5SDate(item.createdAt)}</div>
+              </button>;
+            })}
+          </div>
+          {selected && <div id={`form-5s-history-${selected.id}`} style={{ ...sty.card }}>
+            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 10, marginBottom: 15 }}>
+              <div><div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>Detail Audit 5S</div><div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>{MONTH_LABELS[(selected.bulan || 1) - 1]} {selected.tahun} · {selected.gudangNama || "—"}</div></div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: Number(selected.scorePercent) >= 80 ? C.green : C.accent }}>{Number(selected.scorePercent || 0).toFixed(2)}%</div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 9, fontSize: 13, marginBottom: 16 }}>
+              <div><strong>Auditor:</strong> {selected.auditor || "—"}</div><div><strong>Diisi:</strong> {format5SDate(selected.createdAt)}</div>
+              <div><strong>UPT:</strong> {selected.upt || "—"}</div><div><strong>Indikator:</strong> {selected.totalChecked}/{selected.totalItems}</div>
+              <div style={{ gridColumn: isMobile ? undefined : "1 / -1", wordBreak: "break-all" }}><strong>ID rekam:</strong> {selected.id}</div>
+            </div>
+            {(selected.checklist || []).map(category => <details key={category.id} open style={{ borderTop: `1px solid ${C.border}`, padding: "11px 0" }}>
+              <summary style={{ cursor: "pointer", color: C.text, fontWeight: 850 }}>{category.label.replace("\n", " ")} — {(category.indicators || []).filter(indicator => indicator.checked).length}/{(category.indicators || []).length}</summary>
+              <div style={{ color: C.muted, fontSize: 12, fontStyle: "italic", margin: "7px 0" }}>{category.definition}</div>
+              {(category.indicators || []).map((indicator, index) => <div key={index} style={{ display: "flex", gap: 8, padding: "5px 0", color: C.text, fontSize: 13 }}><span aria-hidden="true" style={{ color: indicator.checked ? C.green : C.muted, fontWeight: 900 }}>{indicator.checked ? "✓" : "○"}</span><span>{indicator.label}</span></div>)}
+            </details>)}
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 3, fontSize: 13, whiteSpace: "pre-wrap", color: C.text }}><strong>Catatan / Temuan</strong><br />{selected.catatan || "Tidak ada catatan."}</div>
+            <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 12, color: C.text, fontSize: 13 }}>
+              <strong>Sampling Foto</strong><br />
+              {(selected.samplePhotos || []).length === 0 ? "Tidak ada foto sampling." : (selected.samplePhotos || []).map((photo, index) => <a key={`${photo.url}-${index}`} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 7, marginRight: 10, color: C.accent }}>Foto {index + 1}: {photo.name || "Buka foto"}</a>)}
+            </div>
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAssessments = [], saveMaturity5SAssessment, setMaturityAuditEvidence, onBack, isMobile, selectedUpt, askConfirmDelete }) {
   const now = new Date();
   const [bulan, setBulan] = useState(now.getMonth());
   const [tahun, setTahun] = useState(now.getFullYear());
@@ -1000,6 +1092,9 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
   const [auditor, setAuditor] = useState(currentUser?.name || "");
   const [catatan, setCatatan] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [form5SSubTab, setForm5SSubTab] = useState("entry");
   const [uploading5S, setUploading5S] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState("");
 
@@ -1059,38 +1154,66 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
 
   const handleReset = () => { setChecks(initChecks()); setSamplePhotos([]); setSaved(false); };
 
-  const handleSave = () => {
+  const handlePersist = async () => {
+    if (!saveMaturity5SAssessment) {
+      setSaveError("Penyimpanan Form 5S belum tersedia.");
+      return;
+    }
+    const selectedGudang = gudangList.find(item => item.id === gudang);
+    if (!gudang.trim() || !auditor.trim() || !Number.isInteger(tahun) || tahun < 2000 || tahun > 2100) {
+      setSaveError("Lengkapi gudang, nama auditor, dan tahun 2000–2100 sebelum menyimpan.");
+      return;
+    }
+    const record = {
+      upt: selectedUpt || "UPT Surabaya",
+      gudangId: selectedGudang ? selectedGudang.id : null,
+      gudangNama: selectedGudang ? selectedGudang.nama : gudang.trim(),
+      bulan: bulan + 1,
+      tahun,
+      auditor: auditor.trim(),
+      checklist: build5SChecklistSnapshot(checks),
+      samplePhotos,
+      totalItems,
+      totalChecked,
+      scorePercent: Number(scorePct.toFixed(2)),
+      catatan: catatan.trim(),
+    };
+    setSaving(true);
+    setSaveError("");
+    const savedRecord = await saveMaturity5SAssessment(record);
+    setSaving(false);
+    if (!savedRecord) {
+      setSaveError("Checklist belum tersimpan. Periksa koneksi lalu coba lagi; isian form tetap dipertahankan.");
+      return;
+    }
     setSaved(true);
     if (setMaturityAuditEvidence) {
-      const ts = new Date().toLocaleString("id-ID");
-      const user = currentUser?.name || currentUser?.username || "Pengguna";
-
+      const ts = new Date(savedRecord.createdAt).toLocaleString("id-ID");
+      const user = savedRecord.auditor || currentUser?.name || currentUser?.username || "Pengguna";
       const chkEntry = {
         id: "k3_5s_chk",
         name: `Checklist 5S — ${MONTH_LABELS[bulan]} ${tahun} (${scorePct.toFixed(1)}%)`,
-        url: "#form-5s",
+        url: `#form-5s-history-${savedRecord.id}`,
         size: 0,
         auto: true,
         source: "Form Pengisian 5S",
+        assessment5SId: savedRecord.id,
         meta: `Diisi oleh: ${user} | Skor: ${scorePct.toFixed(2)}% (${totalChecked}/${totalItems}) | Disimpan: ${ts}`,
-        savedAt: Date.now(),
+        savedAt: savedRecord.createdAt,
       };
-
-      const fotoEntries = samplePhotos.map((p, i) => ({
+      const fotoEntries = samplePhotos.map((photo, index) => ({
         id: "k3_5s_foto",
-        name: `Foto Sampling 5S ${i + 1} — ${p.name}`,
-        url: p.url,
-        size: p.size,
+        name: `Foto Sampling 5S ${index + 1} — ${photo.name}`,
+        url: photo.url,
+        size: photo.size,
         auto: true,
         source: "Form Pengisian 5S",
+        assessment5SId: savedRecord.id,
         meta: `Upload oleh: ${user} | Disimpan: ${ts}`,
       }));
-
-      setMaturityAuditEvidence(prev => {
-        const existing = (prev["4.5"] || []).filter(
-          f => f.id !== "k3_5s_chk" && f.id !== "k3_5s_foto"
-        );
-        return { ...prev, "4.5": [chkEntry, ...fotoEntries, ...existing] };
+      setMaturityAuditEvidence(previous => {
+        const existing = (previous["4.5"] || []).filter(file => file.id !== "k3_5s_chk" && file.id !== "k3_5s_foto");
+        return { ...previous, "4.5": [chkEntry, ...fotoEntries, ...existing] };
       });
     }
     setTimeout(() => setSaved(false), 4000);
@@ -1129,6 +1252,14 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
       )}
 
       {/* ── Metadata ── */}
+      <div style={{ display: "flex", gap: 6, padding: 5, marginBottom: 18, border: `1px solid ${C.border}`, borderRadius: 10, background: C.bg, flexWrap: "wrap" }}>
+        <button onClick={() => setForm5SSubTab("entry")} style={{ border: 0, borderRadius: 7, padding: "9px 13px", cursor: "pointer", fontWeight: 800, background: form5SSubTab === "entry" ? C.accent : "transparent", color: form5SSubTab === "entry" ? "white" : C.text }}>Pengisian 5S</button>
+        <button onClick={() => setForm5SSubTab("history")} style={{ border: 0, borderRadius: 7, padding: "9px 13px", cursor: "pointer", fontWeight: 800, background: form5SSubTab === "history" ? C.accent : "transparent", color: form5SSubTab === "history" ? "white" : C.text }}>History Audit 5S</button>
+      </div>
+
+      {form5SSubTab === "history" ? (
+        <Form5SHistory C={C} sty={sty} isMobile={isMobile} assessments={maturity5SAssessments} selectedUpt={selectedUpt} gudangList={gudangList} />
+      ) : <>
       <div style={{ ...sty.card, marginBottom: 20 }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 14 }}>
           Data Pengisian
@@ -1505,6 +1636,11 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
       )}
 
       {/* ── Success banner ── */}
+      {saveError && (
+        <div role="alert" style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 700 }}>
+          {saveError}
+        </div>
+      )}
       {saved && (
         <div style={{
           display: "flex", alignItems: "center", gap: 10,
@@ -1514,7 +1650,7 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
         }}>
           <div style={{ fontSize: 20 }}>✅</div>
           <div style={{ fontSize: 13.5, color: "#064e3b", lineHeight: 1.55 }}>
-            <strong>Checklist 5S berhasil disimpan!</strong><br />
+            <strong>Checklist 5S tersimpan di database dan masuk History Audit 5S.</strong><br />
             Poin <strong>4.5 › Evidence 1 — Hasil Checklist Form 5S</strong> telah otomatis
             ditandai selesai. Buka tab <em>Pelaksanaan Audit</em> untuk melihat hasilnya.
           </div>
@@ -1535,14 +1671,15 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], setMaturityAud
             title: "Simpan Checklist 5S?",
             message: `Skor checklist saat ini: ${scorePct.toFixed(1)}% (${totalChecked}/${totalItems} indikator). Yakin ingin menyimpan?`,
             confirmLabel: "Ya, Simpan",
-            onConfirm: handleSave,
-          }) : handleSave())}
-          disabled={saved}
+            onConfirm: handlePersist,
+          }) : handlePersist())}
+          disabled={saved || saving}
           style={saved ? { background: "#10b981", borderColor: "#10b981", boxShadow: "none", cursor: "default" } : undefined}
         >
-          {saved ? "✓ Tersimpan!" : "💾 Simpan Checklist"}
+          {saving ? "Menyimpan..." : saved ? "✓ Tersimpan!" : "💾 Simpan Checklist"}
         </button>
       </div>
+      </>}
     </div>
   );
 }

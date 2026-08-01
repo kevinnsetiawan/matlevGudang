@@ -186,4 +186,19 @@ test.describe("WARNOTO desktop preservation smoke", () => {
     await expect(page.locator('input[type="file"]:not(:disabled)')).toHaveCount(0);
     await expect(page.getByText("Upload bukti sementara nonaktif", { exact:true }).first()).toBeVisible();
   });
+
+  test("Form 5S exposes an empty persistent-history view without a database fixture", async ({ isolatedPage:page }) => {
+    await openApp(page);
+    await openRoute(page, {
+      tab:"maturity",
+      menuPath:["Penilaian Maturity"],
+      readySelector:'.app-shell[data-current-tab="maturity"]',
+    });
+
+    await page.getByRole("button", { name:"Form Pengisian 5S", exact:true }).click();
+    await expect(page.getByRole("button", { name:"Pengisian 5S", exact:true })).toBeVisible();
+    await page.getByRole("button", { name:"History Audit 5S", exact:true }).click();
+    await expect(page.getByText("History Audit 5S", { exact:true }).last()).toBeVisible();
+    await expect(page.getByText("Belum ada hasil Form 5S untuk filter ini.", { exact:true })).toBeVisible();
+  });
 });
