@@ -1,236 +1,97 @@
-// Komponen PetaGudangTab — dipindah dari App.jsx (refactor Fase 5a).
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fmtDate } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 
-export function PetaGudangTab({ gudangList, subGudangList, lokasiList, stocks, sty, C, currentUser, gudangCapacityList }) {
-  const [selectedGudangId, setSelectedGudangId] = useState(gudangList[0]?.id||"");
+const norm = value => String(value ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+const num = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+const mapPercent = value => {
+  if (value == null || String(value).trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+};
+export function PetaGudangTab({ gudangList = [], subGudangList = [], lokasiList = [], stocks = [], sty, C, gudangCapacityList = [] }) {
+  const [selectedGudangId, setSelectedGudangId] = useState(gudangList[0]?.id || "");
+  const [selectedScopeId, setSelectedScopeId] = useState("main");
   const [hoveredLokasi, setHoveredLokasi] = useState(null);
   const [filterHanyaBerisi, setFilterHanyaBerisi] = useState(false);
 
-  // gudangList dimuat async dari Supabase — kalau saat mount masih kosong,
-  // selectedGudangId ke-stuck di "" dan peta tidak pernah tampil walau data sudah ada.
-  // Kalau belum ada pilihan valid, prioritaskan Gudang yang sudah punya konten (denah sendiri
-  // atau denah Sub Gudang) — supaya user tidak mendarat di gudang kosong lalu mengira peta belum tampil.
   useEffect(() => {
-    const stillValid = gudangList.some(g=>g.id===selectedGudangId);
-    if (selectedGudangId && stillValid) return;
-    if (gudangList.length === 0) return;
-    const withContent = gudangList.find(g => g.denahImageData || subGudangList.some(sg=>sg.gudangId===g.id && sg.denahImageData));
+    if (!gudangList.length) return;
+    if (gudangList.some(g => g.id === selectedGudangId)) return;
+    const withContent = gudangList.find(g => g.denahImageData || subGudangList.some(s => s.gudangId === g.id && s.denahImageData));
     setSelectedGudangId((withContent || gudangList[0]).id);
   }, [gudangList, subGudangList, selectedGudangId]);
 
-  const gudang = gudangList.find(g=>g.id===selectedGudangId);
-  const blokDiGudang = lokasiList.filter(l=>l.gudangId===selectedGudangId && l.mapX!=null);
+  const gudang = gudangList.find(g => g.id === selectedGudangId);
+  const subs = useMemo(() => subGudangList.filter(s => s.gudangId === selectedGudangId), [subGudangList, selectedGudangId]);
+  const mappedSubs = useMemo(() => subs.filter(s => s.denahImageData), [subs]);
+  useEffect(() => {
+    if (selectedScopeId !== "main" && !mappedSubs.some(s => s.id === selectedScopeId)) setSelectedScopeId("main");
+  }, [selectedScopeId, mappedSubs]);
+  const selectedSub = mappedSubs.find(s => s.id === selectedScopeId);
+  const scope = useMemo(() => selectedSub ? { id: selectedSub.id, name: selectedSub.nama, image: selectedSub.denahImageData, isSub: true } : gudang ? { id: gudang.id, name: gudang.nama, image: gudang.denahImageData, isSub: false } : null, [selectedSub, gudang]);
+  const blocks = scope ? lokasiList.filter(l => {
+    if (scope.isSub) return l.subGudangId === scope.id && mapPercent(l.subMapX) != null && mapPercent(l.subMapY) != null;
+    return l.gudangId === scope.id && !l.subGudangId && mapPercent(l.mapX) != null && mapPercent(l.mapY) != null;
+  }) : [];
+  const stockAt = id => stocks.filter(s => s.lokasiId === id);
+  const visibleBlocks = filterHanyaBerisi ? blocks.filter(l => stockAt(l.id).length) : blocks;
 
-  function stokDiBlok(lokasiId) {
-    return stocks.filter(s=>s.lokasiId===lokasiId);
-  }
+  const capacity = useMemo(() => {
+    if (!scope) return null;
+    const target = norm(scope.name), parent = norm(gudang?.nama);
+    const rows = gudangCapacityList.filter(r => {
+      const warehouse = norm(r.gudang);
+      if (scope.isSub) {
+        const sub = norm(r.subGudang || r.subGudangNama || r.namaSubGudang);
+        return sub === target && (!parent || !warehouse || warehouse === parent);
+      }
+      return warehouse === target;
+    });
+    if (!rows.length) return null;
+    const luas = rows.reduce((s, r) => s + num(r.luasLahanM2), 0), terpakai = rows.reduce((s, r) => s + num(r.luasTerpakaiM2), 0);
+    const sisa = rows.reduce((s, r) => s + num(r.sisaLuasM2), 0) || Math.max(0, luas - terpakai), pct = luas > 0 ? terpakai / luas : 0;
+    const statusKapasitas = pct >= 0.9 ? "KRITIS" : pct >= 0.75 ? "WASPADA" : "AMAN";
+    return { luasLahanM2: luas, luasTerpakaiM2: terpakai, sisaLuasM2: sisa, persentaseTerpakai: pct, statusKapasitas };
+  }, [gudangCapacityList, scope]);
 
-  const blokTampil = filterHanyaBerisi
-    ? blokDiGudang.filter(l=>stokDiBlok(l.id).length>0)
-    : blokDiGudang;
+  const selectScope = id => { setSelectedScopeId(id || "main"); setHoveredLokasi(null); };
+  const renderTooltip = (l, x) => {
+    const list = stockAt(l.id), pending = l.status === "PENDING", empty = !list.length;
+    return <div className="warehouse-map-tooltip" style={{ position: "absolute", top: 20, left: x < 25 ? 0 : x > 75 ? "auto" : "50%", right: x > 75 ? 0 : "auto", transform: x >= 25 && x <= 75 ? "translateX(-50%)" : "none", background: "white", border: `1px solid ${C.border}`, borderRadius: 8, padding: 10, minWidth: 200, maxWidth: 280, boxShadow: "0 4px 16px rgba(0,0,0,.15)", zIndex: 20 }}>
+      <div style={{ fontWeight: 800, fontSize: 12, marginBottom: 6, borderBottom: `1px solid ${C.border}`, paddingBottom: 4 }}>📍 {l.kode} — {l.nama}</div>
+      {pending && <div style={{ fontSize: 12, color: "#92400e", fontWeight: 700, marginBottom: 6 }}>⏳ Menunggu approval TL</div>}
+      {empty ? <div style={{ fontSize: 12, color: C.muted, fontStyle: "italic" }}>Tidak ada barang di blok ini</div> : list.slice(0, 5).map((s, i) => <div key={i} style={{ fontSize: 12, padding: "2px 0", display: "flex", justifyContent: "space-between" }}><span style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span><span style={{ fontWeight: 700, color: C.accent, marginLeft: 8 }}>{fmtNum(s.qty)} {s.unit}</span></div>)}
+      {list.length > 5 && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>+{list.length - 5} item lainnya</div>}
+      <div style={{ fontSize: 12, color: C.muted, marginTop: 6 }}>Koordinat tersimpan: {x.toFixed(1)}%, {mapPercent(l.subGudangId ? l.subMapY : l.mapY)?.toFixed(1) ?? "-"}%</div>
+    </div>;
+  };
 
-  return (
-    <div>
-      <div className="warehouse-map-toolbar" style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div>
-          <p style={{color:C.muted,fontSize:13}}>Visualisasi lokasi blok dan material di denah gudang — data kapasitas m² dari import Excel. Untuk atur titik koordinat blok di denah, buka Master Data → Master Gudang.</p>
-        </div>
-        <div className="warehouse-map-toolbar__controls" style={{display:"flex",gap:10,alignItems:"center"}}>
-          <label style={{fontSize:12,color:C.muted,display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-            <input type="checkbox" checked={filterHanyaBerisi} onChange={e=>setFilterHanyaBerisi(e.target.checked)}/>
-            Hanya blok berisi barang
-          </label>
-          <select className="warehouse-map-toolbar__select" style={{...sty.select,width:200}} value={selectedGudangId} onChange={e=>setSelectedGudangId(e.target.value)}>
-            {gudangList.map(g=><option key={g.id} value={g.id}>{g.nama}</option>)}
-          </select>
-        </div>
+  return <div>
+    <div className="warehouse-map-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Visualisasi blok dan material pada denah gudang. Koordinat peta bersifat read-only.</p>
+      <div className="warehouse-map-toolbar__controls" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <select aria-label="Pilih Gudang" style={{ ...sty.select, minHeight: 44, width: 200 }} value={selectedGudangId} onChange={e => { setSelectedGudangId(e.target.value); setSelectedScopeId("main"); setHoveredLokasi(null); }}>
+          {gudangList.map(g => <option key={g.id} value={g.id}>{g.nama}</option>)}
+        </select>
+        <select aria-label="Pilih tampilan denah" style={{ ...sty.select, minHeight: 44, width: 220 }} value={selectedScopeId} onChange={e => selectScope(e.target.value)}>
+          <option value="main">Gudang utama{gudang?.denahImageData ? "" : " (belum ada denah)"}</option>
+          {mappedSubs.map(s => <option key={s.id} value={s.id}>Sub Gudang — {s.nama}</option>)}
+        </select>
+        <label style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}><input type="checkbox" checked={filterHanyaBerisi} onChange={e => setFilterHanyaBerisi(e.target.checked)} /> Hanya blok berisi barang</label>
       </div>
-
-      {gudangList.length===0 && (
-        <div style={{...sty.card,textAlign:"center",padding:60,color:C.muted}}>
-          <div style={{fontSize:48,marginBottom:12}}>🏭</div>
-          <div style={{fontSize:14,fontWeight:700}}>Belum ada Gudang</div>
-          <div style={{fontSize:12,marginTop:4}}>Tambahkan Gudang di Master Data → Master Gudang</div>
-        </div>
-      )}
-
-      {gudang && !gudang.denahImageData && (
-        <div style={{...sty.card,textAlign:"center",padding:60,color:C.muted}}>
-          <div style={{fontSize:48,marginBottom:12}}>🗺️</div>
-          <div style={{fontSize:14,fontWeight:700}}>Denah {gudang.nama} belum diupload</div>
-          <div style={{fontSize:12,marginTop:4}}>Upload gambar denah (PNG/JPG) di Master Data → Master Gudang</div>
-          <div style={{fontSize:12,color:C.muted,marginTop:4}}>💡 Convert PDF denah ke gambar (screenshot/foto) sebelum upload</div>
-        </div>
-      )}
-
-      {gudang && gudang.denahImageData && (() => {
-        const totalBlok = blokDiGudang.length;
-        const blokBerisi = blokDiGudang.filter(l=>stokDiBlok(l.id).length>0).length;
-        const blokKosong = totalBlok - blokDiGudang.filter(l=>l.status==="PENDING").length - blokBerisi;
-        const blokPending = blokDiGudang.filter(l=>l.status==="PENDING").length;
-        const totalItem = blokDiGudang.reduce((a,l)=>a+stokDiBlok(l.id).length,0);
-        return (
-        <div>
-          {blokDiGudang.length===0 && (
-            <div style={{background:"#fef3c7",border:`1px solid #fde68a`,borderRadius:8,padding:"10px 14px",fontSize:12,color:"#92400e",marginBottom:14}}>
-              ⚠️ Belum ada blok yang di-assign koordinat di peta ini. Pergi ke Master Data → Master Gudang → Konfigurasi Koordinat Blok.
-            </div>
-          )}
-
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-            {[
-              {label:"Total Blok",val:totalBlok,color:C.text},
-              {label:"Berisi Barang",val:blokBerisi,color:C.green},
-              {label:"Kosong",val:blokKosong,color:C.muted},
-              {label:"Pending Approval",val:blokPending,color:"#92400e"},
-              {label:"Total Item Tersimpan",val:totalItem,color:C.accent},
-            ].map((s,i)=>(
-              <div key={i} style={{...sty.card,padding:"8px 14px",display:"flex",flexDirection:"column",minWidth:110}}>
-                <div style={{fontSize:12,color:C.muted,fontWeight:700,textTransform:"uppercase"}}>{s.label}</div>
-                <div style={{fontSize:18,fontWeight:800,color:s.color}}>{s.val}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="warehouse-map-layout" style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 280px",gap:16}}>
-            {/* Peta utama */}
-            <div style={{position:"relative",...sty.card,padding:10,display:"flex",justifyContent:"center"}}>
-              {/* Lebar wrapper dibatasi via maxWidth SAJA (bukan maxHeight/object-fit
-                  pada img) — img tetap width:100% height:auto supaya gambar selalu
-                  mengisi penuh box-nya tanpa letterbox, karena marker titik diposisikan
-                  pakai persen (%) relatif ke box ini; kalau ada letterbox, persen jadi
-                  tidak sinkron dengan piksel asli gambar dan titik jadi melebar/salah posisi. */}
-              <div style={{position:"relative",maxWidth:680,width:"100%"}}>
-              <img src={gudang.denahImageData} alt="Denah Gudang" style={{width:"100%",height:"auto",display:"block",borderRadius:10,border:`1px solid ${C.border}`}}/>
-              {blokTampil.map(l=>{
-                const stokList = stokDiBlok(l.id);
-                const isEmpty = stokList.length===0;
-                const isHovered = hoveredLokasi===l.id;
-                const isPending = l.status==="PENDING";
-                return (
-                  <div key={l.id}
-                    style={{position:"absolute",left:`${l.mapX}%`,top:`${l.mapY}%`,transform:"translate(-50%,-50%)",cursor:"pointer",zIndex:isHovered?10:5,
-                      // Area sentuh dibuat lebih besar (44x44) dari titik visualnya
-                      // (14-20px) — di HP jari lebih besar dari kursor mouse, kalau
-                      // area klik sama persis dengan ukuran titik kecilnya, gampang
-                      // tap-miss. Titik visual tetap kecil, cuma "hit area" yang dibesarkan.
-                      width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center"}}
-                    onMouseEnter={()=>setHoveredLokasi(l.id)}
-                    onMouseLeave={()=>setHoveredLokasi(null)}
-                    onClick={()=>setHoveredLokasi(isHovered?null:l.id)}>
-                    {/* Titik marker */}
-                    <div style={{width:isHovered?20:14,height:isHovered?20:14,borderRadius:"50%",background:isPending?"#9ca3af":(isEmpty?"#9ca3af":"#dc2626"),border:isPending?"2px dashed white":"2px solid white",boxShadow:"0 2px 6px rgba(0,0,0,0.4)",transition:"all 0.15s"}}/>
-                    {/* Label selalu tampil */}
-                    <div style={{position:"absolute",top:-12,left:"50%",transform:"translateX(-50%)",background:isPending?"rgba(146,64,14,0.9)":"rgba(0,0,0,0.75)",color:"white",fontSize:12,fontWeight:700,padding:"1px 5px",borderRadius:3,whiteSpace:"nowrap",pointerEvents:"none"}}>
-                      {l.kode}{isPending?" ⏳ Menunggu Approval":""}
-                    </div>
-                    {/* Popup saat hover/tap */}
-                    {isHovered && (
-                      <div className="warehouse-map-tooltip" style={{position:"absolute",top:36,left:l.mapX<25?0:l.mapX>75?"auto":"50%",right:l.mapX>75?0:"auto",transform:l.mapX>=25&&l.mapX<=75?"translateX(-50%)":"none",background:"white",border:`1px solid ${C.border}`,borderRadius:8,padding:10,minWidth:200,maxWidth:280,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",zIndex:20}}>
-                        <div style={{fontWeight:800,fontSize:12,marginBottom:6,borderBottom:`1px solid ${C.border}`,paddingBottom:4}}>📍 {l.kode} — {l.nama}</div>
-                        {isPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginBottom:6}}>⏳ Blok ini belum final, menunggu approval TL</div>}
-                        {isEmpty
-                          ? <div style={{fontSize:12,color:C.muted,fontStyle:"italic"}}>Tidak ada barang di blok ini</div>
-                          : stokList.slice(0,5).map((st,i)=>(
-                              <div key={i} style={{fontSize:12,padding:"2px 0",display:"flex",justifyContent:"space-between"}}>
-                                <span style={{color:"#111",maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.name}</span>
-                                <span style={{fontWeight:700,color:C.accent,marginLeft:8}}>{fmtNum(st.qty)} {st.unit}</span>
-                              </div>
-                            ))
-                        }
-                        {stokList.length>5 && <div style={{fontSize:12,color:C.muted,marginTop:4}}>+{stokList.length-5} item lainnya</div>}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              </div>
-            </div>
-
-            {/* Panel legend kanan */}
-            <div>
-              <div style={{...sty.card,marginBottom:12}}>
-                <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Legenda</div>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <div style={{width:12,height:12,borderRadius:"50%",background:"#dc2626",border:"2px solid white",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}}/>
-                  <span style={{fontSize:12}}>Blok berisi barang</span>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <div style={{width:12,height:12,borderRadius:"50%",background:"#9ca3af",border:"2px solid white",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}}/>
-                  <span style={{fontSize:12}}>Blok kosong</span>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:12,height:12,borderRadius:"50%",background:"#9ca3af",border:"2px dashed white",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}}/>
-                  <span style={{fontSize:12}}>Menunggu approval TL</span>
-                </div>
-              </div>
-              <div style={{...sty.card}}>
-                <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Daftar Blok ({blokTampil.length})</div>
-                <div style={{maxHeight:400,overflowY:"auto"}}>
-                  {blokTampil.map(l=>{
-                    const n = stokDiBlok(l.id).length;
-                    return (
-                      <div key={l.id} style={{padding:"6px 0",borderBottom:`1px solid ${C.border}`,cursor:"pointer",background:hoveredLokasi===l.id?"#eff6ff":"transparent"}}
-                        onMouseEnter={()=>setHoveredLokasi(l.id)}
-                        onMouseLeave={()=>setHoveredLokasi(null)}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div>
-                            <div style={{fontSize:12,fontWeight:600}}>{l.kode}</div>
-                            <div style={{fontSize:12,color:C.muted}}>{l.nama||"-"}</div>
-                          </div>
-                          <span style={{fontSize:12,fontWeight:700,color:n>0?C.accent:C.muted}}>{n} item</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {blokTampil.length===0 && <div style={{fontSize:12,color:C.muted,textAlign:"center",padding:16}}>Tidak ada blok untuk ditampilkan</div>}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
-
-      {/* Galeri denah Sub Gudang (read-only) — hanya sub gudang yang sudah upload denah sendiri */}
-      {gudang && (() => {
-        const subsWithDenah = subGudangList.filter(sg=>sg.gudangId===gudang.id && sg.denahImageData);
-        if (subsWithDenah.length===0) return null;
-        return (
-          <div style={{marginTop:24}}>
-            <div style={{fontSize:14,fontWeight:800,marginBottom:10}}>🏢 Denah Sub Gudang</div>
-            <div className="warehouse-submap-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:16}}>
-              {subsWithDenah.map(sg=>{
-                const blokSub = lokasiList.filter(l=>l.subGudangId===sg.id && l.subMapX!=null);
-                const blokBerisi = blokSub.filter(l=>stokDiBlok(l.id).length>0).length;
-                return (
-                  <div key={sg.id} style={{...sty.card,padding:12}}>
-                    <div style={{fontWeight:700,fontSize:13,marginBottom:2}}>{sg.nama}</div>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:8}}>
-                      {gudang.nama} • {blokSub.length} blok terpetakan • {blokBerisi} berisi barang
-                      {sg.denahUploadedAt && <> • diupdate {fmtDate(sg.denahUploadedAt)}</>}
-                    </div>
-                    <div style={{position:"relative",width:"100%"}}>
-                      <img src={sg.denahImageData} alt={`Denah ${sg.nama}`} style={{width:"100%",height:"auto",display:"block",borderRadius:8,border:`1px solid ${C.border}`}}/>
-                      {blokSub.map(l=>{
-                        const stokList = stokDiBlok(l.id);
-                        const isEmpty = stokList.length===0;
-                        const isPending = l.status==="PENDING";
-                        return (
-                          <div key={l.id} title={`${l.kode}${isEmpty?" (kosong)":` — ${stokList.length} item`}`}
-                            style={{position:"absolute",left:`${l.subMapX}%`,top:`${l.subMapY}%`,transform:"translate(-50%,-50%)",width:12,height:12,borderRadius:"50%",background:isPending?"#9ca3af":(isEmpty?"#9ca3af":"#dc2626"),border:isPending?"2px dashed white":"2px solid white",boxShadow:"0 1px 4px rgba(0,0,0,0.4)"}}/>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
     </div>
-  );
+    {!gudangList.length && <div style={{ ...sty.card, textAlign: "center", padding: 60, color: C.muted }}>Belum ada Gudang.</div>}
+    {gudang && !scope?.image && <div style={{ ...sty.card, textAlign: "center", padding: 48, color: C.muted }}>Denah {scope?.name || gudang.nama} belum diupload.</div>}
+    {scope?.image && <>
+      <div style={{ ...sty.card, marginBottom: 14, padding: 12 }}><strong>{scope.name}</strong><div style={{ fontSize: 12, color: C.muted }}>{scope.isSub ? "Sub Gudang" : "Gudang utama"}</div></div>
+      {capacity ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginBottom: 14 }}>{[["Luas", `${fmtNum(Math.round(num(capacity.luasLahanM2)))} m²`],["Terpakai", `${fmtNum(Math.round(num(capacity.luasTerpakaiM2)))} m²`],["Sisa", `${fmtNum(Math.round(num(capacity.sisaLuasM2)))} m²`],["Persentase", `${(num(capacity.persentaseTerpakai) * 100).toFixed(1)}%`],["Status", capacity.statusKapasitas || "-"]].map(([k,v]) => <div key={k} style={{ ...sty.card, padding: "9px 12px" }}><div style={{ fontSize: 12, color: C.muted, fontWeight: 700 }}>{k}</div><div style={{ fontSize: 16, fontWeight: 800 }}>{v}</div></div>)}</div> : <div style={{ ...sty.card, padding: 12, marginBottom: 14, color: C.muted, fontSize: 12 }}>Belum ada record kapasitas yang cocok untuk “{scope.name}”.</div>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>{[["Total Blok", blocks.length, C.text],["Berisi Barang", blocks.filter(l => stockAt(l.id).length).length, C.green],["Kosong", blocks.filter(l => !stockAt(l.id).length && l.status !== "PENDING").length, C.muted],["Pending Approval", blocks.filter(l => l.status === "PENDING").length, "#92400e"],["Total Item Tersimpan", blocks.reduce((n, l) => n + stockAt(l.id).length, 0), C.accent]].map(([k,v,c]) => <div key={k} style={{ ...sty.card, padding: "8px 14px", minWidth: 110 }}><div style={{ fontSize: 12, color: C.muted, fontWeight: 700, textTransform: "uppercase" }}>{k}</div><div style={{ fontSize: 18, fontWeight: 800, color: c }}>{v}</div></div>)}</div>
+      <div className="warehouse-map-layout" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 16 }}>
+        <div style={{ ...sty.card, padding: 10, display: "flex", justifyContent: "center", alignItems: "flex-start" }}><div style={{ position: "relative", maxWidth: 680, width: "100%", height: "fit-content", alignSelf: "flex-start" }}><img src={scope.image} alt={`Denah ${scope.name}`} style={{ width: "100%", height: "auto", display: "block", borderRadius: 10, border: `1px solid ${C.border}` }} />{visibleBlocks.map(l => { const list = stockAt(l.id), empty = !list.length, pending = l.status === "PENDING", active = hoveredLokasi === l.id, x = mapPercent(scope.isSub ? l.subMapX : l.mapX), y = mapPercent(scope.isSub ? l.subMapY : l.mapY); return <div key={l.id} title={`${l.kode}${empty ? " (kosong)" : ` — ${list.length} item`}`} style={{ position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-50%)", width: 12, height: 12, borderRadius: "50%", background: pending || empty ? "#9ca3af" : "#dc2626", border: pending ? "2px dashed white" : "2px solid white", cursor: "pointer", boxShadow: active ? "0 0 0 3px rgba(37,99,235,.35)" : "0 1px 4px rgba(0,0,0,.4)", zIndex: active ? 10 : 5 }} onMouseEnter={() => setHoveredLokasi(l.id)} onMouseLeave={() => setHoveredLokasi(null)} onClick={() => setHoveredLokasi(active ? null : l.id)}>{active && renderTooltip(l, x)}</div>; })}</div></div>
+        <div><div style={{ ...sty.card, padding: 12, marginBottom: 12 }}><div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Legenda</div><div style={{ fontSize: 12, marginBottom: 6 }}>🔴 Blok berisi barang</div><div style={{ fontSize: 12, marginBottom: 6 }}>⚪ Blok kosong</div><div style={{ fontSize: 12 }}>⏳ Menunggu approval TL</div></div><div style={{ ...sty.card, padding: 12 }}><div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Daftar Blok ({visibleBlocks.length})</div>{visibleBlocks.length ? visibleBlocks.map(l => <div key={l.id} style={{ minHeight: 44, padding: "7px 0", borderBottom: `1px solid ${C.border}`, cursor: "pointer", background: hoveredLokasi === l.id ? "#eff6ff" : "transparent" }} onMouseEnter={() => setHoveredLokasi(l.id)} onMouseLeave={() => setHoveredLokasi(null)} onClick={() => setHoveredLokasi(hoveredLokasi === l.id ? null : l.id)}><strong style={{ fontSize: 12 }}>{l.kode}</strong><div style={{ fontSize: 12, color: C.muted }}>{l.nama || "-"} · {stockAt(l.id).length} item</div></div>) : <div style={{ fontSize: 12, color: C.muted, padding: 16, textAlign: "center" }}>Tidak ada blok untuk ditampilkan</div>}</div></div>
+      </div>
+    </>}
+    {gudang && mappedSubs.length > 0 && <div style={{ marginTop: 24 }}><div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>🏢 Denah Sub Gudang</div><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16 }}>{mappedSubs.map(s => { const bs = lokasiList.filter(l => l.subGudangId === s.id && l.subMapX != null); return <button type="button" key={s.id} onClick={() => selectScope(s.id)} style={{ ...sty.card, padding: 12, textAlign: "left", cursor: "pointer", minHeight: 44, border: selectedScopeId === s.id ? `2px solid ${C.accent}` : undefined }}><strong style={{ fontSize: 13 }}>{s.nama}</strong><div style={{ fontSize: 12, color: C.muted, margin: "3px 0 8px" }}>{bs.length} blok terpetakan · {bs.filter(l => stockAt(l.id).length).length} berisi barang{s.denahUploadedAt ? <> · {fmtDate(s.denahUploadedAt)}</> : null}</div><img src={s.denahImageData} alt={`Denah ${s.nama}`} style={{ width: "100%", height: "auto", display: "block", borderRadius: 8, border: `1px solid ${C.border}` }} /></button>; })}</div></div>}
+  </div>;
 }
