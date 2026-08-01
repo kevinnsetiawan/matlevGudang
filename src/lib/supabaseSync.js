@@ -538,7 +538,11 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
       (t.stockItems||[]).forEach((si, itemIndex) => {
         const kat = si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
-          : { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+          // Material baru: transaksi tidak menyimpan katalogId hasil auto-create saat approve,
+          // jadi resolve ke entry katalogList asli lewat nama (pola sama dgn buildKartuGantungHistory
+          // di sap.js). Tanpa ini, event MASUK masuk bucket saldo berbeda dari event KELUAR (saldo minus).
+          : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
+            || { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
         const fakeStockRow = { jenisBarang: STATUS_RETUR_TO_JENIS[si.statusMaterial]||"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
@@ -579,7 +583,9 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
       (t.stockItems||[]).forEach((si, itemIndex) => {
         const kat = si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
-          : { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+          // idem TUG10: match nama ke katalogList asli supaya katalogId sama dgn event KELUAR
+          : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
+            || { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
         const fakeStockRow = { jenisBarang:"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
