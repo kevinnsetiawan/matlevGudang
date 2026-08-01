@@ -1224,6 +1224,10 @@
 .forecast-methodology { margin-bottom: 8px; padding: 7px 10px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1e40af; font-size: 12px; }
 .forecast-methodology summary { font-weight: 800; cursor: pointer; }
 .forecast-methodology p { margin: 6px 0 1px; line-height: 1.5; }
+.forecast-procurement-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; padding: 9px; border: 1px solid #e2e8f0; border-radius: 11px; background: #fff; }
+.forecast-procurement-head .forecast-overview__metrics { flex: 1; min-width: 240px; grid-template-columns: repeat(3,minmax(0,1fr)); }
+.forecast-procurement-head > button { min-height: 32px; padding: 6px 12px; border: 1px solid #bfdbfe; border-radius: 7px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 750; cursor: pointer; }
+.forecast-procurement-head > button:disabled { border-color: #e2e8f0; background: #f8fafc; color: #94a3b8; cursor: default; }
 .forecast-table-card { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
 .forecast-table { width: 100%; min-width: 1040px; border-collapse: collapse; font-size: 12px; }
 .forecast-table th { padding: 9px 11px; border-bottom: 1px solid #dbe3ef; background: #f8fafc; color: #64748b; font-size: 12px; font-weight: 850; letter-spacing: .45px; text-align: left; text-transform: uppercase; white-space: nowrap; }
@@ -1880,7 +1884,8 @@
   .dashboard-overview-kpi, .dashboard-manager-kpi, .dashboard-manager__upt-card,
   .tug-command-bar, .tug-action-row, .tug-status-filter,
   .forecast-overview, .forecast-controls, .forecast-search, .forecast-table-card,
-  .forecast-detail-head, .forecast-analysis-panel, .operations-actionbar,
+  .forecast-detail-head, .forecast-analysis-panel, .forecast-procurement-head,
+  .operations-actionbar,
   .operations-filterbar
 ) { background: #1e293b; border-color: #334155; color: #e2e8f0; }
 
@@ -1904,7 +1909,7 @@
 [data-theme="dark"] :is(
   .forecast-sort select, .forecast-back, .forecast-row-actions button,
   .forecast-pagination__size select, .forecast-pagination__nav button,
-  .exec-attention__item > button
+  .forecast-procurement-head > button, .exec-attention__item > button
 ) { background: #1e293b; border-color: #334155; color: #e2e8f0; }
 
 /* Tombol/kontrol kecil dengan teks muted (filter) → surface gelap + muted terang */
