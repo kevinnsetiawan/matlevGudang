@@ -25,7 +25,7 @@ import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, at
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
 import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
-import { loadMaturityAssessments, loadMaturityAudits, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
+import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -290,6 +290,7 @@ export default function PLNWarehouse() {
   const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
   const [maturityAssessments, setMaturityAssessments] = useState(() => readCachedList("pln_maturity_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [maturityAudits, setMaturityAudits] = useState(() => readCachedList("pln_maturity_audits_v1") ?? []); // cache fallback read-only; DB adalah canonical
+  const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory()); // cache/fallback read-only; DB adalah canonical
   const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
   const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
   const [attbList, setAttbList] = useState(() => readCachedList("pln_attb_v1") ?? []);
@@ -579,10 +580,10 @@ export default function PLNWarehouse() {
       const loadFailures = [];
       // Semua cache dibaca paralel. Pada browser dengan window.storage asinkron ini
       // menghilangkan waterfall sebelum request REST bahkan dimulai.
-      const [cs, ckat, clokLocal, ct, cseq, crk, copn, csc, cah, cma, cmau, che, chel, cattb, cmcd, cmch, cmcai, cgcap, cgcapi, cmig, cmpr] = await Promise.all([
+      const [cs, ckat, clokLocal, ct, cseq, crk, copn, csc, cah, cma, cmau, cmah, che, chel, cattb, cmcd, cmch, cmcai, cgcap, cgcapi, cmig, cmpr] = await Promise.all([
         CLOUD.get("pln_stocks_v4"), CLOUD.get("pln_katalog_v4"), CLOUD.get("pln_lokasi_v4"), CLOUD.get("pln_txns_v3"), CLOUD.get("pln_docseq_v3"),
         CLOUD.get("pln_rencana_v1"), CLOUD.get("pln_opname_v1"), CLOUD.get("pln_stockcount_v1"), CLOUD.get("pln_approval_history_v1"), CLOUD.get("pln_maturity_v1"),
-        CLOUD.get("pln_maturity_audits_v1"), CLOUD.get("pln_heavy_equipment_v1"), CLOUD.get("pln_heavy_equipment_loans_v1"), CLOUD.get("pln_attb_v1"),
+        CLOUD.get("pln_maturity_audits_v1"), CLOUD.get("pln_maturity_audit_history_v1"), CLOUD.get("pln_heavy_equipment_v1"), CLOUD.get("pln_heavy_equipment_loans_v1"), CLOUD.get("pln_attb_v1"),
         CLOUD.get("pln_material_cadang_v1"), CLOUD.get("pln_material_cadang_health_v1"), CLOUD.get("pln_material_cadang_ai_insights_v1"),
         CLOUD.get("pln_gudang_capacity_v1"), CLOUD.get("pln_gudang_capacity_imports_v1"), CLOUD.get("pln_migrated_tug15_v1"), CLOUD.get("pln_migrasi_pending_review_v1"),
       ]);
@@ -610,7 +611,7 @@ export default function PLNWarehouse() {
         loadMasterTable("attb_list"),
       ];
       // Maturity punya tabel typed khusus; jangan lewat masterSync/blob warnoto_state.
-      const maturityLoads = [loadMaturityAssessments(), loadMaturityAudits()];
+      const maturityLoads = [loadMaturityAssessments(), loadMaturityAudits(), loadMaturityAuditHistory()];
 
       // Hanya tiga dataset ini diperlukan untuk layar kerja pertama. Request
       // non-kritis tetap berjalan paralel dan diproses dengan invariant null/
@@ -621,7 +622,7 @@ export default function PLNWarehouse() {
       if (initialStocks !== null) setStocks(initialStocks?.length ? dedupeById(initialStocks).list : (cs || DEFAULT_STOCKS));
       setLoading(false);
 
-      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
+      const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote, cmahRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
 
       if (cs && ckat && clok) {
@@ -849,6 +850,17 @@ export default function PLNWarehouse() {
       };
       prepareMaturityCacheMigration({ key:"assessments", label:"Asesmen Maturity", cached:cma, remote:cmaRemote, setState:setMaturityAssessments, upsertAll:upsertMaturityAssessments, reload:loadMaturityAssessments });
       prepareMaturityCacheMigration({ key:"audits", label:"Audit Maturity", cached:cmau, remote:cmauRemote, setState:setMaturityAudits, upsertAll:upsertMaturityAudits, reload:loadMaturityAudits });
+      // Riwayat semester adalah data referensi yang di-seed lewat migration,
+      // bukan data perangkat yang boleh otomatis dipush. Jika tabel belum
+      // tersedia/gagal dimuat, tampilkan cache atau nilai UPT Surabaya yang telah
+      // diverifikasi sambil menandai kegagalan load.
+      if (cmahRemote === null) {
+        setMaturityAuditHistory(cmah?.length ? cmah : getDefaultMaturityAuditHistory());
+        loadFailures.push("History Audit Maturity");
+      } else {
+        setMaturityAuditHistory(cmahRemote);
+        CLOUD.set("pln_maturity_audit_history_v1", cmahRemote);
+      }
       if (maturityMigrationCandidates.length > 0) {
         const migrationSummary = maturityMigrationCandidates.map(item => `${item.cached.length} ${item.label}`).join(" dan ");
         askConfirmDelete({
@@ -986,7 +998,7 @@ export default function PLNWarehouse() {
   // to the latest React state via stateRef (always up to date, avoids stale
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
-  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
+  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
 
   // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
   // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
@@ -5687,6 +5699,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               isMobile={isMobile}
               hasRole={hasRole}
               maturityAudits={maturityAudits}
+              maturityAuditHistory={maturityAuditHistory}
               selectedMaturityUpt={selectedMaturityUpt}
               setSelectedMaturityUpt={setSelectedMaturityUpt}
               canSwitchMaturityUpt={canSwitchMaturityUpt}

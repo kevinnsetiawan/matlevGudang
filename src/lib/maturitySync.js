@@ -4,7 +4,21 @@ import { isDemoMode } from "./demo.js";
 // Maturity memakai tabel khusus, bukan `warnoto_state` atau pola master generik.
 // Kolom yang sering difilter disimpan typed; detail form tetap disimpan di `data`.
 const AUDIT_STATUS = new Set(["DRAFT", "SELF_ASSESSMENT", "REVIEW_UIT", "REVISION", "FINAL"]);
+const HISTORY_STATUS = new Set(["ARSIP", "FINAL", "BERJALAN"]);
 const isBinaryUrl = value => typeof value === "string" && /^(?:data|blob):/i.test(value);
+
+// Nilai awal yang telah dikonfirmasi UPT Surabaya. Database tetap canonical;
+// daftar ini hanya dipakai sebagai fallback baca saat tabel/history belum dapat
+// dimuat, agar dashboard tidak kembali menampilkan angka statis di JSX.
+export const DEFAULT_MATURITY_AUDIT_HISTORY = Object.freeze([
+  { id: "MAH-UPT-SBY-2024-S1", upt: "UPT Surabaya", tahun: 2024, semester: 1, score: 3.58, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2024-S2", upt: "UPT Surabaya", tahun: 2024, semester: 2, score: 3.74, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2025-S1", upt: "UPT Surabaya", tahun: 2025, semester: 1, score: 3.86, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2025-S2", upt: "UPT Surabaya", tahun: 2025, semester: 2, score: 4.12, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2026-S1", upt: "UPT Surabaya", tahun: 2026, semester: 1, score: 4.26, status: "BERJALAN", source: "HISTORIS_TERVERIFIKASI" },
+]);
+
+export const getDefaultMaturityAuditHistory = () => DEFAULT_MATURITY_AUDIT_HISTORY.map(item => ({ ...item }));
 // Legacy localStorage records may carry usernames/old app IDs in fields that
 // now target UUID foreign-key columns. Keep the original value in `data`, but
 // only send canonical UUIDs to Postgres so one malformed record cannot abort a
@@ -42,6 +56,22 @@ function auditRowToItem(row) {
     createdAt: asEpoch(row.created_at, row.data?.createdAt),
     updatedAt: asEpoch(row.updated_at, row.data?.updatedAt),
     updatedBy: row.updated_by ?? row.data?.updatedBy ?? null,
+  };
+}
+
+function auditHistoryRowToItem(row) {
+  return {
+    id: row.id,
+    upt: row.upt || "UPT Surabaya",
+    tahun: Number(row.tahun),
+    semester: Number(row.semester),
+    score: Number(row.score),
+    status: HISTORY_STATUS.has(row.status) ? row.status : "ARSIP",
+    source: row.source || "HISTORIS_TERVERIFIKASI",
+    notes: row.notes || "",
+    createdAt: asEpoch(row.created_at),
+    updatedAt: asEpoch(row.updated_at),
+    updatedBy: row.updated_by ?? null,
   };
 }
 
@@ -120,6 +150,7 @@ async function deleteRow(table, id) {
 
 export const loadMaturityAssessments = () => loadRows("maturity_assessments", assessmentRowToItem);
 export const loadMaturityAudits = () => loadRows("maturity_audits", auditRowToItem);
+export const loadMaturityAuditHistory = () => loadRows("maturity_audit_history", auditHistoryRowToItem);
 export const upsertMaturityAssessment = item => upsertRow("maturity_assessments", assessmentItemToRow(item));
 export const upsertMaturityAudit = item => upsertRow("maturity_audits", auditItemToRow(item));
 export const upsertMaturityAssessments = items => upsertRows("maturity_assessments", items.map(assessmentItemToRow));

@@ -3,9 +3,20 @@ import { AUDIT_ASPECTS } from "../data/auditAspects.js";
 import { DEFAULT_UPT_LIST } from "../data/masterUpt.js";
 import { fmtDate, fmtDateOnly } from "../lib/utils.js";
 
+const HISTORY_STATUS_COLOR = {
+  ARSIP: "#64748b",
+  FINAL: "#1d4ed8",
+  BERJALAN: "#0284c7",
+};
+const HISTORY_STATUS_LABEL = {
+  ARSIP: "Arsip",
+  FINAL: "Final",
+  BERJALAN: "Berjalan",
+};
+
 export function MaturityDashboardTab({
   C, sty, currentUser, isMobile, hasRole,
-  maturityAudits, selectedMaturityUpt, setSelectedMaturityUpt, canSwitchMaturityUpt,
+  maturityAudits, maturityAuditHistory = [], selectedMaturityUpt, setSelectedMaturityUpt, canSwitchMaturityUpt,
   maturitySubTab, setMaturitySubTab,
   maturityAuditModal, setMaturityAuditModal,
   auditListPage, setAuditListPage,
@@ -28,6 +39,13 @@ export function MaturityDashboardTab({
             const evidenceCount = latestAudit?.evidence ? Object.values(latestAudit.evidence).flat().length : 0;
             const statusLabel = latestAudit ? (MATURITY_WORKFLOW_LABEL[latestAudit.status] || latestAudit.status) : "Belum Ada Audit";
             const statusColor = latestAudit ? (MATURITY_WORKFLOW_COLOR[latestAudit.status] || "#64748b") : "#64748b";
+            const uptAuditHistory = maturityAuditHistory
+              .filter(item => (item.upt || "UPT Surabaya") === selectedMaturityUpt)
+              .sort((a, b) => (a.tahun - b.tahun) || (a.semester - b.semester));
+            const latestHistory = uptAuditHistory[uptAuditHistory.length - 1] || null;
+            const previousHistory = uptAuditHistory[uptAuditHistory.length - 2] || null;
+            const historyChange = latestHistory && previousHistory ? latestHistory.score - previousHistory.score : null;
+            const recentHistory = [...uptAuditHistory].reverse();
             return (
               <div className="operations-page">
               <div className="kpi-banner" style={{
@@ -187,24 +205,28 @@ export function MaturityDashboardTab({
                           <h3 style={{ fontSize: 17, fontWeight: 800, color: "#0f172a", margin: 0 }}>History Audit</h3>
                           <p style={{ fontSize: 13, color: "#64748b", margin: "2px 0 0 0" }}>Tren skor audit beberapa semester terakhir.</p>
                         </div>
-                        <div style={{
+                        {historyChange !== null && <div style={{
                           background: "#eff6ff",
                           border: "1px solid #bfdbfe",
                           borderRadius: 20,
                           padding: "4px 12px",
                           fontSize: 12,
                           fontWeight: 800,
-                          color: "#1d4ed8",
+                          color: historyChange >= 0 ? "#1d4ed8" : "#b91c1c",
                           display: "flex",
                           alignItems: "center",
                           gap: 4
                         }}>
                           <span>Perubahan terakhir</span>
-                          <strong>+0.14</strong>
-                        </div>
+                          <strong>{historyChange >= 0 ? "+" : ""}{historyChange.toFixed(2)}</strong>
+                        </div>}
                       </div>
 
-                      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1.2fr", gap: 24 }}>
+                      {uptAuditHistory.length === 0 ? (
+                        <div style={{ color: "#64748b", fontSize: 14, textAlign: "center", padding: "42px 16px", border: "1px dashed #cbd5e1", borderRadius: 12, background: "#f8fafc" }}>
+                          Belum ada riwayat nilai audit untuk {selectedMaturityUpt}.
+                        </div>
+                      ) : (<div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1.2fr", gap: 24 }}>
                         {/* Bar Chart Container */}
                         <div style={{
                           border: "1px solid #e2e8f0",
@@ -217,17 +239,11 @@ export function MaturityDashboardTab({
                           minHeight: 220
                         }}>
                           <div style={{ display: "flex", justifyContent: "space-around", alignItems: "flex-end", height: 160, paddingBottom: 10, borderBottom: "1.5px solid #cbd5e1" }}>
-                            {[
-                              { label: "S1 2024", val: 3.58 },
-                              { label: "S2 2024", val: 3.74 },
-                              { label: "S1 2025", val: 3.86 },
-                              { label: "S2 2025", val: 4.12 },
-                              { label: "S1 2026", val: 4.26 }
-                            ].map((bar, idx) => {
-                              const heightPct = (bar.val / 5) * 100;
+                            {uptAuditHistory.map(bar => {
+                              const heightPct = (bar.score / 5) * 100;
                               return (
-                                <div key={idx} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: "15%", height: "100%", justifyContent: "flex-end" }}>
-                                  <span style={{ fontSize: 12, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>{bar.val.toFixed(2)}</span>
+                                <div key={bar.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: `${Math.min(15, 100 / uptAuditHistory.length)}%`, height: "100%", justifyContent: "flex-end" }}>
+                                  <span style={{ fontSize: 12, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>{bar.score.toFixed(2)}</span>
                                   <div style={{
                                     width: "100%",
                                     height: `${heightPct}%`,
@@ -240,8 +256,8 @@ export function MaturityDashboardTab({
                             })}
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-around", paddingTop: 8 }}>
-                            {["S1 2024", "S2 2024", "S1 2025", "S2 2025", "S1 2026"].map((lbl, idx) => (
-                              <div key={idx} style={{ width: "15%", textAlign: "center", fontSize: 11, fontWeight: 800, color: "#64748b" }}>{lbl}</div>
+                            {uptAuditHistory.map(item => (
+                              <div key={item.id} style={{ width: `${Math.min(15, 100 / uptAuditHistory.length)}%`, textAlign: "center", fontSize: 11, fontWeight: 800, color: "#64748b" }}>S{item.semester} {item.tahun}</div>
                             ))}
                           </div>
                         </div>
@@ -260,19 +276,15 @@ export function MaturityDashboardTab({
                           }}>
                             <div>
                               <div style={{ fontSize: 10, color: "#0369a1", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>Skor Terbaru</div>
-                              <div style={{ fontSize: 22, fontWeight: 900, color: "#0369a1", margin: "2px 0", lineHeight: 1.1 }}>4.26</div>
-                              <div style={{ fontSize: 11, color: "#0284c7", fontWeight: 600 }}>Semester 1 2026 - Berjalan</div>
+                              <div style={{ fontSize: 22, fontWeight: 900, color: "#0369a1", margin: "2px 0", lineHeight: 1.1 }}>{latestHistory.score.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: HISTORY_STATUS_COLOR[latestHistory.status] || "#0284c7", fontWeight: 600 }}>Semester {latestHistory.semester} {latestHistory.tahun} - {HISTORY_STATUS_LABEL[latestHistory.status] || latestHistory.status}</div>
                             </div>
                           </div>
 
                           {/* History items list */}
-                          {[
-                            { sem: "S1 2026", status: "Berjalan", score: 4.26, color: "#0284c7" },
-                            { sem: "S2 2025", status: "Final", score: 4.12, color: "#1d4ed8" },
-                            { sem: "S1 2025", status: "Final", score: 3.86, color: "#1d4ed8" },
-                            { sem: "S2 2024", status: "Arsip", score: 3.74, color: "#64748b" }
-                          ].map((item, idx) => (
-                            <div key={idx} style={{
+                          {recentHistory.map(item => {
+                            const color = HISTORY_STATUS_COLOR[item.status] || "#64748b";
+                            return <div key={item.id} style={{
                               display: "flex",
                               justifyContent: "space-between",
                               alignItems: "center",
@@ -282,23 +294,23 @@ export function MaturityDashboardTab({
                               borderRadius: 12
                             }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{item.sem}</span>
+                                <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>S{item.semester} {item.tahun}</span>
                                 <span style={{
                                   fontSize: 10,
                                   fontWeight: 800,
                                   padding: "2px 6px",
                                   borderRadius: 12,
-                                  background: item.color + "15",
-                                  color: item.color,
+                                  background: color + "15",
+                                  color,
                                   textTransform: "uppercase"
                                 }}>{item.status}</span>
                               </div>
                               <strong style={{ fontSize: 14, fontWeight: 950, color: "#0f172a" }}>{item.score.toFixed(2)}</strong>
                             </div>
-                          ))}
+                          })}
                         </div>
                       </div>
-                    </div>
+                    )}</div>
 
                     {/* Bottom 2x2 Grid */}
                     <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16, marginBottom: 20 }}>
