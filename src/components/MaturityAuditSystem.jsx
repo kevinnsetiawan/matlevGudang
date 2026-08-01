@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { ChartBar, FolderSimple, Pulse, UploadSimple, FileText, Check, CaretRight, CaretLeft, Sparkle, CheckCircle, Info } from "@phosphor-icons/react";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "../data/auditAspects.js";
+import {
+  assignMaturityDriveEvidence,
+  downloadMaturityDriveEvidence,
+  syncMaturityDrive,
+  unlinkMaturityDriveEvidence,
+  uploadMaturityDriveEvidence,
+} from "../lib/maturityDrive.js";
 
 // =========================================================================
 // CONSTANTS & ICONS
@@ -10,10 +17,10 @@ const MATURITY_LEVELS = { 1: "Basic", 2: "Developing", 3: "Defined", 4: "Managed
 const MATURITY_WORKFLOW_LABEL = { DRAFT: "Draft", SELF_ASSESSMENT: "Self Assessment (UPT)", REVIEW_UIT: "Review UIT", REVISION: "Revisi", FINAL: "Nilai Final (Pusat)" };
 const MATURITY_WORKFLOW_COLOR = { DRAFT: "#64748b", SELF_ASSESSMENT: "#3b82f6", REVIEW_UIT: "#f59e0b", REVISION: "#ef4444", FINAL: "#1d4ed8" };
 
-// Temporary hard-stop: no Drive relay, object URL, base64, or file bytes may be
-// attached to a Maturity record while the canonical persistence rollout is active.
+// Form 5S keeps its established photo flow and its automatic evidence bridge.
+// Its separate Drive/storage decision remains outside the Maturity audit relay.
 function uploadFileToDrive() {
-  return Promise.reject(new Error("Upload evidence Maturity sedang dinonaktifkan."));
+  return Promise.reject(new Error("Upload foto Form 5S belum dikonfigurasi."));
 }
 
 // Icon set diselaraskan ke @phosphor-icons/react (dipakai app-wide di 3 varian
@@ -72,7 +79,10 @@ export function MaturityAuditEditor({
 }) {
   const [internalActiveAspectId, setInternalActiveAspectId] = useState(null);
   const [uploadingItems, setUploadingItems] = useState({});
-  const [, setUploadError] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [syncingDrive, setSyncingDrive] = useState(false);
+  const [unassignedFiles, setUnassignedFiles] = useState([]);
+  const [assignmentTargets, setAssignmentTargets] = useState({});
   const activeAspectId = propsActiveAspectId ?? internalActiveAspectId;
   const setActiveAspectId = (id) => {
     setInternalActiveAspectId(id);
@@ -164,6 +174,46 @@ export function MaturityAuditEditor({
   const paginatedAspects = categoryAspects.slice((aspectPage - 1) * pageSize, aspectPage * pageSize);
 
   const activeAspect = AUDIT_ASPECTS.find(a => a.id === activeAspectId);
+  const categoryOrder = Math.max(1, AUDIT_CATEGORIES.findIndex(category => category.id === activeCategory.id) + 1);
+
+  const applySyncedEvidence = useCallback((evidence = []) => {
+    setMaturityAuditEvidence(previous => {
+      const automatic = Object.fromEntries(Object.entries(previous).map(([aspectId, files]) => [
+        aspectId, (files || []).filter(file => file?.auto || file?.source === "Form Pengisian 5S"),
+      ]));
+      const manual = evidence.reduce((next, file) => {
+        const files = next[file.aspectId] || [];
+        next[file.aspectId] = [...files.filter(existing => existing.driveFileId !== file.driveFileId && existing.id !== file.id), file];
+        return next;
+      }, {});
+      return { ...automatic, ...Object.fromEntries(Object.keys(manual).map(aspectId => [aspectId, [...(automatic[aspectId] || []), ...manual[aspectId]]])) };
+    });
+  }, [setMaturityAuditEvidence]);
+
+  const drivePayload = useCallback((overrides = {}) => ({
+    auditId: audit.id,
+    auditCreatedAt: audit.createdAt,
+    upt: currentUptName,
+    categoryId: activeCategory.id,
+    categoryLabel: activeCategory.label,
+    categoryOrder,
+    ...overrides,
+  }), [audit.id, audit.createdAt, currentUptName, activeCategory, categoryOrder]);
+
+  const handleDriveSync = async () => {
+    if (!audit.id) {
+      setUploadError("Audit belum memiliki ID. Tutup lalu buat ulang audit sebelum sinkronisasi Drive.");
+      return;
+    }
+    setSyncingDrive(true); setUploadError("");
+    try {
+      const result = await syncMaturityDrive(drivePayload({ scanDrive: true }));
+      applySyncedEvidence(result.evidence);
+      setUnassignedFiles(result.unassigned || []);
+    } catch (error) {
+      setUploadError(error?.message || "Sinkronisasi Google Drive gagal.");
+    } finally { setSyncingDrive(false); }
+  };
 
   return (
     <div style={{ paddingBottom: 40 }}>
@@ -264,10 +314,43 @@ export function MaturityAuditEditor({
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 800, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "1px" }}>BERKAS EVIDENCE OFFICIAL</div>
                         <div style={{ fontSize: 15, fontWeight: 800, color: "white" }}>Pencatatan Evidence Audit</div>
-                        <div style={{ fontSize: 13, color: "#dbeafe", marginTop: 2 }}>Upload file dan foto sedang dinonaktifkan sementara. Audit hanya menyimpan metadata penilaian.</div>
+                        <div style={{ fontSize: 13, color: "#dbeafe", marginTop: 2 }}>Berkas tersimpan di Google Drive; ID dan metadata evidence dicatat secara canonical.</div>
                       </div>
                     </div>
+                    <button type="button" onClick={handleDriveSync} disabled={syncingDrive || !audit.id} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,.45)", color: "#fff", background: "rgba(255,255,255,.14)", fontWeight: 800, cursor: syncingDrive ? "wait" : "pointer" }}>
+                      {syncingDrive ? "Menyinkronkan..." : "↻ Sinkronkan Drive"}
+                    </button>
                   </div>
+                  {uploadError && <div role="alert" style={{ padding: "10px 12px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 13, fontWeight: 700 }}>{uploadError}</div>}
+
+                  {unassignedFiles.length > 0 && (
+                    <div style={{ border: `1px solid ${C.yellow}66`, background: `${C.yellow}12`, borderRadius: 10, padding: "12px 14px" }}>
+                      <strong style={{ display: "block", color: C.text, fontSize: 13 }}>Berkas Belum Terhubung ({unassignedFiles.length})</strong>
+                      <span style={{ display: "block", marginTop: 3, color: C.muted, fontSize: 12 }}>Berkas ini ditemukan pada root/periode/UPT/kategori/aspek dan belum memengaruhi skor.</span>
+                      {unassignedFiles.map(file => {
+                        const selectedItemId = assignmentTargets[file.driveFileId] || activeAspect.requiredEvidence[0]?.id || "";
+                        const targetItem = activeAspect.requiredEvidence.find(item => item.id === selectedItemId);
+                        return <div key={file.driveFileId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 9, fontSize: 12 }}>
+                          <span style={{ color: C.text, fontWeight: 800, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+                          <select value={selectedItemId} onChange={event => setAssignmentTargets(previous => ({ ...previous, [file.driveFileId]: event.target.value }))} style={{ minWidth: 170, fontSize: 12 }}>
+                            {activeAspect.requiredEvidence.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+                          </select>
+                          <button type="button" onClick={async () => {
+                            if (!targetItem) return;
+                            setUploadingItems(previous => ({ ...previous, [`assign-${file.driveFileId}`]: true })); setUploadError("");
+                            try {
+                              const result = await assignMaturityDriveEvidence(drivePayload({ unassignedId: file.id, aspectId: activeAspect.id, aspectTitle: activeAspect.title, itemId: targetItem.id, itemLabel: targetItem.label }));
+                              applySyncedEvidence([...(Object.values(maturityAuditEvidence).flat().filter(existing => !existing?.auto)), result.evidence]);
+                              setUnassignedFiles(previous => previous.filter(candidate => candidate.driveFileId !== file.driveFileId));
+                            } catch (error) { setUploadError(error?.message || "Berkas tidak dapat dihubungkan."); }
+                            finally { setUploadingItems(previous => ({ ...previous, [`assign-${file.driveFileId}`]: false })); }
+                          }} disabled={uploadingItems[`assign-${file.driveFileId}`]} style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid #ca8a04", background: "#fff", color: "#854d0e", fontWeight: 800, cursor: "pointer" }}>
+                            {uploadingItems[`assign-${file.driveFileId}`] ? "Menghubungkan..." : "Hubungkan"}
+                          </button>
+                        </div>;
+                      })}
+                    </div>
+                  )}
 
                   {activeAspect.requiredEvidence.map((eviItem, eviIdx) => {
                     const itemFiles = aspectFiles.filter(f => f.itemId === eviItem.id);
@@ -344,7 +427,7 @@ export function MaturityAuditEditor({
                                 <span style={{ fontWeight: 800, fontSize: 13, color: C.accent, flexShrink: 0 }}>📍 Sub-Bagian Target:</span>
                                 <span style={{ fontWeight: 700, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>{targetFolderPath}</span>
                               </div>
-                              {canScoreUPT && !isAutoFilled && <span style={{ display: "block", marginTop: 6, fontSize: 13, color: C.muted, fontWeight: 800 }}>Upload bukti sementara nonaktif</span>}
+                              {canScoreUPT && !isAutoFilled && <span style={{ display: "block", marginTop: 6, fontSize: 13, color: C.muted, fontWeight: 800 }}>Maks. 25 MB per berkas; foto, PDF, dokumen Office, ZIP/RAR, TXT, atau CSV.</span>}
                             </div>
                           </div>
 
@@ -373,7 +456,6 @@ export function MaturityAuditEditor({
                                 type="file"
                                 accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.txt,.csv"
                                 multiple
-                                disabled
                                 hidden
                                 onChange={async (e) => {
                                   const files = Array.from(e.target.files || []);
@@ -382,28 +464,16 @@ export function MaturityAuditEditor({
                                   setUploadError("");
                                   setUploadingItems(prev => ({ ...prev, [eviItem.id]: true }));
                                   try {
-                                    const uploadedFiles = await Promise.all(files.map(f => uploadFileToDrive({
+                                    const uploadedFiles = await Promise.all(files.map(f => uploadMaturityDriveEvidence({
                                       file: f,
-                                      upt: currentUptName,
-                                      category: activeCategory.label,
-                                      aspectId: activeAspect.id,
-                                      itemLabel: eviItem.label
-                                    })));
-                                    const newFiles = uploadedFiles.map(res => ({
-                                      itemId: eviItem.id,
-                                      itemLabel: eviItem.label,
+                                      ...drivePayload({
                                       aspectId: activeAspect.id,
                                       aspectTitle: activeAspect.title,
-                                      category: activeCategory.label,
-                                      upt: currentUptName,
-                                      folderPath: res.folderPath || targetFolderPath,
-                                      driveRepositoryUrl: res.targetFolderId ? `https://drive.google.com/drive/folders/${res.targetFolderId}` : null,
-                                      name: res.name,
-                                      size: res.size,
-                                      url: res.url,
-                                      isDrive: res.isDrive,
-                                      syncedToDrive: res.syncedToDrive
-                                    }));
+                                      itemId: eviItem.id,
+                                      itemLabel: eviItem.label,
+                                    })
+                                    })));
+                                    const newFiles = uploadedFiles.map(res => ({ ...res, folderPath: targetFolderPath }));
 
                                     setMaturityAuditEvidence(prev => {
                                       const cur = prev[activeAspect.id] || [];
@@ -445,7 +515,6 @@ export function MaturityAuditEditor({
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                               {itemFiles.map((f, fi) => {
                                 const globalIdx = aspectFiles.indexOf(f);
-                                const targetUrl = f.url || "#";
                                 const fullFolderPath = f.folderPath || targetFolderPath;
                                 return (
                                   <div key={fi} style={{
@@ -461,10 +530,12 @@ export function MaturityAuditEditor({
                                     <span style={{ color: isAutoFilled ? C.green : C.accent }}>
                                       <Icons.File />
                                     </span>
-                                    <a
-                                      href={targetUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (f.auto && f.url) window.location.hash = f.url.replace(/^#/, "");
+                                        else if (f.id) downloadMaturityDriveEvidence(f.id).catch(error => setUploadError(error?.message || "Berkas tidak dapat diunduh."));
+                                      }}
                                       style={{
                                         color: C.text,
                                         fontWeight: 700,
@@ -472,12 +543,16 @@ export function MaturityAuditEditor({
                                         overflow: "hidden",
                                         textOverflow: "ellipsis",
                                         whiteSpace: "nowrap",
-                                        textDecoration: "none"
+                                        textDecoration: "underline",
+                                        border: "none",
+                                        padding: 0,
+                                        background: "transparent",
+                                        cursor: "pointer"
                                       }}
                                       title={`File: ${f.name}\n📍 Sub-Bagian: ${fullFolderPath}`}
                                     >
                                       {f.name}
-                                    </a>
+                                    </button>
                                     <span style={{
                                        fontSize: 13,
                                        color: f.isDrive ? "#0284c7" : "#b45309",
@@ -490,11 +565,14 @@ export function MaturityAuditEditor({
                                      </span>
                                     {canScoreUPT && !f.auto && (
                                       <button
-                                        onClick={() => {
-                                          setMaturityAuditEvidence(prev => {
-                                            const cur = prev[activeAspect.id] || [];
-                                            return { ...prev, [activeAspect.id]: cur.filter((_, ci) => ci !== globalIdx) };
-                                          });
+                                        onClick={async () => {
+                                          try {
+                                            if (f.id) await unlinkMaturityDriveEvidence({ evidenceId: f.id });
+                                            setMaturityAuditEvidence(prev => {
+                                              const cur = prev[activeAspect.id] || [];
+                                              return { ...prev, [activeAspect.id]: cur.filter((_, ci) => ci !== globalIdx) };
+                                            });
+                                          } catch (error) { setUploadError(error?.message || "Evidence tidak dapat dilepas."); }
                                         }}
                                         style={{ background: "transparent", border: "none", color: C.red, cursor: "pointer", fontWeight: 800, padding: 0, marginLeft: 4, fontSize: 15 }}
                                         title="Hapus file"

@@ -1946,7 +1946,10 @@ export default function PLNWarehouse() {
     setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
     setActiveAspectId(null);
     setAspectPage(1);
-    setMaturityAuditModal({ isNew:true, upt: selectedMaturityUpt });
+    // ID dibuat saat draft dibuka agar evidence Google Drive dapat memiliki
+    // stable key sebelum tombol Simpan Audit ditekan; record audit tetap hanya
+    // dipersist ketika alur Simpan yang ada dijalankan.
+    setMaturityAuditModal({ id: `MA-${uid().slice(-8)}`, isNew:true, upt: selectedMaturityUpt, createdAt: Date.now() });
     setMaturitySubTab("pelaksanaan");
   }
   function openMaturityAudit(audit) {
@@ -1999,14 +2002,28 @@ export default function PLNWarehouse() {
   async function saveMaturityAudit(audit, newStatus) {
     setMaturityAuditSaving(true);
     try {
+      // Draft Drive sekarang sudah menerima ID stabil sebelum Simpan. ID saja
+      // bukan berarti record sudah ada di state/UI; bedakan dengan lookup
+      // canonical agar audit baru tetap masuk sebagai CREATE, bukan UPDATE.
+      const isExistingAudit = maturityAudits.some(item => item.id === audit?.id);
+      const { isNew: _isNew, ...auditData } = audit || {};
       const scores = maturityAuditForm.aspekScores;
-      const level = calcMaturityLevel(scores, maturityAuditEvidence);
+      const scoreResult = calcMaturityScore(scores, maturityAuditEvidence);
+      const level = scoreResult.level;
+      const createdAt = auditData.createdAt || Date.now();
+      const createdDate = new Date(createdAt);
+      const periodKey = auditData.periodKey || `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, "0")}`;
+      const uptName = auditData.upt || selectedMaturityUpt || "UPT Surabaya";
+      const uptId = auditData.uptId || ((uptList.length ? uptList : DEFAULT_UPT_LIST).find(item => item.nama === uptName)?.id || null);
       const entry = {
-        ...(audit.id ? audit : {}),
-        id: audit.id || `MA-${uid().slice(-8)}`,
-        upt: audit.upt || selectedMaturityUpt || "UPT Surabaya",
+        ...(isExistingAudit ? auditData : {}),
+        id: auditData.id || `MA-${uid().slice(-8)}`,
+        upt: uptName,
+        uptId,
         status: newStatus,
         level,
+        score: Number(scoreResult.total.toFixed(2)),
+        periodKey,
         aspekScores: scores,
         evidence: maturityAuditEvidence,
         catatanUPT: maturityAuditForm.catatanUPT,
@@ -2014,18 +2031,19 @@ export default function PLNWarehouse() {
         catatanPusat: maturityAuditForm.catatanPusat,
         fileUrl: maturityAuditForm.fileUrl,
         fileNama: maturityAuditForm.fileNama,
-        createdAt: audit.createdAt || Date.now(),
+        createdAt,
+        createdBy: auditData.createdBy || currentUser.id,
         updatedAt: Date.now(),
         updatedBy: currentUser.id,
-        history: [...(audit.history || []), { action: newStatus, by: currentUser.id, at: Date.now() }],
+        history: [...(auditData.history || []), { action: newStatus, by: currentUser.id, at: Date.now() }],
       };
       const saved = await upsertMaturityAudit(entry);
       if (!saved) {
         showToast("Audit Maturity tidak tersimpan karena server tidak dapat dihubungi.", "error");
         return;
       }
-      setMaturityAudits(current => audit.id ? current.map(a => a.id === audit.id ? entry : a) : [entry, ...current]);
-      logAudit(currentUser, audit.id ? "UPDATE" : "CREATE", "maturity_audit", entry.id, { status: newStatus, level, upt: entry.upt });
+      setMaturityAudits(current => isExistingAudit ? current.map(a => a.id === entry.id ? entry : a) : [entry, ...current]);
+      logAudit(currentUser, isExistingAudit ? "UPDATE" : "CREATE", "maturity_audit", entry.id, { status: newStatus, level, upt: entry.upt });
       setMaturityAuditModal(null);
       showToast(`Audit ${entry.upt} disimpan — ${MATURITY_WORKFLOW_LABEL[newStatus]}${newStatus === "FINAL" ? " (Nilai Final)" : ""}`);
     } finally { setMaturityAuditSaving(false); }

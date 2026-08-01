@@ -35,12 +35,17 @@ const asEpoch = (value, fallback = null) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+const periodKeyFor = value => {
+  const date = new Date(asEpoch(value, Date.now()));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+};
 
 function assessmentRowToItem(row) {
   return {
     ...(row.data || {}),
     id: row.id,
     createdAt: asEpoch(row.created_at, row.data?.createdAt),
+    createdBy: row.created_by ?? row.data?.createdBy ?? null,
     tanggalAsesmen: asEpoch(row.assessment_at, row.data?.tanggalAsesmen),
     createdBy: row.created_by ?? row.data?.createdBy ?? null,
   };
@@ -51,8 +56,11 @@ function auditRowToItem(row) {
     ...(row.data || {}),
     id: row.id,
     upt: row.upt ?? row.data?.upt ?? "UPT Surabaya",
+    uptId: row.upt_id ?? row.data?.uptId ?? null,
     status: row.status ?? row.data?.status ?? "DRAFT",
     level: row.level ?? row.data?.level ?? 1,
+    score: Number(row.score ?? row.data?.score ?? 1),
+    periodKey: row.period_key ?? row.data?.periodKey ?? periodKeyFor(row.created_at ?? row.data?.createdAt),
     createdAt: asEpoch(row.created_at, row.data?.createdAt),
     updatedAt: asEpoch(row.updated_at, row.data?.updatedAt),
     updatedBy: row.updated_by ?? row.data?.updatedBy ?? null,
@@ -119,9 +127,13 @@ function auditItemToRow(item) {
     created_at: asEpoch(item.createdAt, Date.now()),
     updated_at: asEpoch(item.updatedAt, Date.now()),
     upt: item.upt || "UPT Surabaya",
+    upt_id: item.uptId || null,
+    period_key: /^\d{4}-(0[1-9]|1[0-2])$/.test(item.periodKey || "") ? item.periodKey : periodKeyFor(item.createdAt),
     status,
     level: Math.min(5, Math.max(1, Number(item.level) || 1)),
+    score: Math.min(5, Math.max(0, Number(item.score) || 1)),
     updated_by: asOptionalUuid(item.updatedBy),
+    created_by: asOptionalUuid(item.createdBy),
   };
 }
 

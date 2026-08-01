@@ -172,7 +172,7 @@ test.describe("WARNOTO desktop preservation smoke", () => {
     });
   });
 
-  test("maturity file upload remains disabled while canonical audit storage is prepared", async ({ isolatedPage:page }) => {
+  test("maturity audit exposes a Drive-backed evidence picker", async ({ isolatedPage:page }) => {
     await openApp(page);
     await openRoute(page, {
       tab:"maturity",
@@ -183,8 +183,9 @@ test.describe("WARNOTO desktop preservation smoke", () => {
     await page.getByRole("button", { name:"Pelaksanaan Audit", exact:true }).click();
     await page.getByRole("button", { name:"+ Audit Baru", exact:true }).first().click();
     await page.locator(".maturity-aspect-row").first().click();
-    await expect(page.locator('input[type="file"]:not(:disabled)')).toHaveCount(0);
-    await expect(page.getByText("Upload bukti sementara nonaktif", { exact:true }).first()).toBeVisible();
+    await expect(page.locator('input[type="file"]:not(:disabled)')).toHaveCount(7);
+    await expect(page.getByText(/Maks\. 25 MB per berkas/).first()).toBeVisible();
+    await expect(page.getByRole("button", { name:"Sinkronkan Drive", exact:false })).toBeVisible();
   });
 
   test("Form 5S exposes an empty persistent-history view without a database fixture", async ({ isolatedPage:page }) => {

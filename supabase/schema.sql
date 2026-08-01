@@ -1195,12 +1195,15 @@ create table if not exists maturity_audits (
   created_at bigint not null,
   updated_at bigint,
   upt text not null,
+  period_key text not null default to_char(now() at time zone 'Asia/Jakarta', 'YYYY-MM') check (period_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
   status text not null check (status in ('DRAFT', 'SELF_ASSESSMENT', 'REVIEW_UIT', 'REVISION', 'FINAL')),
   level smallint not null check (level between 1 and 5),
+  score numeric(4,2) not null default 1 check (score between 0 and 5),
   updated_by uuid references profiles(id) on delete set null
 );
 create index if not exists idx_maturity_audits_upt_updated_at on maturity_audits(upt, updated_at desc);
 create index if not exists idx_maturity_audits_status on maturity_audits(status);
+create unique index if not exists idx_maturity_audits_upt_period_key on maturity_audits(upt, period_key);
 alter table maturity_audits enable row level security;
 drop policy if exists "Authenticated read maturity_audits" on maturity_audits;
 drop policy if exists "Authenticated write maturity_audits" on maturity_audits;
@@ -1271,6 +1274,125 @@ create policy "Authenticated insert maturity_5s_assessments" on maturity_5s_asse
 revoke update, delete on maturity_5s_assessments from authenticated;
 grant select, insert on maturity_5s_assessments to authenticated;
 grant all on maturity_5s_assessments to service_role;
+
+-- Maturity Drive: database retains IDs/metadata only; file bytes stay in Drive.
+create table if not exists maturity_audit_events (
+  id uuid primary key default gen_random_uuid(), audit_id text not null,
+  event_type text not null check (event_type in ('AUDIT_CREATED','AUDIT_SAVED','STATUS_CHANGED','TREE_ENSURED','EVIDENCE_UPLOADED','EVIDENCE_SYNCED','EVIDENCE_ASSIGNED','EVIDENCE_UNLINKED','EVIDENCE_DOWNLOADED')),
+  actor_id uuid references profiles(id) on delete set null, event_data jsonb not null default '{}'::jsonb,
+  created_at bigint not null default ((extract(epoch from now()) * 1000)::bigint)
+);
+create index if not exists idx_maturity_audit_events_audit_created on maturity_audit_events(audit_id, created_at desc);
+create or replace function public.log_maturity_audit_event()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.maturity_audit_events (audit_id, event_type, actor_id, event_data)
+    values (new.id, 'AUDIT_CREATED', new.updated_by,
+      jsonb_build_object('status', new.status, 'score', new.score, 'level', new.level, 'period_key', new.period_key, 'audit_updated_at', new.updated_at));
+  else
+    insert into public.maturity_audit_events (audit_id, event_type, actor_id, event_data)
+    values (new.id,
+      case when new.status is distinct from old.status then 'STATUS_CHANGED' else 'AUDIT_SAVED' end,
+      new.updated_by,
+      jsonb_build_object('status_from', old.status, 'status_to', new.status, 'score_from', old.score, 'score_to', new.score, 'level_from', old.level, 'level_to', new.level, 'period_key', new.period_key, 'audit_updated_at', new.updated_at));
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_maturity_audits_events on public.maturity_audits;
+create trigger trg_maturity_audits_events after insert or update on public.maturity_audits
+for each row execute function public.log_maturity_audit_event();
+create table if not exists maturity_audit_evidence (
+  id uuid primary key default gen_random_uuid(), audit_id text not null,
+  aspect_id text not null, item_id text not null, item_label text not null default '',
+  category_id text not null default '', category_label text not null default '', upt text not null,
+  drive_file_id text not null unique, drive_folder_id text, file_name text not null,
+  mime_type text not null default 'application/octet-stream', file_size bigint not null default 0 check (file_size >= 0), md5_checksum text,
+  source text not null default 'UPLOAD' check (source in ('UPLOAD','SYNC','ASSIGN')),
+  linked_at bigint not null default ((extract(epoch from now()) * 1000)::bigint), linked_by uuid references profiles(id) on delete set null,
+  unlinked_at bigint, unlinked_by uuid references profiles(id) on delete set null
+);
+-- No audit FK: an existing UI draft may select evidence before its audit is saved.
+create unique index if not exists idx_maturity_audit_evidence_active_item on maturity_audit_evidence(audit_id, drive_file_id) where unlinked_at is null;
+create index if not exists idx_maturity_audit_evidence_audit_aspect on maturity_audit_evidence(audit_id, aspect_id) where unlinked_at is null;
+create table if not exists maturity_audit_drive_folders (
+  id uuid primary key default gen_random_uuid(), mapping_key text not null unique, audit_id text, period_key text,
+  folder_type text not null check (folder_type in ('ROOT','PERIOD','UPT','CATEGORY','ASPECT','ITEM')),
+  parent_mapping_key text, drive_folder_id text not null unique, drive_root_id text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at bigint not null default ((extract(epoch from now()) * 1000)::bigint),
+  updated_at bigint not null default ((extract(epoch from now()) * 1000)::bigint)
+);
+create index if not exists idx_maturity_audit_drive_folders_audit on maturity_audit_drive_folders(audit_id, folder_type);
+alter table maturity_audit_events enable row level security;
+alter table maturity_audit_evidence enable row level security;
+alter table maturity_audit_drive_folders enable row level security;
+revoke all on maturity_audit_events, maturity_audit_evidence, maturity_audit_drive_folders from anon, authenticated;
+grant all on maturity_audit_events, maturity_audit_evidence, maturity_audit_drive_folders to service_role;
+
+-- Maturity Drive security delta: canonical UPT/actor scope and recoverable
+-- assignment records. Mirrors 20260802_maturity_drive_security_delta.sql.
+alter table maturity_audits add column if not exists upt_id text references upt(id) on delete restrict;
+alter table maturity_audits add column if not exists created_by uuid references profiles(id) on delete set null;
+update maturity_audits audit set upt_id = unit.id from upt unit where audit.upt_id is null and unit.data->>'nama' = audit.upt;
+update maturity_audits set created_by = updated_by where created_by is null;
+alter table maturity_audits alter column upt_id set not null;
+alter table maturity_audits alter column created_by drop not null;
+drop index if exists idx_maturity_audits_upt_period_key;
+create unique index if not exists idx_maturity_audits_upt_id_period_key on maturity_audits(upt_id, period_key);
+alter table maturity_audit_evidence add column if not exists upt_id text references upt(id) on delete restrict;
+update maturity_audit_evidence evidence set upt_id = audit.upt_id from maturity_audits audit where evidence.upt_id is null and evidence.audit_id = audit.id;
+alter table maturity_audit_evidence alter column upt_id set not null;
+alter table maturity_audit_evidence add column if not exists assignment_state text not null default 'ACTIVE';
+alter table maturity_audit_evidence drop constraint if exists maturity_audit_evidence_assignment_state_check;
+alter table maturity_audit_evidence add constraint maturity_audit_evidence_assignment_state_check check (assignment_state in ('ACTIVE','NEEDS_REPAIR'));
+create table if not exists maturity_audit_drive_unassigned (
+  id uuid primary key default gen_random_uuid(), audit_id text not null references maturity_audits(id) on delete cascade,
+  upt_id text not null references upt(id) on delete restrict, period_key text not null check (period_key ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
+  drive_root_id text not null, drive_file_id text not null, source_folder_id text not null, file_name text not null,
+  mime_type text not null default 'application/octet-stream', file_size bigint not null default 0 check (file_size >= 0), md5_checksum text,
+  assignment_state text not null default 'UNASSIGNED' check (assignment_state in ('UNASSIGNED','ASSIGNING','ACTIVE','NEEDS_REPAIR')),
+  target_folder_id text, target_aspect_id text, target_item_id text, target_item_label text, target_category_id text, target_category_label text,
+  assigned_by uuid references profiles(id) on delete set null, assigned_at bigint, last_error text,
+  created_at bigint not null default ((extract(epoch from now()) * 1000)::bigint), updated_at bigint not null default ((extract(epoch from now()) * 1000)::bigint),
+  unique (audit_id, drive_file_id)
+);
+create index if not exists idx_maturity_drive_unassigned_scope on maturity_audit_drive_unassigned(audit_id, upt_id, period_key, assignment_state);
+alter table maturity_audit_drive_unassigned enable row level security;
+revoke all on maturity_audit_drive_unassigned from anon, authenticated;
+grant all on maturity_audit_drive_unassigned to service_role;
+create or replace function public.set_maturity_audit_actor()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null then
+    if tg_op = 'INSERT' then new.created_by := auth.uid(); end if;
+    new.updated_by := auth.uid();
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_maturity_audits_actor on public.maturity_audits;
+create trigger trg_maturity_audits_actor before insert or update on public.maturity_audits for each row execute function public.set_maturity_audit_actor();
+create or replace function public.create_maturity_drive_stub(p_audit_id text, p_upt_id text, p_period_key text, p_created_at bigint, p_actor_id uuid)
+returns table(id text, upt text, upt_id text, uit_id text, status text, created_at bigint, period_key text, score numeric)
+language plpgsql security definer set search_path = public as $$
+declare v_upt text; v_uit_id text;
+begin
+  select unit.data->>'nama', unit.uit_id into v_upt, v_uit_id
+  from public.upt unit where unit.id = p_upt_id;
+  if v_upt is null then raise exception 'UPT tidak ditemukan' using errcode = '22023'; end if;
+  begin
+    insert into public.maturity_audits (id,data,created_at,updated_at,upt,upt_id,period_key,status,level,score,created_by,updated_by)
+    values (p_audit_id,jsonb_build_object('id',p_audit_id,'upt',v_upt,'uptId',p_upt_id,'status','DRAFT','level',1,'score',1,'periodKey',p_period_key,'createdAt',p_created_at,'updatedAt',p_created_at,'evidence','{}'::jsonb,'maturityDriveDraft',true),p_created_at,p_created_at,v_upt,p_upt_id,p_period_key,'DRAFT',1,1,p_actor_id,p_actor_id);
+  exception when unique_violation then
+    if exists (select 1 from public.maturity_audits where upt_id=p_upt_id and period_key=p_period_key and id<>p_audit_id) then raise exception 'UPT ini sudah memiliki audit Maturity untuk periode %.',p_period_key using errcode='23505'; end if;
+  end;
+  return query select a.id,a.upt,a.upt_id,unit.uit_id,a.status,a.created_at,a.period_key,a.score from public.maturity_audits a join public.upt unit on unit.id=a.upt_id where a.id=p_audit_id;
+end;
+$$;
+revoke all on function public.create_maturity_drive_stub(text,text,text,bigint,uuid) from public;
+grant execute on function public.create_maturity_drive_stub(text,text,text,bigint,uuid) to service_role;
 
 -- ────────────────────────────────────────────────────────────
 -- 24. STOCK_PHOTO_EMBEDDINGS — pencarian barang Data Stok BERDASARKAN FOTO
