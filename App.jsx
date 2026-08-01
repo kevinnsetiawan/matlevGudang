@@ -5134,7 +5134,12 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
     // ForecastStokPage.jsx, lihat src/lib/tsbForecast.js untuk alasan lengkap (pola pemakaian
     // material gudang PLN intermiten/lumpy, rata-rata flat bias oleh panjang jendela observasi).
     const { forecastPerPeriod } = tsbMonthlyForecast(expandMonthlySeriesFromMap(historyMap));
-    const rataRataBulanan = Math.floor(forecastPerPeriod);
+    // Bulatkan HANYA untuk teks yang ditampilkan (Math.round, bukan Math.floor -- floor pernah
+    // bikin rate kecil seperti 0,3/bulan tampil "0" dan salah dibaca "tidak ada data pemakaian"
+    // padahal histori-nya ada, ditemukan user 2026-08-01 pada material dgn demand sangat jarang).
+    // Perhitungan estimasi hari (estimasiHari) TETAP pakai forecastPerPeriod asli/tidak dibulatkan
+    // supaya sinyal demand kecil tidak hilang duluan sebelum sempat dipakai menghitung.
+    const rataRataBulanan = Math.round(forecastPerPeriod);
     let trenPersen = null, trenLabel = "data terlalu sedikit untuk tren";
     if (history.length>=4) {
       const mid = Math.floor(history.length/2);
@@ -5143,7 +5148,7 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
       trenPersen = avgAwal===0 ? (avgAkhir===0?0:100) : Math.round(((avgAkhir-avgAwal)/avgAwal)*100);
       trenLabel = `${trenPersen>=0?"naik":"turun"} ${fmtNum(Math.abs(trenPersen))}%`;
     }
-    const estimasiHari = rataRataBulanan>0 ? Math.round(totalQty/(rataRataBulanan/30)) : null;
+    const estimasiHari = forecastPerPeriod>0 ? Math.round(totalQty/(forecastPerPeriod/30)) : null;
     const estimasiHariText = estimasiHari===null ? "tidak dapat dihitung (belum ada data pemakaian)" : `${fmtNum(estimasiHari)} hari`;
 
     const prompt = `Analisis mendalam untuk material berikut:
