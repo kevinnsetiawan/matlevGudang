@@ -1,7 +1,7 @@
 // Komponen DashboardAsman — dipindah dari App.jsx (refactor Fase 4f).
 import { fmtRp } from "../lib/utils.js";
 import { fmtNum, getKritisAgg } from "../lib/ragShared.mjs";
-import { getMaterialAkanHabis } from "../lib/analytics.js";
+import { getMaterialAkanHabis, buildMonthlySeriesByKatalog } from "../lib/analytics.js";
 import { KPISaldoCards } from "./KPISaldoCards.jsx";
 import { PendingWidget } from "./PendingWidget.jsx";
 import { RencanaWidget } from "./RencanaWidget.jsx";
@@ -12,7 +12,7 @@ import { Package, Money, Warning, Hourglass, ClipboardText } from "@phosphor-ico
 
 export function DashboardAsman({ stocks, txns, katalogList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-  const stokKritis = getKritisAgg(stocks);
+  const stokKritis = getKritisAgg(stocks, buildMonthlySeriesByKatalog(txns, stocks));
   const akanHabis = getMaterialAkanHabis(stocks, katalogList, txns, 5);
   const txnBulanIni = txns.filter(t=>{const d=new Date(t.createdAt); const now=new Date(); return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
 

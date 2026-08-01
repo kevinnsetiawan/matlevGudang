@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { WAREHOUSE } from "../constants.js";
 import { fmtDate } from "../lib/utils.js";
-import { fmtNum } from "../lib/ragShared.mjs";
+import { fmtNum, meanStdev, normInv, computeEffectiveMinQty } from "../lib/ragShared.mjs";
 import { supabase } from "../supabaseClient.js";
 import { Sparkline } from "./Sparkline.jsx";
 import { MaterialCadangTab } from "./MaterialCadangTab.jsx";
@@ -24,34 +24,6 @@ const DEFAULT_LEAD_TIME_DAYS = 30;
 // angka manual "Min Qty Alert" dari Data Stok sebagai fallback.
 const MIN_HISTORY_MONTHS = 3;
 const sortDays = days => days===Infinity ? Number.MAX_SAFE_INTEGER : days;
-
-function meanStdev(series) {
-  const mean = series.reduce((sum,value)=>sum+value,0)/series.length;
-  const stdev = Math.sqrt(series.reduce((sum,value)=>sum+(value-mean)**2,0)/series.length);
-  return { mean, stdev };
-}
-
-// Inverse normal CDF (algoritma Acklam), akurasi ~1e-9, dipakai utk Z-score safety stock.
-function normInv(p) {
-  if (p <= 0) return -Infinity;
-  if (p >= 1) return Infinity;
-  const a = [-3.969683028665376e+01, 2.209460984245205e+02, -2.759285104469687e+02, 1.383577518672690e+02, -3.066479806614716e+01, 2.506628277459239e+00];
-  const b = [-5.447609879822406e+01, 1.615858368580409e+02, -1.556989798598866e+02, 6.680131188771972e+01, -1.328068155288572e+01];
-  const c = [-7.784894002430293e-03, -3.223964580411365e-01, -2.400758277161838e+00, -2.549732539343734e+00, 4.374664141464968e+00, 2.938163982698783e+00];
-  const d = [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
-  const plow = 0.02425, phigh = 1 - plow;
-  let q, r;
-  if (p < plow) {
-    q = Math.sqrt(-2 * Math.log(p));
-    return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
-  } else if (p <= phigh) {
-    q = p - 0.5; r = q*q;
-    return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
-  } else {
-    q = Math.sqrt(-2 * Math.log(1-p));
-    return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1);
-  }
-}
 
 export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, forecastDetail, setForecastDetail,
   forecastDetailResult, setForecastDetailResult, forecastDetailLoading, forecastDrillDown,
@@ -129,14 +101,12 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
     // Stok minimum: kalau histori pemakaian sudah cukup panjang, hitung sendiri sebagai reorder
     // point (lead time demand + safety stock) dan abaikan angka manual. Service level flat 95%
     // -- TIDAK boleh pakai risk.key sebagai input karena minQty inilah yang menentukan risk.key.
-    const hasEnoughHistory = monthlySeries.length >= MIN_HISTORY_MONTHS;
-    let minQty = manualMinQty;
-    if (hasEnoughHistory) {
-      const { mean, stdev } = meanStdev(monthlySeries);
-      const leadTimeMonths = DEFAULT_LEAD_TIME_DAYS/30;
-      minQty = Math.ceil(mean*leadTimeMonths + normInv(0.95)*stdev*Math.sqrt(leadTimeMonths));
-    }
-    const minQtySource = hasEnoughHistory ? "computed" : "manual";
+    // Rumusnya di ragShared.mjs supaya identik dengan Dashboard & bot Telegram.
+    const { minQty, minQtySource } = computeEffectiveMinQty({
+      monthlySeries, manualMinQty,
+      leadTimeMonths: DEFAULT_LEAD_TIME_DAYS/30,
+      minHistoryMonths: MIN_HISTORY_MONTHS,
+    });
     const critical = minQty>0 && totalQty<=minQty;
     // perDay, minQty & monthlySeries dipakai tab Rekomendasi Pengadaan untuk menghitung usulan qty beli.
     const base = {days:estimatedDays,perDay,minQty,minQtySource,monthlySeries};

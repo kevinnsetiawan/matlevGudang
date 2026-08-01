@@ -6,6 +6,11 @@
 // ikut meluruh ke 0 kalau material sudah lama tidak dipakai (beda dari Croston's klasik yang
 // forecast-nya tetap flat selamanya walau demand sudah berhenti total — cocok untuk kasus
 // material yang mungkin sudah obsolete). Referensi: Teunter, Syntetos & Babai (2011).
+// expandMonthlySeriesFromMap pindah ke ragShared.mjs (dipakai lintas browser + Node/bot);
+// di-re-export dari sini supaya importer lama (App.jsx, tests) tidak perlu diubah.
+import { expandMonthlySeriesFromMap } from "./ragShared.mjs";
+export { expandMonthlySeriesFromMap };
+
 const ALPHA = 0.1; // smoothing probabilitas kejadian demand per bulan
 const BETA = 0.1;  // smoothing besaran demand saat terjadi
 
@@ -18,24 +23,6 @@ export function tsbMonthlyForecast(monthlySeries) {
     else { a += ALPHA * (0 - a); }
   }
   return { demandProbability: a, avgDemandSize: z, forecastPerPeriod: a * z };
-}
-
-// Ubah map {"YYYY-MM": qty} (yang cuma menyimpan bulan berisi transaksi) menjadi array
-// berurutan dari bulan tertua sampai `now`, dengan bulan kosong diisi 0.
-export function expandMonthlySeriesFromMap(historyMap, now = Date.now()) {
-  const keys = Object.keys(historyMap);
-  if (keys.length === 0) return [];
-  const toIndex = (key) => { const [y, m] = key.split("-").map(Number); return y * 12 + (m - 1); };
-  const nowDate = new Date(now);
-  const endIdx = nowDate.getFullYear() * 12 + nowDate.getMonth();
-  const startIdx = Math.min(...keys.map(toIndex));
-  const series = [];
-  for (let idx = startIdx; idx <= endIdx; idx++) {
-    const y = Math.floor(idx / 12), m = (idx % 12) + 1;
-    const key = `${y}-${String(m).padStart(2, "0")}`;
-    series.push(historyMap[key] || 0);
-  }
-  return series;
 }
 
 // Sama seperti expandMonthlySeriesFromMap tapi input-nya list {qty, ts} (dipakai getRisk()

@@ -1,6 +1,7 @@
 // Komponen DashboardManager — dipindah dari App.jsx (refactor Fase 4f).
 import { fmtRp } from "../lib/utils.js";
 import { fmtNum, getKritisAgg } from "../lib/ragShared.mjs";
+import { buildMonthlySeriesByKatalog } from "../lib/analytics.js";
 import { KPISaldoCards } from "./KPISaldoCards.jsx";
 import { CollapsibleSection } from "./CollapsibleSection.jsx";
 import { PendingWidget } from "./PendingWidget.jsx";
@@ -16,7 +17,10 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
   const nilaiPersediaan = stocks.filter(s=>s.jenisBarang==="Persediaan").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiPersediaanBursa = stocks.filter(s=>s.jenisBarang==="Persediaan Bursa").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiPreMemory = stocks.filter(s=>s.jenisBarang==="Pre Memory").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-  const stokKritis = getKritisAgg(stocks);
+  // Deret pemakaian bulanan per katalog — key-nya katalogId (bukan lokasi/UPT), jadi map yang
+  // sama dipakai ulang untuk rekap per-UPT di tabel bawah.
+  const monthlySeriesByKatalogId = buildMonthlySeriesByKatalog(txns, stocks);
+  const stokKritis = getKritisAgg(stocks, monthlySeriesByKatalogId);
   const terlambat = rencanaKedatanganList.flatMap(r=>(r.items||[]).map(i=>({...i,tanggalSerahTerima:r.tanggalSerahTerima}))).filter(i=>i.tanggalSerahTerima && new Date(i.tanggalSerahTerima).getTime()<Date.now());
   const txnBulanIni = txns.filter(t=>{const d=new Date(t.createdAt); const now=new Date(); return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
 
@@ -96,7 +100,7 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
                 const isSurabaya = upt.id==="UPT-SBY";
                 const uptStocks = isSurabaya ? stocks : [];
                 const uptNilai = uptStocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
-                const uptKritis = getKritisAgg(uptStocks).length;
+                const uptKritis = getKritisAgg(uptStocks, monthlySeriesByKatalogId).length;
                 const uptTxn = isSurabaya ? txnBulanIni.length : 0;
                 return (
                   <tr key={upt.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"white":"#f9fafb"}}>

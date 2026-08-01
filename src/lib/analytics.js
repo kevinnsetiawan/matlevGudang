@@ -1,6 +1,28 @@
 // Helper analitik dashboard (top pemakaian/stok, material akan habis, ringkasan txn)
 // — dipindah dari App.jsx (refactor Fase 4f).
 import { fmtDate } from "./utils.js";
+import { expandMonthlySeriesFromMap, computeEffectiveMinQty } from "./ragShared.mjs";
+
+// Deret pemakaian bulanan (KELUAR TUG9/TUG8 approved) per katalogId, bulan kosong terisi 0.
+// Dipakai pemanggil getKritisAgg() (App.jsx, DashboardAsman, DashboardManager) supaya stok
+// minimum ikut dihitung otomatis dari histori — lihat computeEffectiveMinQty di ragShared.mjs.
+export function buildMonthlySeriesByKatalog(txns, stocks) {
+  const map = {};
+  (txns||[]).forEach(t => {
+    if (!["TUG9","TUG8"].includes(t.docType) || t.status!=="APPROVED") return;
+    const d = new Date(t.approvedAt||t.createdAt||0);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    (t.stockItems||[]).forEach(si => {
+      const stockRow = (stocks||[]).find(s=>s.id===si.stockId);
+      if (!stockRow?.katalogId) return;
+      if (!map[stockRow.katalogId]) map[stockRow.katalogId] = {};
+      map[stockRow.katalogId][key] = (map[stockRow.katalogId][key]||0) + (si.qty||0);
+    });
+  });
+  const result = {};
+  Object.entries(map).forEach(([kid, historyMap]) => { result[kid] = expandMonthlySeriesFromMap(historyMap); });
+  return result;
+}
 
 export function getTopPemakaian(txns, stocks, katalogList, mode, n) {
   // Collect all outgoing items from approved TUG-9 and TUG-8
@@ -69,6 +91,11 @@ export function getMaterialAkanHabis(stocks, katalogList, txns, n) {
     });
   });
 
+  // Deret bulanan (untuk stok minimum otomatis) sengaja lewat helper bersama, bukan disusun
+  // ulang dari usageMap di atas — usageMap cuma simpan total+timestamp tertua (input avgPerBulan),
+  // bukan breakdown per bulan. Satu pass ekstra atas txns lebih murah daripada dua rumus deret.
+  const monthlySeriesByKatalog = buildMonthlySeriesByKatalog(txns, stocks);
+
   const results = Object.values(grouped).map(g => {
     const usage = usageMap[g.katalogId];
     let avgPerBulan = 0;
@@ -78,12 +105,16 @@ export function getMaterialAkanHabis(stocks, katalogList, txns, n) {
       avgPerBulan = usage.totalQty / bulan;
       estimasiHari = avgPerBulan > 0 ? Math.round(g.totalQty / (avgPerBulan/30)) : Infinity;
     }
-    const isKritis = g.minQty > 0 && g.totalQty <= g.minQty;
+    const { minQty: effectiveMinQty, minQtySource } = computeEffectiveMinQty({
+      monthlySeries: monthlySeriesByKatalog[g.katalogId] || [],
+      manualMinQty: g.minQty,
+    });
+    const isKritis = effectiveMinQty > 0 && g.totalQty <= effectiveMinQty;
     const isPerhatian = estimasiHari <= 30;
     const isWaspada = estimasiHari > 30 && estimasiHari <= 60;
     if (!isKritis && !isPerhatian && !isWaspada) return null;
     let badge = isKritis?"🔴 Kritis":isPerhatian?"🟡 Perhatian":"🟠 Waspada";
-    return { ...g, avgPerBulan, estimasiHari, isKritis, badge };
+    return { ...g, avgPerBulan, estimasiHari, isKritis, badge, minQty: effectiveMinQty, minQtySource };
   }).filter(Boolean);
 
   results.sort((a,b) => {

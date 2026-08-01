@@ -100,7 +100,7 @@ import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoM
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
-import { getMaterialAkanHabis } from "./src/lib/analytics.js";
+import { getMaterialAkanHabis, buildMonthlySeriesByKatalog } from "./src/lib/analytics.js";
 
 // Turn this on only after the reviewed self-host migration is installed. It
 // makes TUG-8/9 fail closed rather than silently reverting to browser storage.
@@ -4803,7 +4803,7 @@ export default function PLNWarehouse() {
     lokasiList.forEach(l=>{ gudangNamaByLokasiId[l.id] = gudangList.find(g=>g.id===l.gudangId)?.nama || ""; });
     const withLokasi = s => ({ gudang: gudangNamaByLokasiId[s.lokasiId]||"", blok: s.lokasi||"-" });
     const top20 = [...enrichedStocks].sort((a,b)=>(b.qty*b.price)-(a.qty*a.price)).slice(0,20);
-    const kritis = getKritisAgg(enrichedStocks);
+    const kritis = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
     const pending = txns.filter(t=>t.status==="PENDING");
     const tiga_bulan_lalu = Date.now() - 90*24*60*60*1000;
     const txnRecent = txns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
@@ -4902,7 +4902,7 @@ export default function PLNWarehouse() {
       .slice(0,20);
 
     // Stok kritis
-    const kritis = getKritisAgg(enrichedStocks);
+    const kritis = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
 
     // Pending approvals
     const pending = txns.filter(t=>t.status==="PENDING");
@@ -5306,7 +5306,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     return items.sort((a,b)=>(b.tanggal||0)-(a.tanggal||0));
   }, [txns, katalogList]);
   // Material kritis AGREGAT per katalog (total semua lokasi ≤ minimum) — dipakai seluruh dashboard.
-  const lowStocks = getKritisAgg(enrichedStocks);
+  const lowStocks = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
   const forecastSoon = getMaterialAkanHabis(enrichedStocks, katalogList, txns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
   const totalVal = enrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
   const filteredStocks = enrichedStocks.filter(s=>{

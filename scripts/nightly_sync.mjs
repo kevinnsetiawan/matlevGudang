@@ -34,7 +34,7 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "../src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed, expandMonthlySeriesFromMap } from "../src/lib/ragShared.mjs";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -64,7 +64,11 @@ async function main() {
     supabase.from("lokasi").select("id, data"),
     supabase.from("gudang").select("id, data"),
     supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true),
-    supabase.from("tug15_history").select("*").gte("tanggal", new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).limit(500),
+    // limit dinaikkan dari 500: itu batas TOTAL lintas semua katalog dalam 180 hari, terlalu kecil
+    // untuk menghitung deret pemakaian bulanan per material (materialnya ratusan). Filter tanggal
+    // 180 hari yang jadi pembatas utama; limit tinggal jaring pengaman anti-OOM. Jumlah baris riil
+    // di-log di bawah supaya kalau suatu saat kepotong lagi, kelihatan di log GitHub Actions.
+    supabase.from("tug15_history").select("*").gte("tanggal", new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)).limit(20000),
   ]);
   if (eKat) throw eKat;
   if (eStock) throw eStock;
@@ -139,12 +143,28 @@ async function main() {
   }));
 
   // Ringkas mutasi per katalog dari tug15_history (tetap valid — tabel ini tidak ikut migrasi).
+  // Loop yang sama sekalian membangun peta pemakaian per bulan {katalogId: {"YYYY-MM": qty}} dari
+  // baris KELUAR saja — mirror definisi "usage" di browser (cuma TUG9/TUG8 yang dihitung sbg
+  // pemakaian, penerimaan/retur tidak) — untuk stok minimum otomatis di getKritisAgg di bawah.
+  console.log(`Baris tug15_history 180 hari terakhir: ${(mutasi || []).length}`);
   const mutasiByKatalog = {};
+  const keluarPerBulanByKatalog = {};
   (mutasi || []).forEach((m) => {
     if (!mutasiByKatalog[m.katalog_id]) mutasiByKatalog[m.katalog_id] = { masuk: 0, keluar: 0, count: 0 };
     if (m.jenis_transaksi === "MASUK") mutasiByKatalog[m.katalog_id].masuk += Number(m.qty) || 0;
-    else mutasiByKatalog[m.katalog_id].keluar += Number(m.qty) || 0;
+    else {
+      mutasiByKatalog[m.katalog_id].keluar += Number(m.qty) || 0;
+      if (m.jenis_transaksi === "KELUAR" && m.katalog_id && m.tanggal) {
+        const bulan = String(m.tanggal).slice(0, 7); // "YYYY-MM-DD" → "YYYY-MM"
+        if (!keluarPerBulanByKatalog[m.katalog_id]) keluarPerBulanByKatalog[m.katalog_id] = {};
+        keluarPerBulanByKatalog[m.katalog_id][bulan] = (keluarPerBulanByKatalog[m.katalog_id][bulan] || 0) + (Number(m.qty) || 0);
+      }
+    }
     mutasiByKatalog[m.katalog_id].count += 1;
+  });
+  const monthlySeriesByKatalogId = {};
+  Object.entries(keluarPerBulanByKatalog).forEach(([katalogId, historyMap]) => {
+    monthlySeriesByKatalogId[katalogId] = expandMonthlySeriesFromMap(historyMap);
   });
   const namaByKatalogId = {};
   katalogList.forEach((k) => { namaByKatalogId[k.id] = k.name; });
@@ -192,7 +212,8 @@ async function main() {
   };
   const enriched = stocks.map((s) => ({ ...s, nilai: (s.qty || 0) * (s.price || 0) }));
   const top20 = [...enriched].sort((a, b) => b.nilai - a.nilai).slice(0, 20);
-  const kritis = getKritisAgg(enriched); // agregat per katalog — konsisten dgn dashboard App.jsx
+  // agregat per katalog + stok minimum otomatis dari histori — konsisten dgn dashboard App.jsx
+  const kritis = getKritisAgg(enriched, monthlySeriesByKatalogId);
   const state_data = {
     generatedAt: new Date().toISOString(),
     generatedBy: "nightly_sync.mjs (cron)",
