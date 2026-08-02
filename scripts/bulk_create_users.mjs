@@ -22,13 +22,15 @@
 //   - username        : dipakai login (tanpa "@..."), huruf kecil, tanpa spasi
 //   - password        : minimal 6 karakter (syarat Supabase Auth)
 //   - name            : nama tampilan
-//   - role            : ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT /
-//                       ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER
+//   - role            : ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / ASMAN_LOG_UIT /
+//                       MGR_LOGISTIK_UIT / ADMIN_LOG_PUSAT / ADMIN_ULTG / MGR_ULTG /
+//                       PENGADAAN / VIEWER
 //                       (SUPERADMIN TIDAK BISA didaftarkan lewat script ini — manual SQL/Dashboard saja)
 //   - jabatan         : opsional, boleh kosong
 //   - upt_id          : wajib untuk role scope-UPT (ADMIN/TL/ASMAN/MANAGER, PENGADAAN mode UPT)
 //   - ultg_id         : WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG, selain itu boleh kosong
-//   - uit_id          : wajib untuk role ADMIN_UIT / MGR_LOGISTIK_UIT, atau PENGADAAN mode UIT
+//   - uit_id          : wajib untuk role ADMIN_UIT / ASMAN_LOG_UIT / MGR_LOGISTIK_UIT, atau
+//                       PENGADAAN mode UIT. ADMIN_LOG_PUSAT nasional — tidak perlu uit_id.
 //   - pengadaan_scope : "UPT" (default) atau "UIT" — cuma relevan kalau role=PENGADAAN, menentukan
 //                       field mana (upt_id atau uit_id) yang dipakai & kuota mana yang dicek
 
@@ -39,15 +41,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const AUTH_EMAIL_DOMAIN = "@warnoto.pln.local"; // harus SAMA PERSIS dengan AUTH_EMAIL_DOMAIN di App.jsx
 
-const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
+const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
 
 // Kuota role per UPT/UIT (hard limit) — sama seperti admin-create-user/admin-update-user,
 // supaya batch import CSV tidak bisa bikin 2 Manager/Asman/TL/Admin/Pengadaan di 1 UPT/UIT
 // yang sama, konsisten dengan validasi yang sudah aktif di menu Kelola Akun.
 const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
-const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
-const UIT_SCOPED_ROLES = ["ADMIN_UIT", "MGR_LOGISTIK_UIT"];
-const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT" };
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, ASMAN_LOG_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 }; // ADMIN_LOG_PUSAT nasional, tidak terikat 1 UIT
+const UIT_SCOPED_ROLES = ["ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT"];
+const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", ASMAN_LOG_UIT: "Asman Logistik UIT", ADMIN_LOG_PUSAT: "Admin Logistik Pusat" };
 
 if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   console.error("Env var SUPABASE_URL / SUPABASE_SECRET_KEY (service_role) belum di-set.");

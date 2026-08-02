@@ -16,7 +16,7 @@ const HISTORY_STATUS_LABEL = {
 
 export function MaturityDashboardTab({
   C, sty, currentUser, isMobile, hasRole,
-  maturityAudits, maturityAuditHistory = [], maturity5SAssessments = [], selectedMaturityUpt, setSelectedMaturityUpt, canSwitchMaturityUpt,
+  maturityAudits, maturityAuditHistory = [], maturity5SAssessments = [], selectedMaturityUpt, selectedMaturityUptId = "", setSelectedMaturityUpt, canSwitchMaturityUpt,
   maturitySubTab, setMaturitySubTab,
   maturityAuditModal, setMaturityAuditModal,
   auditListPage, setAuditListPage,
@@ -32,7 +32,13 @@ export function MaturityDashboardTab({
   MATURITY_LEVELS, MATURITY_WORKFLOW_LABEL, MATURITY_WORKFLOW_COLOR,
 }) {
             const is3D = false;
-            const uptAudits = maturityAudits.filter(a => (a.upt || "UPT Surabaya") === selectedMaturityUpt);
+            // Scoping per-UPT pakai id (FK) supaya tidak bergantung kecocokan
+            // string nama; cocokkan nama hanya bila salah satu sisi belum punya id
+            // (mis. Master UPT belum termuat / baris lama).
+            const isSelectedUpt = row => (row.uptId && selectedMaturityUptId)
+              ? row.uptId === selectedMaturityUptId
+              : (row.upt || "UPT Surabaya") === selectedMaturityUpt;
+            const uptAudits = maturityAudits.filter(isSelectedUpt);
             const latestAudit = uptAudits[0] || null;
             const calcResult = latestAudit ? calcMaturityScore(latestAudit.aspekScores || {}, latestAudit.evidence || {}) : { itemA: 0, itemB: 0, total: 0, level: 1 };
             const currentLevel = latestAudit ? calcResult.level : 1;
@@ -40,7 +46,7 @@ export function MaturityDashboardTab({
             const statusLabel = latestAudit ? (MATURITY_WORKFLOW_LABEL[latestAudit.status] || latestAudit.status) : "Belum Ada Audit";
             const statusColor = latestAudit ? (MATURITY_WORKFLOW_COLOR[latestAudit.status] || "#64748b") : "#64748b";
             const uptAuditHistory = maturityAuditHistory
-              .filter(item => (item.upt || "UPT Surabaya") === selectedMaturityUpt)
+              .filter(isSelectedUpt)
               .sort((a, b) => (a.tahun - b.tahun) || (a.semester - b.semester));
             const latestHistory = uptAuditHistory[uptAuditHistory.length - 1] || null;
             const previousHistory = uptAuditHistory[uptAuditHistory.length - 2] || null;
@@ -492,13 +498,14 @@ export function MaturityDashboardTab({
                   {/*  DAFTAR AUDIT (bila tidak sedang input/edit)  */}
                   {!maturityAuditModal && (() => {
                     const _nowD = new Date();
-                    const auditHasThisMonth = maturityAudits.some(a => {
-                      if ((a.upt || "UPT Surabaya") !== selectedMaturityUpt) return false;
+                    const auditHasThisMonth = uptAudits.some(a => {
                       const d = new Date(a.createdAt);
                       return d.getMonth() === _nowD.getMonth() && d.getFullYear() === _nowD.getFullYear();
                     });
-                    const auditTotal = maturityAudits.length;
-                    const auditPageItems = maturityAudits.slice((auditListPage - 1) * 5, auditListPage * 5);
+                    // Daftar audit ikut discope ke UPT terpilih — sebelumnya memakai
+                    // `maturityAudits` mentah sehingga audit UPT lain ikut terdaftar.
+                    const auditTotal = uptAudits.length;
+                    const auditPageItems = uptAudits.slice((auditListPage - 1) * 5, auditListPage * 5);
                     return (
                     <>
 
@@ -521,7 +528,7 @@ export function MaturityDashboardTab({
                             + Audit Baru
                           </button>
                         </div>
-                        {maturityAudits.length === 0 ? (
+                        {uptAudits.length === 0 ? (
                           <div style={{ textAlign: "center", padding: 32 }}>
                             <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 4 }}>Belum ada audit</div>
                             <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>Klik "+ Audit Baru" untuk memulai asesmen maturity level gudang.</div>
@@ -532,9 +539,13 @@ export function MaturityDashboardTab({
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                             {auditPageItems.map(a => {
-                              const canEditUPT = hasRole(currentUser, "ADMIN", "TL", "ASMAN", "MANAGER") && (a.status === "DRAFT" || a.status === "SELF_ASSESSMENT" || a.status === "REVISION");
-                              const canEditUIT = hasRole(currentUser, "ADMIN_UIT", "MGR_LOGISTIK_UIT") && a.status === "REVIEW_UIT";
-                              const canEditPusat = hasRole(currentUser, "SUPERADMIN", "MANAGER") && a.status === "FINAL";
+                              // Matriks sama persis dengan policy "Maturity audits update by stage".
+                              // ASMAN/MANAGER read-only di jenjang UPT (keputusan user 2026-08-02).
+                              const canEditUPT = hasRole(currentUser, "ADMIN", "TL") && (a.status === "DRAFT" || a.status === "SELF_ASSESSMENT" || a.status === "REVISION");
+                              const canEditUIT = hasRole(currentUser, "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT") && a.status === "REVIEW_UIT"; // SUPERADMIN ikut lolos
+                              // Pusat = ADMIN_LOG_PUSAT (+ SUPERADMIN lewat hasRole). MANAGER sengaja
+                              // TIDAK di sini — ia terikat satu UPT, jadi akan menilai final UPT-nya sendiri.
+                              const canEditPusat = hasRole(currentUser, "ADMIN_LOG_PUSAT") && (a.status === "REVIEW_PUSAT" || a.status === "FINAL");
                               const canReview = canEditUPT || canEditUIT || canEditPusat;
                               return (
                                 <div key={a.id} style={{
@@ -630,11 +641,11 @@ export function MaturityDashboardTab({
                     <button style={sty.btn("ghost")} onClick={() => setMaturitySubTab("pelaksanaan")}>← Kembali</button>
                   </div>
                   <div style={{ ...sty.card }}>
-                    {maturityAudits.filter(a => a.status === "FINAL").length === 0 ? (
+                    {uptAudits.filter(a => a.status === "FINAL").length === 0 ? (
                       <div style={{ fontSize: 14, color: C.muted, textAlign: "center", padding: 32 }}>Belum ada audit yang final dinilai Pusat.</div>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {maturityAudits.filter(a => a.status === "FINAL").map(a => (
+                        {uptAudits.filter(a => a.status === "FINAL").map(a => (
                           <div key={a.id} onClick={() => { openMaturityAudit(a); setMaturitySubTab("pelaksanaan"); }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderRadius: 10, border: `1px solid ${C.border}`, cursor: "pointer", transition: "background .15s" }} onMouseEnter={e => e.currentTarget.style.background = C.border} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                               <div style={{ width: 40, height: 40, borderRadius: 10, background: MATURITY_WORKFLOW_COLOR[a.status], color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 18, flexShrink: 0 }}>{a.level || "—"}</div>

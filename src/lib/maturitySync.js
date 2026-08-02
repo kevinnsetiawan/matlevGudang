@@ -10,15 +10,20 @@ const isBinaryUrl = value => typeof value === "string" && /^(?:data|blob):/i.tes
 // Nilai awal yang telah dikonfirmasi UPT Surabaya. Database tetap canonical;
 // daftar ini hanya dipakai sebagai fallback baca saat tabel/history belum dapat
 // dimuat, agar dashboard tidak kembali menampilkan angka statis di JSX.
+const DEFAULT_HISTORY_UPT_ID = "UPT-SBY";
 export const DEFAULT_MATURITY_AUDIT_HISTORY = Object.freeze([
-  { id: "MAH-UPT-SBY-2024-S1", upt: "UPT Surabaya", tahun: 2024, semester: 1, score: 3.58, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
-  { id: "MAH-UPT-SBY-2024-S2", upt: "UPT Surabaya", tahun: 2024, semester: 2, score: 3.74, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
-  { id: "MAH-UPT-SBY-2025-S1", upt: "UPT Surabaya", tahun: 2025, semester: 1, score: 3.86, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
-  { id: "MAH-UPT-SBY-2025-S2", upt: "UPT Surabaya", tahun: 2025, semester: 2, score: 4.12, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
-  { id: "MAH-UPT-SBY-2026-S1", upt: "UPT Surabaya", tahun: 2026, semester: 1, score: 4.26, status: "BERJALAN", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2024-S1", upt: "UPT Surabaya", uptId: DEFAULT_HISTORY_UPT_ID, tahun: 2024, semester: 1, score: 3.58, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2024-S2", upt: "UPT Surabaya", uptId: DEFAULT_HISTORY_UPT_ID, tahun: 2024, semester: 2, score: 3.74, status: "ARSIP", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2025-S1", upt: "UPT Surabaya", uptId: DEFAULT_HISTORY_UPT_ID, tahun: 2025, semester: 1, score: 3.86, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2025-S2", upt: "UPT Surabaya", uptId: DEFAULT_HISTORY_UPT_ID, tahun: 2025, semester: 2, score: 4.12, status: "FINAL", source: "HISTORIS_TERVERIFIKASI" },
+  { id: "MAH-UPT-SBY-2026-S1", upt: "UPT Surabaya", uptId: DEFAULT_HISTORY_UPT_ID, tahun: 2026, semester: 1, score: 4.26, status: "BERJALAN", source: "HISTORIS_TERVERIFIKASI" },
 ]);
 
-export const getDefaultMaturityAuditHistory = () => DEFAULT_MATURITY_AUDIT_HISTORY.map(item => ({ ...item }));
+// Fallback ini milik SATU UPT saja. Tanpa scoping, user UPT lain akan melihat
+// angka UPT Surabaya sebagai angkanya sendiri ketika load DB gagal — jadi UPT
+// lain (termasuk pemanggil tanpa argumen) sengaja dapat daftar kosong.
+export const getDefaultMaturityAuditHistory = uptId =>
+  uptId === DEFAULT_HISTORY_UPT_ID ? DEFAULT_MATURITY_AUDIT_HISTORY.map(item => ({ ...item })) : [];
 // Legacy localStorage records may carry usernames/old app IDs in fields that
 // now target UUID foreign-key columns. Keep the original value in `data`, but
 // only send canonical UUIDs to Postgres so one malformed record cannot abort a
@@ -71,6 +76,7 @@ function auditHistoryRowToItem(row) {
   return {
     id: row.id,
     upt: row.upt || "UPT Surabaya",
+    uptId: row.upt_id ?? null,
     tahun: Number(row.tahun),
     semester: Number(row.semester),
     score: Number(row.score),
@@ -87,6 +93,7 @@ function maturity5SRowToItem(row) {
   return {
     id: row.id,
     upt: row.upt || "UPT Surabaya",
+    uptId: row.upt_id ?? null,
     gudangId: row.gudang_id || "",
     gudangNama: row.gudang_nama || "",
     bulan: Number(row.bulan),
@@ -137,10 +144,32 @@ function auditItemToRow(item) {
   };
 }
 
+function auditHistoryItemToRow(item) {
+  return {
+    id: item.id,
+    upt: item.upt || "UPT Surabaya",
+    // NOT NULL + FK ke upt(id) sejak GELOMBANG A. Jangan pernah dipaksa jadi
+    // string kosong: biarkan server menolak baris tanpa UPT.
+    upt_id: item.uptId || null,
+    tahun: Number(item.tahun),
+    semester: Number(item.semester),
+    score: Math.min(5, Math.max(0, Number(item.score) || 0)),
+    status: HISTORY_STATUS.has(item.status) ? item.status : "ARSIP",
+    source: item.source || "HISTORIS_TERVERIFIKASI",
+    notes: item.notes || "",
+    created_at: asEpoch(item.createdAt, Date.now()),
+    updated_at: asEpoch(item.updatedAt, Date.now()),
+    updated_by: asOptionalUuid(item.updatedBy),
+  };
+}
+
 function maturity5SItemToRow(item) {
   return {
     id: item.id,
     upt: item.upt || "UPT Surabaya",
+    // Wajib terisi setelah GELOMBANG B (kolom NOT NULL + RLS per-UPT); dikirim
+    // apa adanya supaya baris tanpa UPT ditolak server, bukan diam-diam masuk.
+    upt_id: item.uptId || null,
     gudang_id: item.gudangId || null,
     gudang_nama: item.gudangNama || "",
     bulan: Math.min(12, Math.max(1, Number(item.bulan) || 1)),
@@ -189,12 +218,19 @@ async function upsertRows(table, rows) {
   return true;
 }
 
+// RLS yang tidak punya policy DELETE TIDAK melempar error: PostgREST balas 200
+// dengan 0 baris terhapus. Tanpa `.select()` penghapusan yang ditolak akan
+// terlihat sukses dan barisnya hilang dari UI padahal masih ada di server.
 async function deleteRow(table, id) {
   if (isDemoMode()) return true;
   if (!supabase) return false;
-  const { error } = await supabase.from(table).delete().eq("id", id);
+  const { data, error } = await supabase.from(table).delete().eq("id", id).select("id");
   if (error) {
     console.error(`delete ${table}: ${error.message}`, error);
+    return false;
+  }
+  if (!data || data.length === 0) {
+    console.error(`delete ${table}: ditolak server (0 baris terhapus, id=${id})`);
     return false;
   }
   return true;
@@ -217,6 +253,9 @@ export const loadMaturityAuditHistory = () => loadRows("maturity_audit_history",
 export const loadMaturity5SAssessments = () => loadRows("maturity_5s_assessments", maturity5SRowToItem);
 export const upsertMaturityAssessment = item => upsertRow("maturity_assessments", assessmentItemToRow(item));
 export const upsertMaturityAudit = item => upsertRow("maturity_audits", auditItemToRow(item));
+// Riwayat semester tidak punya form input manual — baris terbit dari audit FINAL
+// yang sudah disetujui. Writer ini disediakan untuk rantai approval itu.
+export const upsertMaturityAuditHistory = item => upsertRow("maturity_audit_history", auditHistoryItemToRow(item));
 export const upsertMaturityAssessments = items => upsertRows("maturity_assessments", items.map(assessmentItemToRow));
 export const upsertMaturityAudits = items => upsertRows("maturity_audits", items.map(auditItemToRow));
 export const deleteMaturityAssessment = id => deleteRow("maturity_assessments", id);

@@ -16,8 +16,19 @@ const ALLOWED_MIME = new Set([
   "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "text/plain", "text/csv",
 ]);
-const WRITER_ROLES = new Set(["ADMIN", "TL", "ASMAN", "MANAGER", "SUPERADMIN"]);
-const UIT_ROLES = new Set(["ADMIN_UIT", "MGR_LOGISTIK_UIT"]);
+// Selaras hirarki resmi 2026-08-02 dan jenjang review Maturity:
+// UPT menulis lewat ADMIN/TL saja (ASMAN & MANAGER read-only), peninjau UIT dan
+// Pusat juga perlu menulis karena mereka mengoreksi evidence saat review.
+const WRITER_ROLES = new Set([
+  "ADMIN", "TL",
+  "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT",
+  "ADMIN_LOG_PUSAT", "SUPERADMIN",
+]);
+// Lingkup nasional: bebas UPT dan UIT. ADMIN_LOG_PUSAT TIDAK boleh dimasukkan ke
+// UIT_ROLES — branch itu mewajibkan uit_id profil cocok dengan UIT milik UPT,
+// sedangkan akun Pusat tidak punya uit_id, jadi justru akan ditolak 403.
+const NATIONAL_ROLES = new Set(["SUPERADMIN", "ADMIN_LOG_PUSAT"]);
+const UIT_ROLES = new Set(["ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT"]);
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -105,7 +116,7 @@ async function findUptById(id: string) {
 }
 async function assertUptAccess(ctx: any, upt: any, write = false) {
   if (write && !WRITER_ROLES.has(ctx.profile.role)) throw Object.assign(new Error("Role Anda tidak berwenang mengubah evidence Maturity."), { status: 403 });
-  if (ctx.profile.role === "SUPERADMIN") return;
+  if (NATIONAL_ROLES.has(ctx.profile.role)) return;
   if (UIT_ROLES.has(ctx.profile.role)) {
     if (!ctx.profile.uit_id || ctx.profile.uit_id !== upt.uitId) throw Object.assign(new Error("Role UIT hanya dapat mengakses UPT pada UIT sendiri."), { status: 403 });
     return;

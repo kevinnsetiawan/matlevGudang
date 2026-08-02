@@ -29,7 +29,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const AUTH_EMAIL_DOMAIN = "@warnoto.pln.local"; // harus SAMA PERSIS dengan App.jsx
 
-const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","MGR_LOGISTIK_UIT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
+const VALID_ROLES = ["ADMIN","TL","ASMAN","MANAGER","ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT","ADMIN_ULTG","MGR_ULTG","PENGADAAN","VIEWER","SUPERADMIN"];
 
 // Kuota role per UPT — 1 unit UPT hanya boleh punya 1 orang di posisi kunci
 // ini sekaligus, supaya tidak ada rangkap jabatan struktural. Hard limit:
@@ -39,9 +39,13 @@ const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
 // Kuota role per UIT — sama prinsipnya, level di atas UPT. PENGADAAN dibagi 2
 // scope independen (UPT vs UIT), dibedakan lewat upt_id vs uit_id yang terisi
 // (lihat pengecekan di bawah), bukan role value yang berbeda.
-const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
-const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT" };
-const UIT_SCOPED_ROLES = ["ADMIN_UIT", "MGR_LOGISTIK_UIT"]; // PENGADAAN scope UIT ditentukan lewat body.pengadaanScope, bukan role tetap
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, ASMAN_LOG_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 }; // ADMIN_LOG_PUSAT nasional, tidak terikat 1 UIT
+const ROLE_LABELS = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman Konstruksi", MANAGER: "Manager", PENGADAAN: "Tim Pengadaan", ADMIN_UIT: "Admin UIT", MGR_LOGISTIK_UIT: "Manager Logistik UIT", ASMAN_LOG_UIT: "Asman Logistik UIT", ADMIN_LOG_PUSAT: "Admin Logistik Pusat" };
+const UIT_SCOPED_ROLES = ["ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT"]; // PENGADAAN scope UIT ditentukan lewat body.pengadaanScope, bukan role tetap
+// Peran nasional (Pusat): lingkupnya seluruh UPT dan UIT, jadi TIDAK terikat
+// upt_id maupun uit_id. Tanpa cabang ini akun Pusat dipaksa memilih satu UPT
+// dan menyimpan upt_id yang salah secara semantik.
+const NATIONAL_ROLES = ["ADMIN_LOG_PUSAT"];
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -112,17 +116,23 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: `Role ${role} wajib memilih unit ULTG.` });
     }
 
-    // Role level-UIT (ADMIN_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT pakai
+    // Role level-UIT (ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT pakai
     // uitId, bukan uptId — field-nya saling eksklusif di form Kelola Akun.
+    const isNational = NATIONAL_ROLES.includes(role);
     const isUitScoped = UIT_SCOPED_ROLES.includes(role) || (role === "PENGADAAN" && pengadaanScope === "UIT");
-    if (isUitScoped) {
+    if (isNational) {
+      // Lingkup nasional — tidak memilih UPT maupun UIT.
+    } else if (isUitScoped) {
       if (!uitId) return json({ ok: false, error: `Role ${ROLE_LABELS[role] || role} wajib memilih unit UIT.` });
     } else {
       if (!uptId) return json({ ok: false, error: "UPT wajib dipilih." });
     }
 
-    // ── 2b. Kuota role per UPT/UIT (hard limit) ──
-    if (isUitScoped) {
+    // ── 2b. Kuota role per UPT/UIT (hard limit) — peran nasional tidak dikuotakan
+    //        per unit karena tidak punya upt_id/uit_id untuk dijadikan pembanding.
+    if (isNational) {
+      // tanpa kuota per unit
+    } else if (isUitScoped) {
       if (UIT_ROLE_QUOTA[role] !== undefined) {
         const { data: existing, error: quotaErr } = await admin
           .from("profiles").select("name").eq("role", role).eq("uit_id", uitId);
@@ -160,7 +170,7 @@ Deno.serve(async (req) => {
     //        timpa dengan data asli dari form ──
     const { error: profErr } = await admin.from("profiles").update({
       username, name, role, jabatan,
-      upt_id: isUitScoped ? null : uptId,
+      upt_id: (isNational || isUitScoped) ? null : uptId,
       ultg_id: ultgId,
       uit_id: isUitScoped ? uitId : null,
       gudang_ids: gudangIds,

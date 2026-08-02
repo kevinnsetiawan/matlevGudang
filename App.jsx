@@ -116,7 +116,8 @@ const ULTG_ROLES = ["ADMIN_ULTG","MGR_ULTG"]; // role dengan sidebar terbatas (v
 // Kuota role per UPT untuk indikator di form Kelola Akun — validasi sebenarnya
 // (hard limit) ditegakkan server-side di admin-create-user/admin-update-user.
 const UPT_ROLE_QUOTA = { MANAGER: 1, ASMAN: 1, TL: 1, ADMIN: 1, PENGADAAN: 1 };
-const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
+// ADMIN_LOG_PUSAT sengaja TIDAK di sini: Pusat tingkat nasional, tidak terikat satu UIT.
+const UIT_ROLE_QUOTA = { ADMIN_UIT: 1, ASMAN_LOG_UIT: 1, MGR_LOGISTIK_UIT: 1, PENGADAAN: 1 };
 
 // Who can create TUG-9 transactions
 
@@ -135,8 +136,8 @@ ATTB_FIELDS_BY_JENIS.JALAN = [...ATTB_FIELDS_BY_JENIS.BANGUNAN, {key:"hilang", l
 // ─── MASTER GUDANG (bangunan gudang, parent dari Blok/Lokasi) ──────────
 const MATURITY_LEVELS = { 1:"Basic", 2:"Developing", 3:"Defined", 4:"Managed", 5:"Excellent" };
 // Penilaian Maturity (audit workflow) — label & warna status berjenjang.
-const MATURITY_WORKFLOW_LABEL = { DRAFT:"Draft", SELF_ASSESSMENT:"Self Assessment (UPT)", REVIEW_UIT:"Review UIT", REVISION:"Revisi", FINAL:"Nilai Final (Pusat)" };
-const MATURITY_WORKFLOW_COLOR = { DRAFT:"#94a3b8", SELF_ASSESSMENT:"#3b82f6", REVIEW_UIT:"#f59e0b", REVISION:"#ef4444", FINAL:"#1d4ed8" };
+const MATURITY_WORKFLOW_LABEL = { DRAFT:"Draft", SELF_ASSESSMENT:"Self Assessment (UPT)", REVIEW_UIT:"Review UIT", REVIEW_PUSAT:"Review Pusat", REVISION:"Revisi", FINAL:"Nilai Final (Pusat)" };
+const MATURITY_WORKFLOW_COLOR = { DRAFT:"#94a3b8", SELF_ASSESSMENT:"#3b82f6", REVIEW_UIT:"#f59e0b", REVIEW_PUSAT:"#6366f1", REVISION:"#ef4444", FINAL:"#1d4ed8" };
 
 // ─── DATA STOK dari SAP PEMAT (145 material Persediaan UPT Surabaya) ───
 // Data real dari file PEMAT_04062026.csv — selalu tersedia saat aplikasi dibuka.
@@ -291,7 +292,9 @@ export default function PLNWarehouse() {
   const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
   const [maturityAssessments, setMaturityAssessments] = useState(() => readCachedList("pln_maturity_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [maturityAudits, setMaturityAudits] = useState(() => readCachedList("pln_maturity_audits_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory()); // cache/fallback read-only; DB adalah canonical
+  // Fallback default hanya berlaku untuk UPT pemilik angkanya (lihat getDefaultMaturityAuditHistory);
+  // profil cache sudah terbaca di atas, jadi UPT user tersedia sejak render pertama.
+  const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory(currentUser?.uptId)); // cache/fallback read-only; DB adalah canonical
   const [maturity5SAssessments, setMaturity5SAssessments] = useState(() => readCachedList("pln_maturity_5s_assessments_v1") ?? []); // cache fallback read-only; DB adalah canonical
   const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
   const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
@@ -854,10 +857,10 @@ export default function PLNWarehouse() {
       prepareMaturityCacheMigration({ key:"audits", label:"Audit Maturity", cached:cmau, remote:cmauRemote, setState:setMaturityAudits, upsertAll:upsertMaturityAudits, reload:loadMaturityAudits });
       // Riwayat semester adalah data referensi yang di-seed lewat migration,
       // bukan data perangkat yang boleh otomatis dipush. Jika tabel belum
-      // tersedia/gagal dimuat, tampilkan cache atau nilai UPT Surabaya yang telah
-      // diverifikasi sambil menandai kegagalan load.
+      // tersedia/gagal dimuat, tampilkan cache atau nilai default milik UPT user
+      // sendiri (kosong untuk UPT lain) sambil menandai kegagalan load.
       if (cmahRemote === null) {
-        setMaturityAuditHistory(cmah?.length ? cmah : getDefaultMaturityAuditHistory());
+        setMaturityAuditHistory(cmah?.length ? cmah : getDefaultMaturityAuditHistory(currentUserUptId || currentUser?.uptId));
         loadFailures.push("History Audit Maturity");
       } else {
         setMaturityAuditHistory(cmahRemote);
@@ -1427,25 +1430,32 @@ export default function PLNWarehouse() {
     setAkunResult(null);
     setAkunModal("edit");
   }
-  // Role level-UIT (ADMIN_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT pakai
-  // uitId, bukan uptId — field-nya saling eksklusif di form (lihat render modal).
+  // Role level-UIT (ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT
+  // pakai uitId, bukan uptId — field-nya saling eksklusif di form (lihat render modal).
+  // ADMIN_LOG_PUSAT tidak termasuk: nasional, tidak terikat satu UIT.
   function isUitScopedRole(f) {
-    return ["ADMIN_UIT","MGR_LOGISTIK_UIT"].includes(f.role) || (f.role==="PENGADAAN" && f.pengadaanScope==="UIT");
+    return ["ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT"].includes(f.role) || (f.role==="PENGADAAN" && f.pengadaanScope==="UIT");
   }
+  // Peran nasional (Pusat): lingkupnya seluruh UPT dan UIT, jadi tidak memilih
+  // unit apa pun. Tanpa cabang ini ia jatuh ke "UPT wajib dipilih" dan menyimpan
+  // upt_id yang salah secara semantik untuk peran nasional.
+  function isNationalRole(f) { return f.role === "ADMIN_LOG_PUSAT"; }
   async function submitAkunEdit() {
     if (isDemoMode()) { showToast("Mode demo: manajemen akun dinonaktifkan.","error"); return; }
     const f = akunForm;
     if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
     if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
+    const national = isNationalRole(f);
     const uitScoped = isUitScopedRole(f);
-    if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
+    if (national) { /* lingkup nasional — tidak memilih UPT maupun UIT */ }
+    else if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
     else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
     if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
     if (f.password && f.password.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
     setAkunBusy(true);
     const { data, error } = await supabase.functions.invoke("admin-update-user", { body: {
       userId: f.id, name: f.name.trim(), role: f.role, jabatan: f.jabatan||"",
-      uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"", uitId: uitScoped ? (f.uitId||"") : "",
+      uptId: (national || uitScoped) ? "" : (f.uptId||""), ultgId: f.ultgId||"", uitId: uitScoped ? (f.uitId||"") : "",
       pengadaanScope: f.pengadaanScope||"UPT", newPassword: f.password||"",
       gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
     }});
@@ -1463,14 +1473,16 @@ export default function PLNWarehouse() {
     if (!f.password || f.password.length < 6) { showToast("Password minimal 6 karakter.","error"); return; }
     if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
     if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
+    const national = isNationalRole(f);
     const uitScoped = isUitScopedRole(f);
-    if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
+    if (national) { /* lingkup nasional — tidak memilih UPT maupun UIT */ }
+    else if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
     else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
     if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
     setAkunBusy(true);
     const { data, error } = await supabase.functions.invoke("admin-create-user", { body: {
       username: f.username.trim().toLowerCase(), password: f.password, name: f.name.trim(),
-      role: f.role, jabatan: f.jabatan||"", uptId: uitScoped ? "" : (f.uptId||""), ultgId: f.ultgId||"",
+      role: f.role, jabatan: f.jabatan||"", uptId: (national || uitScoped) ? "" : (f.uptId||""), ultgId: f.ultgId||"",
       uitId: uitScoped ? (f.uitId||"") : "", pengadaanScope: f.pengadaanScope||"UPT",
       gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
     }});
@@ -1830,8 +1842,40 @@ export default function PLNWarehouse() {
     showToast("Lokasi dihapus.");
   }
 
+  // Nama UPT → id UPT (FK upt.id). Master UPT bisa belum termuat, jadi jatuh ke DEFAULT_UPT_LIST.
+  function uptIdByNama(nama) {
+    return (uptList.length ? uptList : DEFAULT_UPT_LIST).find(item => item.nama === nama)?.id || "";
+  }
+
+  // Gate tulis Maturity — cerminan persis policy "Maturity audits update by stage":
+  // pelaku ditentukan oleh status BARIS SAAT INI, bukan status tujuan.
+  //   DRAFT/SELF_ASSESSMENT/REVISION → ADMIN/TL UPT-nya (can_write_maturity_upt)
+  //   REVIEW_UIT                     → ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT (can_review_maturity_uit)
+  //   REVIEW_PUSAT/FINAL             → ADMIN_LOG_PUSAT (can_review_maturity_pusat)
+  // SUPERADMIN lolos di semua jenjang (hasRole), sama seperti helper SQL-nya —
+  // tanpa itu audit yang macet di meja UIT tidak bisa ditolong siapa pun.
+  // Dicek di klien supaya penolakan server tidak muncul sebagai
+  // "server tidak dapat dihubungi".
+  // `status` null = aksi di luar jenjang audit (asesmen/5S/hapus) → tetap ADMIN/TL.
+  function guardMaturityWrite(aksi, status = null) {
+    if (isDemoMode()) { showToast(`Mode demo: ${aksi} tidak disimpan ke server.`, "error"); return false; }
+    if (status === "REVIEW_UIT") {
+      if (hasRole(currentUser, "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT")) return true; // hasRole = SUPERADMIN ikut lolos (lihat can_review_maturity_uit)
+      showToast(`Audit ada di tahap Review UIT — hanya Admin / Asman / Manager Logistik UIT yang boleh ${aksi}.`, "error");
+      return false;
+    }
+    if (status === "REVIEW_PUSAT" || status === "FINAL") {
+      if (hasRole(currentUser, "ADMIN_LOG_PUSAT")) return true;
+      showToast(`Audit ada di tahap Pusat — hanya Admin Logistik Pusat yang boleh ${aksi}.`, "error");
+      return false;
+    }
+    if (!hasRole(currentUser, "ADMIN", "TL")) { showToast(`Hanya Admin Gudang / TL Logistik yang boleh ${aksi}.`, "error"); return false; }
+    return true;
+  }
+
   // Simpan 1 entri baru riwayat Maturity Level Gudang (khusus Admin, input manual)
   async function saveMaturityAssessment(form) {
+    if (!guardMaturityWrite("menyimpan Asesmen Maturity")) return false;
     const entry = { id:`MAT-${uid().slice(-8)}`, level:form.level, catatan:form.catatan||"", tanggalAsesmen:form.tanggalAsesmen||Date.now(), createdBy:currentUser.id, createdAt:Date.now() };
     const saved = await upsertMaturityAssessment(entry);
     if (!saved) {
@@ -1839,6 +1883,7 @@ export default function PLNWarehouse() {
       return false;
     }
     setMaturityAssessments(current => [entry, ...current.filter(item => item.id !== entry.id)]);
+    logAudit(currentUser, "CREATE", "maturity_assessment", entry.id, { level: entry.level });
     showToast("✅ Asesmen Maturity Level disimpan!");
   }
 
@@ -1848,10 +1893,14 @@ export default function PLNWarehouse() {
   // tetap mempunyai jejak tersendiri. State/cache baru diperbarui setelah
   // INSERT self-host berhasil, bukan ketika pengguna hanya menekan tombol.
   async function saveMaturity5SAssessment(form) {
+    if (!guardMaturityWrite("mengisi Form 5S")) return null;
+    const uptNama = form.upt || selectedMaturityUpt || "UPT Surabaya";
     const entry = {
       ...form,
       id: `M5S-${uid().slice(-10)}`,
-      upt: form.upt || selectedMaturityUpt || "UPT Surabaya",
+      upt: uptNama,
+      // Wajib: kolom upt_id jadi NOT NULL + RLS per-UPT di GELOMBANG B.
+      uptId: form.uptId || uptIdByNama(uptNama) || currentUserUptId || currentUser?.uptId || "",
       createdAt: Date.now(),
       createdBy: currentUser?.id || null,
     };
@@ -2001,6 +2050,9 @@ export default function PLNWarehouse() {
     return calcMaturityScore(scores, evidence).level;
   }
   async function saveMaturityAudit(audit, newStatus) {
+    // Yang menentukan siapa boleh bertindak adalah status LAMA (klausa USING policy);
+    // audit baru belum punya baris di server, jadi diperlakukan sebagai DRAFT.
+    if (!guardMaturityWrite("menyimpan Audit Maturity", audit?.isNew ? "DRAFT" : (audit?.status || "DRAFT"))) return;
     setMaturityAuditSaving(true);
     try {
       // Draft Drive sekarang sudah menerima ID stabil sebelum Simpan. ID saja
@@ -2015,7 +2067,7 @@ export default function PLNWarehouse() {
       const createdDate = new Date(createdAt);
       const periodKey = auditData.periodKey || `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, "0")}`;
       const uptName = auditData.upt || selectedMaturityUpt || "UPT Surabaya";
-      const uptId = auditData.uptId || ((uptList.length ? uptList : DEFAULT_UPT_LIST).find(item => item.nama === uptName)?.id || null);
+      const uptId = auditData.uptId || uptIdByNama(uptName) || null;
       const entry = {
         ...(isExistingAudit ? auditData : {}),
         id: auditData.id || `MA-${uid().slice(-8)}`,
@@ -2045,11 +2097,21 @@ export default function PLNWarehouse() {
       }
       setMaturityAudits(current => isExistingAudit ? current.map(a => a.id === entry.id ? entry : a) : [entry, ...current]);
       logAudit(currentUser, isExistingAudit ? "UPDATE" : "CREATE", "maturity_audit", entry.id, { status: newStatus, level, upt: entry.upt });
+      if (newStatus === "FINAL") {
+        // Trigger DB menerbitkan baris history sendiri saat audit masuk FINAL,
+        // jadi state & cache klien langsung basi — muat ulang dari server.
+        const freshHistory = await loadMaturityAuditHistory();
+        if (freshHistory) {
+          setMaturityAuditHistory(freshHistory);
+          CLOUD.set("pln_maturity_audit_history_v1", freshHistory);
+        }
+      }
       setMaturityAuditModal(null);
       showToast(`Audit ${entry.upt} disimpan — ${MATURITY_WORKFLOW_LABEL[newStatus]}${newStatus === "FINAL" ? " (Nilai Final)" : ""}`);
     } finally { setMaturityAuditSaving(false); }
   }
   async function deleteMaturityAudit(id) {
+    if (!guardMaturityWrite("menghapus Audit Maturity")) return;
     const audit = maturityAudits.find(a => a.id === id);
     askConfirmDelete({
       title: "Hapus Riwayat Audit Maturity?",
@@ -2058,7 +2120,9 @@ export default function PLNWarehouse() {
       onConfirm: async () => {
         const deleted = await deleteMaturityAuditRow(id);
         if (!deleted) {
-          showToast("Audit Maturity tidak dihapus karena server tidak dapat dihubungi.", "error");
+          // Bisa gagal koneksi ATAU ditolak server (angka audit memang tidak
+          // boleh dihapus). Apa pun sebabnya, state TIDAK boleh ikut berubah.
+          showToast("Audit Maturity TIDAK dihapus — ditolak server atau server tidak dapat dihubungi. Data di server tetap utuh.", "error");
           return;
         }
         setMaturityAudits(current => current.filter(a => a.id !== id));
@@ -2576,11 +2640,16 @@ export default function PLNWarehouse() {
   const [maturityForm, setMaturityForm] = useState({ level:3, catatan:"", tanggalAsesmen:Date.now() });
   // ─── Penilaian Maturity (audit workflow) — UI state ───────────────────
   const [maturitySubTab, setMaturitySubTab] = useState("dashboard"); // dashboard | pelaksanaan | history | 5s
-  const canSwitchMaturityUpt = hasRole(currentUser, "ADMIN_UIT","MGR_LOGISTIK_UIT","SUPERADMIN","MANAGER");
+  // Peninjau lintas UPT saja. MANAGER dibuang: tiap UPT punya tepat satu MANAGER
+  // dan cakupannya HANYA UPT itu (keputusan user 2026-08-02).
+  const canSwitchMaturityUpt = hasRole(currentUser, "ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT","SUPERADMIN");
   const [selectedMaturityUpt, setSelectedMaturityUpt] = useState(() => {
     const match = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId);
     return match?.nama || "UPT Surabaya";
   });
+  // Scoping UI Maturity pakai id UPT (FK), bukan kecocokan string nama — nama di
+  // Master UPT bisa berbeda ejaan dengan nama yang tersimpan di baris audit.
+  const selectedMaturityUptId = uptIdByNama(selectedMaturityUpt);
   const [maturityAuditModal, setMaturityAuditModal] = useState(null); // null | {isNew:true,...} (new) | auditObj (edit/review)
   const [maturityAuditForm, setMaturityAuditForm] = useState({ aspekScores:{}, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
   const [maturityAuditSaving, setMaturityAuditSaving] = useState(false);
@@ -5812,6 +5881,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               maturityAuditHistory={maturityAuditHistory}
               maturity5SAssessments={maturity5SAssessments}
               selectedMaturityUpt={selectedMaturityUpt}
+              selectedMaturityUptId={selectedMaturityUptId}
               setSelectedMaturityUpt={setSelectedMaturityUpt}
               canSwitchMaturityUpt={canSwitchMaturityUpt}
               maturitySubTab={maturitySubTab}

@@ -253,12 +253,12 @@ create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
   name text not null,
-  role text not null,           -- ADMIN / TL / ASMAN / MANAGER / ADMIN_UIT / MGR_LOGISTIK_UIT / ADMIN_ULTG / MGR_ULTG / PENGADAAN / VIEWER / SUPERADMIN
+  role text not null,           -- UPT: ADMIN / TL / ASMAN / MANAGER / ADMIN_ULTG / MGR_ULTG — UIT: ADMIN_UIT / ASMAN_LOG_UIT / MGR_LOGISTIK_UIT — Pusat: ADMIN_LOG_PUSAT — lain: PENGADAAN / VIEWER / SUPERADMIN
   jabatan text,
   avatar text,
   upt_id text,                  -- diisi untuk role scoped ke 1 UPT tertentu (opsional, biasanya via UPT konstan app)
   ultg_id text,                 -- WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG — unit ULTG yang dia wakili
-  uit_id text,                  -- diisi untuk role scoped ke 1 UIT (ADMIN_UIT / MGR_LOGISTIK_UIT / PENGADAAN mode UIT)
+  uit_id text,                  -- diisi untuk role scoped ke 1 UIT (ADMIN_UIT / ASMAN_LOG_UIT / MGR_LOGISTIK_UIT / PENGADAAN mode UIT); ADMIN_LOG_PUSAT nasional, tidak terikat UIT
   gudang_ids jsonb,
   created_at timestamptz default now()
 );

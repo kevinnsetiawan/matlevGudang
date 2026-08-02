@@ -14,8 +14,8 @@ import {
 // =========================================================================
 
 const MATURITY_LEVELS = { 1: "Basic", 2: "Developing", 3: "Defined", 4: "Managed", 5: "Excellent" };
-const MATURITY_WORKFLOW_LABEL = { DRAFT: "Draft", SELF_ASSESSMENT: "Self Assessment (UPT)", REVIEW_UIT: "Review UIT", REVISION: "Revisi", FINAL: "Nilai Final (Pusat)" };
-const MATURITY_WORKFLOW_COLOR = { DRAFT: "#64748b", SELF_ASSESSMENT: "#3b82f6", REVIEW_UIT: "#f59e0b", REVISION: "#ef4444", FINAL: "#1d4ed8" };
+const MATURITY_WORKFLOW_LABEL = { DRAFT: "Draft", SELF_ASSESSMENT: "Self Assessment (UPT)", REVIEW_UIT: "Review UIT", REVIEW_PUSAT: "Review Pusat", REVISION: "Revisi", FINAL: "Nilai Final (Pusat)" };
+const MATURITY_WORKFLOW_COLOR = { DRAFT: "#64748b", SELF_ASSESSMENT: "#3b82f6", REVIEW_UIT: "#f59e0b", REVIEW_PUSAT: "#6366f1", REVISION: "#ef4444", FINAL: "#1d4ed8" };
 
 // Form 5S keeps its established photo flow and its automatic evidence bridge.
 // Its separate Drive/storage decision remains outside the Maturity audit relay.
@@ -92,13 +92,15 @@ export function MaturityAuditEditor({
   const isEdit = maturityAuditModal !== "new";
   const audit = isEdit ? maturityAuditModal : {};
   const currentUptName = selectedUpt || audit.upt || "UPT Surabaya";
-  const isUPT = hasRole(currentUser, "ADMIN", "TL", "ASMAN", "MANAGER");
-  const isUIT = hasRole(currentUser, "ADMIN_UIT", "MGR_LOGISTIK_UIT");
-  const isPusat = hasRole(currentUser, "SUPERADMIN", "MANAGER");
+  // Jenjang UPT → UIT → Pusat, cerminan policy "Maturity audits update by stage".
+  // ASMAN/MANAGER read-only (MANAGER terikat 1 UPT, bukan Pusat).
+  const isUPT = hasRole(currentUser, "ADMIN", "TL");
+  const isUIT = hasRole(currentUser, "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT"); // SUPERADMIN ikut lolos
+  const isPusat = hasRole(currentUser, "ADMIN_LOG_PUSAT");
   const status = audit.status || "DRAFT";
   const canScoreUPT = isUPT && (status === "DRAFT" || status === "SELF_ASSESSMENT" || status === "REVISION");
   const canScoreUIT = isUIT && status === "REVIEW_UIT";
-  const canScorePusat = isPusat && status === "FINAL";
+  const canScorePusat = isPusat && (status === "REVIEW_PUSAT" || status === "FINAL");
   // Gate "Kirim Hasil ke UIT": wajib Form 5S sudah disimpan pada bulan berjalan
   const chk5S = maturityAuditEvidence?.["4.5"]?.find(f => f.id === "k3_5s_chk");
   const now = new Date();
@@ -965,14 +967,17 @@ export function MaturityAuditEditor({
                       });
                       return;
                     }
-                    saveMaturityAudit(audit, "SELF_ASSESSMENT");
+                    // Serahkan ke jenjang UIT. Sebelumnya tombol ini menyimpan
+                    // SELF_ASSESSMENT — audit tidak pernah sampai ke meja UIT.
+                    saveMaturityAudit(audit, "REVIEW_UIT");
                   }}>Kirim Hasil ke UIT</button>
                 </>
               )}
               {canScoreUIT && (
                 <>
                   <button className="approval-btn--reject" disabled={maturityAuditSaving} onClick={() => saveMaturityAudit(audit, "REVISION")}>Ajukan Revisi</button>
-                  <button className="approval-btn--primary" disabled={maturityAuditSaving} onClick={() => saveMaturityAudit(audit, "FINAL")}>Kirim Hasil ke Pusat</button>
+                  {/* Ke meja Pusat, bukan langsung FINAL — Pusat yang menilai final. */}
+                  <button className="approval-btn--primary" disabled={maturityAuditSaving} onClick={() => saveMaturityAudit(audit, "REVIEW_PUSAT")}>Kirim Hasil ke Pusat</button>
                 </>
               )}
               {canScorePusat && (
