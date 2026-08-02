@@ -18,7 +18,8 @@ import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
-import { ROLES, hasRole, getUserUptScope, canAccessGudang, allowedGudangIds } from "./src/lib/roles.js";
+import { ROLES, hasRole, getUserUptScope, canAccessGudang } from "./src/lib/roles.js";
+import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
 import { can } from "./src/lib/perms.js";
 import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentStatusFromKondisi, normalizeHeavyEquipmentRecord, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName, normalizeHeavyEquipmentLoanStatus, isPendingHeavyEquipmentLoan, getHeavyEquipmentLoanRuntimeStatus, canApproveHeavyEquipmentLoan, getEquipmentCategory } from "./src/lib/heavyEquipment.js";
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
@@ -5342,10 +5343,19 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // stock record so the rest of the UI/PDF/forecast code can use familiar
   // fields (name, katalog, category, unit, lokasi) without modification.
   const enrichedStocks = enrichStocks(stocks, katalogList, lokasiList);
-  // RBAC per gudang: untuk user dengan gudang_ids null (semua akun existing) hasil
-  // ini identik gudangList — canAccessGudang selalu true, jadi ZERO perubahan perilaku.
-  const gudangAccessLimited = allowedGudangIds(currentUser) != null;
-  const visibleGudangList = useMemo(() => gudangList.filter(g => canAccessGudang(currentUser, g.id)), [gudangList, currentUser]);
+  // UPT adalah pagar pertama; gudang_ids hanya mempersempit scope itu.
+  // SUPERADMIN tetap global, sedangkan akun UIT/ULTG mengikuti hierarki unitnya.
+  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
+  const currentUserUptId = currentUser?.uptId
+    || (ultgList.find(u => u.id === currentUser?.ultgId)?.parentUptId)
+    || (uptList.find(u => String(u.nama || "").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
+  const gudangAccessLimited = currentUser?.role !== "SUPERADMIN";
+  const visibleGudangList = useMemo(() => getVisibleGudangForInspection({
+    currentUser,
+    currentUserUptId,
+    gudangList,
+    uptList,
+  }), [currentUser, currentUserUptId, gudangList, uptList]);
   // Kapasitas/Peta Gudang: baris kapasitas dicocokkan by NAMA gudang (warehouse_capacity
   // tak menyimpan id gudang). ponytail: match-by-name, cukup untuk enforcement UI; unrestricted user di-early-return supaya tak terpengaruh sama sekali.
   const visibleCapacityList = useMemo(() => {
@@ -5372,10 +5382,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // Pengajuan TUG-5 dari ULTG yang sudah disetujui Manager ULTG, siap di-adopt oleh Admin/TL UPT induknya.
   // currentUser.uptId biasanya KOSONG untuk akun ADMIN/TL biasa (UPT mereka ditentukan dari konstanta
   // global UPT/WAREHOUSE, bukan field profil) — fallback cocokkan nama UPT konstan ke Master UPT.
-  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i,"").trim();
-  const currentUserUptId = currentUser?.uptId
-    || (ultgList.find(u=>u.id===currentUser?.ultgId)?.parentUptId)
-    || (uptList.find(u=>String(u.nama||"").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
   const ultgPengajuanUntukAdopt = hasRole(currentUser, "ADMIN","TL") ? txns.filter(t =>
     t.docType==="TUG5" && t.sourceType==="ULTG" && t.stage==="APPROVED_ULTG" && !t.adoptedBy &&
     (currentUser?.role==="SUPERADMIN" || ultgList.find(u=>u.id===t.ultgId)?.parentUptId === currentUserUptId)
@@ -5871,12 +5877,15 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             stocks={stocks}
             katalogList={katalogList}
             lokasiList={lokasiList}
-            gudangList={gudangList}
+            gudangList={visibleGudangList}
             materialInspections={materialInspections}
             materialInspectionBatches={materialInspectionBatches}
             onInspectionCreated={inspection => setMaterialInspections(previous => [inspection, ...previous])}
             onInspectionBatchCreated={batch => setMaterialInspectionBatches(previous => [batch, ...previous])}
             currentUser={currentUser}
+            currentUserUptId={currentUserUptId}
+            uptList={uptList}
+            users={users}
             rolePerms={rolePerms}
             C={C}
             sty={sty}

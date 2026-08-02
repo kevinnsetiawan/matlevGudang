@@ -19,6 +19,7 @@ import {
   MATERIAL_INSPECTION_MAX_PHOTOS,
   MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH,
 } from "../lib/materialInspectionSync.js";
+import { getInspectionIdentity, getInspectionScope } from "../lib/inspectionScope.mjs";
 
 const KONDISI = ["BAIK", "RUSAK_RINGAN", "RUSAK_BERAT", "PERLU_KALIBRASI"];
 const KELAYAKAN = ["READY", "MAINTENANCE", "RETEST", "ATTB_RECOMMENDED"];
@@ -28,8 +29,6 @@ const CHECKLIST_KEYS = [
   ["bebasBocor", "Bebas bocor"],
   ["kemasanBaik", "Kemasan baik"],
 ];
-const UPT_SBY = "UPT-SBY";
-const MANAGER_UPT_SBY = "Yaya Supriman";
 const todayJakarta = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
 
 // Label korporat 12px (override sty.label yang 11px — floor tipografi project).
@@ -88,6 +87,9 @@ export function InspeksiMaterialCadangTab({
   onInspectionCreated,
   onInspectionBatchCreated,
   currentUser,
+  currentUserUptId,
+  uptList = [],
+  users = [],
   rolePerms,
   C,
   sty,
@@ -108,6 +110,25 @@ export function InspeksiMaterialCadangTab({
   const [printBatch, setPrintBatch] = useState(null);
   const pickerSearchRef = useRef(null);
   const writer = ["ADMIN", "TL"].includes(currentUser?.role) && can(currentUser, "aksi.buatInspeksiMaterial", rolePerms);
+  const inspectionScope = useMemo(() => getInspectionScope({
+    currentUser,
+    currentUserUptId,
+    gudangList,
+    lokasiList,
+    stocks,
+    materialInspectionBatches,
+    uptList,
+  }), [currentUser, currentUserUptId, gudangList, lokasiList, stocks, materialInspectionBatches, uptList]);
+  const inspectionIdentity = useMemo(() => getInspectionIdentity({
+    currentUser,
+    currentUserUptId,
+    uptList,
+    users,
+  }), [currentUser, currentUserUptId, uptList, users]);
+  const scopedGudangList = inspectionScope.gudangList;
+  const scopedLokasiList = inspectionScope.lokasiList;
+  const scopedStocks = inspectionScope.stocks;
+  const scopedBatches = inspectionScope.materialInspectionBatches;
 
   const today = todayJakarta();
 
@@ -116,26 +137,26 @@ export function InspeksiMaterialCadangTab({
     const cadangKatalogIds = new Set(
       katalogList.filter(k => k?.jenisBarang === "Cadang").map(k => k.id),
     );
-    return stocks
+    return scopedStocks
       .filter(s => cadangKatalogIds.has(s.katalogId))
       .map(stock => {
         const katalog = katalogList.find(k => k.id === stock.katalogId);
-        const lokasi = lokasiList.find(l => l.id === stock.lokasiId);
+        const lokasi = scopedLokasiList.find(l => l.id === stock.lokasiId);
         return { stock, katalog, lokasi };
       });
-  }, [stocks, katalogList, lokasiList]);
+  }, [scopedStocks, katalogList, scopedLokasiList]);
 
   // Gudang terkunci dari material pertama; material berikutnya harus dari gudang yang sama.
   const lockedGudangId = useMemo(() => {
     if (!items.length) return null;
     const first = items[0];
-    const lokasi = lokasiList.find(l => l.id === first.lokasiId);
+    const lokasi = scopedLokasiList.find(l => l.id === first.lokasiId);
     return lokasi?.gudangId || null;
-  }, [items, lokasiList]);
+  }, [items, scopedLokasiList]);
 
   const lockedGudang = useMemo(
-    () => gudangList.find(g => g.id === lockedGudangId) || null,
-    [gudangList, lockedGudangId],
+    () => scopedGudangList.find(g => g.id === lockedGudangId) || null,
+    [scopedGudangList, lockedGudangId],
   );
 
   const pickerResults = useMemo(() => {
@@ -161,15 +182,15 @@ export function InspeksiMaterialCadangTab({
 
   useEffect(() => {
     if (expandedBatchId) {
-      const batch = materialInspectionBatches.find(b => b.id === expandedBatchId);
+      const batch = scopedBatches.find(b => b.id === expandedBatchId);
       const paths = batch?.items?.flatMap(it => it.photoPaths || []) || [];
       if (!paths.length) { setBatchPhotoUrls({}); return; }
       let active = true;
       loadInspectionPhotoUrls(paths).then(urls => { if (active) setBatchPhotoUrls(urls); });
       return () => { active = false; };
     }
-    setBatchPhotoUrls({});
-  }, [expandedBatchId, materialInspectionBatches]);
+    setBatchPhotoUrls(previous => Object.keys(previous).length ? {} : previous);
+  }, [expandedBatchId, scopedBatches]);
 
   function addItem(stockId) {
     const opt = cadangStockOptions.find(o => o.stock.id === stockId);
@@ -248,13 +269,13 @@ export function InspeksiMaterialCadangTab({
       const header = {
         inspectorId: currentUser.id,
         inspectorName: currentUser.name || currentUser.username || "Pemeriksa",
-        uptId: UPT_SBY,
+        uptId: inspectionIdentity.uptId,
         gudangId: lockedGudangId,
         tanggal: today,
         pelaksanaLogistik: pelaksanaLogistik.trim(),
         pelaksaraPemeliharaan: pelaksaraPemeliharaan.trim(),
-        managerUpt: MANAGER_UPT_SBY,
-        namaUpt: currentUser?.upt || "UPT Surabaya",
+        managerUpt: inspectionIdentity.managerUpt,
+        namaUpt: inspectionIdentity.namaUpt,
         namaGudang: lockedGudang?.nama || "",
       };
       const payloadItems = items.map(it => ({
@@ -317,9 +338,9 @@ export function InspeksiMaterialCadangTab({
           eyebrow="Material Assurance"
           title="Inspeksi Material Cadang"
           description="Satu Berita Acara memuat 1–10 material Cadang dari satu gudang. Identitas material terkunci, dan riwayat bersifat append-only."
-          scope={currentUser?.upt || "UPT Surabaya"}
+          scope={inspectionIdentity.namaUpt}
           metrics={[
-            { label: "BA Tersimpan", value: materialInspectionBatches.length },
+            { label: "BA Tersimpan", value: scopedBatches.length },
             { label: "Material di Form", value: items.length },
             { label: "Lengkap", value: `${completeCount}/${items.length}` },
             { label: writer ? "Akses Tulis" : "Akses Baca", value: writer ? "ADMIN/TL" : "VIEWER" },
@@ -368,10 +389,10 @@ export function InspeksiMaterialCadangTab({
           <StepHeader n={1} title="Identitas Berita Acara" C={C} />
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
             <ChipReadonly label="Tanggal" value={today} C={C} />
-            <ChipReadonly label="UPT" value={UPT_SBY} C={C} />
+            <ChipReadonly label="UPT" value={inspectionIdentity.namaUpt} C={C} />
             <ChipReadonly label="Gudang" value={lockedGudang?.nama || "Terkunci otomatis"} muted={!lockedGudang} C={C} />
             <ChipReadonly label="Nomor BA" value={lastSavedBa?.nomorBa || "Otomatis saat simpan"} muted={!lastSavedBa} C={C} />
-            <ChipReadonly label="Manager UPT" value={MANAGER_UPT_SBY} C={C} />
+            <ChipReadonly label="Manager UPT" value={inspectionIdentity.managerUpt} C={C} />
           </div>
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
             <label style={labelStyle(C)}>Pelaksana Logistik *
@@ -556,11 +577,11 @@ export function InspeksiMaterialCadangTab({
       {view === "history" && (
         <div className="no-print" style={{ ...sty.card, display: "grid", gap: 12 }}>
           <StepHeader n={1} title="Riwayat Berita Acara" C={C} />
-          {materialInspectionBatches.length === 0 ? (
+          {scopedBatches.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Belum ada BA tersimpan.</p>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit,minmax(320px,1fr))", gap: 12 }}>
-              {materialInspectionBatches.map(batch => (
+              {scopedBatches.map(batch => (
                 <BatchCard
                   key={batch.id}
                   batch={batch}

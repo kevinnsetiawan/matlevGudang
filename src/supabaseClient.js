@@ -12,14 +12,13 @@ export const SUPABASE_KEY = E2E_MODE ? undefined : import.meta.env.VITE_SUPABASE
 const EXPECTED_SUPABASE_HOST = "warnoto.com";
 const CANONICAL_SUPABASE_ORIGIN = "https://warnoto.com";
 
-// Dev harus gagal cepat bila .env masih menunjuk ke Supabase Cloud lama. Produksi
-// sudah dibuild oleh Vercel; guard ini khusus mencegah data dev tersinkron ke backend
-// yang salah dan tidak pernah mengirim key apa pun ke log.
-if (import.meta.env.DEV && !E2E_MODE && SUPABASE_URL) {
+// Semua build non-E2E harus menolak endpoint selain backend self-host canonical.
+// Ini mencegah artefak production salah konfigurasi mengirim sesi/data ke project lain.
+if (!E2E_MODE && SUPABASE_URL) {
   let configuredHost = "";
   try { configuredHost = new URL(SUPABASE_URL).hostname.toLowerCase(); } catch {}
   if (configuredHost !== EXPECTED_SUPABASE_HOST) {
-    throw new Error("VITE_SUPABASE_URL harus menunjuk ke warnoto.com (backend self-host). Periksa .env.local.");
+    throw new Error("VITE_SUPABASE_URL harus menunjuk ke warnoto.com (backend self-host). Periksa konfigurasi environment.");
   }
 }
 

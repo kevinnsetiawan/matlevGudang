@@ -259,6 +259,7 @@ create table if not exists profiles (
   upt_id text,                  -- diisi untuk role scoped ke 1 UPT tertentu (opsional, biasanya via UPT konstan app)
   ultg_id text,                 -- WAJIB diisi untuk role ADMIN_ULTG / MGR_ULTG — unit ULTG yang dia wakili
   uit_id text,                  -- diisi untuk role scoped ke 1 UIT (ADMIN_UIT / MGR_LOGISTIK_UIT / PENGADAAN mode UIT)
+  gudang_ids jsonb,
   created_at timestamptz default now()
 );
 -- upt_id/ultg_id/uit_id SENGAJA tanpa foreign key ke tabel upt/uit di sini —
@@ -269,6 +270,7 @@ create table if not exists profiles (
 alter table profiles add column if not exists upt_id text;
 alter table profiles add column if not exists ultg_id text;
 alter table profiles add column if not exists uit_id text;
+alter table profiles add column if not exists gudang_ids jsonb;
 
 alter table profiles enable row level security;
 drop policy if exists "Authenticated read profiles" on profiles;
@@ -888,6 +890,41 @@ create table if not exists material_inspection_batches (
   data jsonb not null default '{}'::jsonb,   -- header manual: pelaksana*, managerUpt, namaUpt, noSloc, namaGudang
   created_at timestamptz not null default now()
 );
+
+-- Scope DB adalah sumber kebenaran untuk BA/material/foto: UPT sendiri,
+-- UPT di bawah UIT sendiri, atau UPT induk ULTG. SUPERADMIN tetap global.
+create or replace function public.can_access_material_inspection_scope(p_upt_id text, p_gudang_id text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1
+    from profiles actor
+    where actor.id = auth.uid()
+      and (
+        actor.role = 'SUPERADMIN'
+        or (
+          p_upt_id is not null
+          and p_gudang_id is not null
+          and exists (select 1 from gudang g where g.id = p_gudang_id and g.upt_id = p_upt_id)
+          and (
+            actor.gudang_ids is null
+            or (
+              jsonb_typeof(actor.gudang_ids) = 'array'
+              and (jsonb_array_length(actor.gudang_ids) = 0 or actor.gudang_ids ? p_gudang_id)
+            )
+          )
+          and (
+            actor.upt_id = p_upt_id
+            or (actor.uit_id is not null and exists (select 1 from upt u where u.id = p_upt_id and u.uit_id = actor.uit_id))
+            or (actor.ultg_id is not null and exists (select 1 from ultg ul where ul.id = actor.ultg_id and ul.upt_id = p_upt_id))
+          )
+        )
+      )
+  );
+$$;
+revoke all on function public.can_access_material_inspection_scope(text, text) from public;
+grant execute on function public.can_access_material_inspection_scope(text, text) to authenticated;
 create index if not exists idx_mi_batches_created_at on material_inspection_batches(created_at desc);
 create index if not exists idx_mi_batches_upt on material_inspection_batches(upt_id);
 create index if not exists idx_mi_batches_gudang on material_inspection_batches(gudang_id);
@@ -896,7 +933,7 @@ grant all on material_inspection_batches to service_role;
 alter table material_inspection_batches enable row level security;
 drop policy if exists "Authenticated read material_inspection_batches" on material_inspection_batches;
 create policy "Authenticated read material_inspection_batches" on material_inspection_batches
-  for select using (auth.role() = 'authenticated');
+  for select to authenticated using (public.can_access_material_inspection_scope(upt_id, gudang_id));
 -- Sengaja TIDAK ada policy insert: batch hanya dibuat lewat RPC security definer,
 -- supaya nomor BA & pasangan batch+item selalu atomik.
 
@@ -921,7 +958,13 @@ drop policy if exists "Authenticated read material_inspections" on material_insp
 -- Insert langsung dari client dihapus (revisi 2026-07-27): semua insert lewat RPC.
 drop policy if exists "Admin TL insert material_inspections" on material_inspections;
 create policy "Authenticated read material_inspections" on material_inspections
-  for select using (auth.role() = 'authenticated');
+  for select to authenticated using (
+    exists (
+      select 1 from material_inspection_batches b
+      where b.id = material_inspections.batch_id
+        and public.can_access_material_inspection_scope(b.upt_id, b.gudang_id)
+    )
+  );
 
 -- RPC atomik: buat 1 batch + 1..10 item dalam satu transaksi, nomor BA server-side.
 -- p_header: { upt_id?, gudang_id?, tanggal?, ...field manual BA }
@@ -930,7 +973,9 @@ create or replace function public.create_material_inspection_batch(p_items jsonb
 returns jsonb as $$
 declare
   v_inspector uuid := auth.uid();
-  v_upt text := coalesce(nullif(p_header->>'upt_id', ''), 'UPT-SBY');
+  v_upt text := nullif(p_header->>'upt_id', '');
+  v_actor_upt text;
+  v_actor_gudang_ids jsonb;
   v_tanggal date := coalesce((p_header->>'tanggal')::date, now()::date);
   v_gudang text := nullif(p_header->>'gudang_id', '');
   v_count int;
@@ -944,6 +989,22 @@ begin
   end if;
   if not exists (select 1 from profiles where id = v_inspector and role in ('ADMIN', 'TL')) then
     raise exception 'Hanya ADMIN/TL yang boleh membuat BA inspeksi.';
+  end if;
+  select upt_id, gudang_ids into v_actor_upt, v_actor_gudang_ids
+  from profiles where id = v_inspector;
+  if v_actor_upt is null or v_upt is null or v_upt <> v_actor_upt then
+    raise exception 'UPT BA harus sama dengan UPT profil pemeriksa.';
+  end if;
+  if v_gudang is null or not exists (
+    select 1 from gudang g where g.id = v_gudang and g.upt_id = v_actor_upt
+  ) then
+    raise exception 'Gudang BA tidak ditemukan pada UPT pemeriksa.';
+  end if;
+  if v_actor_gudang_ids is not null and (
+    jsonb_typeof(v_actor_gudang_ids) <> 'array'
+    or (jsonb_array_length(v_actor_gudang_ids) > 0 and not (v_actor_gudang_ids ? v_gudang))
+  ) then
+    raise exception 'Gudang BA tidak diizinkan untuk pemeriksa ini.';
   end if;
   if p_items is null or jsonb_typeof(p_items) <> 'array' then
     raise exception 'Daftar material tidak valid.';
@@ -967,6 +1028,16 @@ begin
     where not exists (select 1 from stocks s where s.id = e.value->>'stock_id')
   ) then
     raise exception 'Ada stock_id yang tidak ditemukan di data stok.';
+  end if;
+  if exists (
+    select 1
+    from jsonb_array_elements(p_items) e
+    join stocks s on s.id = e.value->>'stock_id'
+    left join lokasi l on l.id = s.lokasi_id
+    left join gudang g on g.id = l.gudang_id
+    where g.id is null or g.id <> v_gudang or g.upt_id <> v_actor_upt
+  ) then
+    raise exception 'Setiap material harus berada pada gudang dan UPT BA yang dipilih.';
   end if;
   -- decision: jenisBarang 'Cadang' TIDAK divalidasi di sini. Filter itu urusan
   -- picker UI; data katalog lama banyak yang jenisBarang-nya kosong, jadi cek di
@@ -1052,7 +1123,16 @@ drop policy if exists "Authenticated read material-inspection-photos" on storage
 drop policy if exists "Admin TL insert material-inspection-photos" on storage.objects;
 drop policy if exists "Admin TL cleanup material-inspection-photos" on storage.objects;
 create policy "Authenticated read material-inspection-photos" on storage.objects
-  for select using (bucket_id = 'material-inspection-photos' and auth.role() = 'authenticated');
+  for select to authenticated using (
+    bucket_id = 'material-inspection-photos'
+    and exists (
+      select 1
+      from material_inspections mi
+      join material_inspection_batches b on b.id = mi.batch_id
+      where coalesce(mi.data->'photoPaths', '[]'::jsonb) ? name
+        and public.can_access_material_inspection_scope(b.upt_id, b.gudang_id)
+    )
+  );
 create policy "Admin TL insert material-inspection-photos" on storage.objects
   for insert to authenticated
   with check (
