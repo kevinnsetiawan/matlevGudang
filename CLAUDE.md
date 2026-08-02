@@ -26,7 +26,7 @@ Lihat bagian "Status sekarang" di `HANDOFF.md` (satu-satunya sumber status, supa
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
 
 Rules:
-- **Awal sesi/project**: sebelum mulai kerja, baca dulu graphify (mis. `graphify query "<ringkasan project>"` atau GRAPH_REPORT.md) supaya orientasi konsisten dan terstruktur, apapun model/vendor yang sedang dipakai (Fable/Opus/Sonnet/Codex).
+- **Awal sesi/project**: sebelum mulai kerja, baca dulu graphify (mis. `graphify query "<ringkasan project>"` atau GRAPH_REPORT.md) supaya orientasi konsisten dan terstruktur, apapun peran/vendor yang sedang dipakai (arsitek/tukang-senior/tukang-biasa/Codex).
 - **Setelah edit kode** → jalankan `graphify update .` supaya graph tetap sinkron (AST-only, tidak kena biaya API).
 - **Sekali per topik, bukan per tool call (hemat token, ditambahkan 2026-07-25):** jalankan `graphify query/explain/path` SEKALI di awal saat menyelusuri topik/bug/fitur baru untuk menemukan file & fungsi yang tepat. Begitu lokasi kode sudah pasti dalam sesi yang sama, `Read`/`Grep` langsung ke file/baris itu untuk langkah-langkah susulan (baca detail, verifikasi, edit) TIDAK perlu mengulang query graphify lagi — output graphify per-query bisa ~2rb token dan sering nyaris sama untuk area yang sudah dieksplorasi, jadi pengulangannya murni boros tanpa nilai orientasi baru.
 

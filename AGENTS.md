@@ -2,6 +2,7 @@
 
 **Baca `HANDOFF.md` dulu** dan lanjutkan dari "Langkah berikutnya".
 
+- **Vendor A (Claude):** kontrak di `~/.claude/CLAUDE.md`. Agent: arsitek (sesi utama) / `tukang-senior` / `tukang-biasa`. Peta peran→model HANYA ada di file global — jangan sematkan nama model di sini.
 - **Vendor B (Codex):** kontrak di `~/.codex/AGENTS.md`. Routing `worker` / `senior`.
 - **Vendor C (OpenCode Go):** detail penuh di `.opencode/instructions/vendor-c-warnoto.md`. Agent: `arsitek` (default, `grok-4.5`), `@tukang-biasa` (`glm-5.1`), `@tukang-senior` (`kimi-k2.7-code`). Command: `/sesi`, `/kerjakan`.
 
