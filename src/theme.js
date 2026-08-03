@@ -43,8 +43,8 @@ export function makeSty(isMobile, C=C_LIGHT) {
     modalHeader: modalHeaderStyle, // header modal berwarna
     // Ring senada warna teks (inset box-shadow) memberi tepi tegas -> badge terbaca
     // "solid corporate" tanpa mengubah call-site (tetap style-only, propagate app-wide).
-    statusBadge:(s)=>{ const col=s==="APPROVED"?C.green:s==="PENDING"?C.yellow:s==="REJECTED"?C.red:C.muted; return { display:"inline-block", padding:"3px 11px", borderRadius:999, fontSize:10, fontWeight:800, letterSpacing:".4px", textTransform:"uppercase", background:s==="APPROVED"?"#dcfce7":s==="PENDING"?"#fef3c7":s==="REJECTED"?"#fee2e2":"#f3f4f6", color:col, boxShadow:`inset 0 0 0 1px ${col}33` }; },
-    jenisBadge:(j)=>{ const col=j==="Pre Memory"?"#1d4ed8":j==="Cadang"?"#7c3aed":j==="Persediaan"?C.green:j==="Persediaan Bursa"?"#ea580c":j==="ATTB"?C.yellow:j==="Non-Stock"?"#be185d":C.muted; return { display:"inline-block", padding:"2px 9px", borderRadius:999, fontSize:10, fontWeight:800, letterSpacing:".2px",
+    statusBadge:(s)=>{ const col=s==="APPROVED"?C.green:s==="PENDING"?C.yellow:s==="REJECTED"?C.red:C.muted; return { display:"inline-block", padding:"3px 11px", borderRadius:999, fontSize:isMobile?12:10, fontWeight:800, letterSpacing:".4px", textTransform:"uppercase", background:s==="APPROVED"?"#dcfce7":s==="PENDING"?"#fef3c7":s==="REJECTED"?"#fee2e2":"#f3f4f6", color:col, boxShadow:`inset 0 0 0 1px ${col}33` }; },
+    jenisBadge:(j)=>{ const col=j==="Pre Memory"?"#1d4ed8":j==="Cadang"?"#7c3aed":j==="Persediaan"?C.green:j==="Persediaan Bursa"?"#ea580c":j==="ATTB"?C.yellow:j==="Non-Stock"?"#be185d":C.muted; return { display:"inline-block", padding:"2px 9px", borderRadius:999, fontSize:isMobile?12:10, fontWeight:800, letterSpacing:".2px",
       background: j==="Pre Memory"?"#dbeafe":j==="Cadang"?"#f3e8ff":j==="Persediaan"?"#dcfce7":j==="Persediaan Bursa"?"#fff7ed":j==="ATTB"?"#fef3c7":j==="Non-Stock"?"#fce7f3":"#f3f4f6",
       color: col, boxShadow:`inset 0 0 0 1px ${col}33` }; },
   };

@@ -9,7 +9,7 @@ import { RencanaWidget } from "./RencanaWidget.jsx";
 import { HeavyEquipmentDashboardSummary } from "./HeavyEquipmentDashboardSummary.jsx";
 import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
-import { Package, Warning, Hourglass, Tractor, ClipboardText, Siren } from "@phosphor-icons/react";
+import { Package, Warning, Hourglass, Tractor, ClipboardText, Siren, Buildings } from "@phosphor-icons/react";
 
 export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
@@ -78,7 +78,7 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
         </CollapsibleSection>
       )}
       {(attbList?.length>0 || attbBongkaranPool?.length>0) && (
-        <CollapsibleSection id="attb" title="Aset ATTB (Penghapusan)" icon="🏢" C={C}>
+        <CollapsibleSection id="attb" title="Aset ATTB (Penghapusan)" icon={<Buildings weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} C={C}>
           <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
         </CollapsibleSection>
       )}

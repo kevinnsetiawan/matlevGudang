@@ -11,7 +11,7 @@ import { RencanaWidget } from "./RencanaWidget.jsx";
 import { HeavyEquipmentDashboardSummary } from "./HeavyEquipmentDashboardSummary.jsx";
 import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
-import { Package, Money, Warning, Hourglass, Tractor, ClockCounterClockwise, ChartLineUp, CalendarBlank, MapPin, Buildings, Nut, CheckCircle, Circle } from "@phosphor-icons/react";
+import { Package, Money, Warning, Hourglass, Tractor, ClockCounterClockwise, ChartLineUp, CalendarBlank, MapPin, Buildings, Nut, CheckCircle, Circle, X } from "@phosphor-icons/react";
 
 export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool, isMobile = false }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
@@ -56,7 +56,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
         </CollapsibleSection>
       )}
       {(attbList?.length>0 || attbBongkaranPool?.length>0) && (
-        <CollapsibleSection id={isMobile ? "default-mobile-attb" : "attb"} title="Aset ATTB (Penghapusan)" icon="🏢" defaultOpen={!isMobile} C={C}>
+        <CollapsibleSection id={isMobile ? "default-mobile-attb" : "attb"} title="Aset ATTB (Penghapusan)" icon={<Buildings weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
           <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
         </CollapsibleSection>
       )}
@@ -75,7 +75,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
               <div style={{fontWeight:800,fontSize:13,color:"#7c3aed"}}><Nut weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Material Cadang — Ringkasan Analisis</div>
               <button style={{...sty.btn("ghost","sm"),fontSize:12}} onClick={()=>setTab("forecastStok")}>Lihat detail →</button>
             </div>
-            <div style={{display:"flex",gap:20,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:12,marginBottom:10}}>
               {[
                 {id:"total",label:"Total Analisis",val:cadang.length,color:C.accent},
                 {id:"aman",label:(<>Aman <CheckCircle weight="fill" size={12} color={C.green} style={{verticalAlign:"-0.15em"}}/></>),val:aman,color:C.green},
@@ -113,8 +113,10 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
                     </div>
                     <span style={sty.statusBadge(t.status)}>{t.status}</span>
                   </div>
-                  <div style={{fontSize:12,color:C.muted,marginTop:3}}>
-                    <CalendarBlank weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.tanggal} • <MapPin weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.lokasiLabel} • <Buildings weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.pihakLabel}
+                  <div style={{display:"flex",flexWrap:"wrap",gap:"2px 10px",fontSize:12,color:C.muted,marginTop:3}}>
+                    <span style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><CalendarBlank weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.tanggal}</span>
+                    <span style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><MapPin weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.lokasiLabel}</span>
+                    <span style={{display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}><Buildings weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {r.pihakLabel}</span>
                   </div>
                 </div>
               );
@@ -130,8 +132,8 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
 
       {/* ── POPUP RINGKASAN KPI ── */}
       {dashModal && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>setDashModal(null)}>
-          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:isMobile?12:20}} onClick={()=>setDashModal(null)}>
+          <div style={{...sty.card,width:480,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
               <h3 style={{fontSize:15,fontWeight:800}}>
                 {dashModal==="totalItem"&&<><Package weight="fill" size={16} style={{verticalAlign:"-0.15em",marginRight:4}}/>Ringkasan Total Item</>}
@@ -139,7 +141,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
                 {dashModal==="kritis"&&<><Warning weight="fill" size={16} style={{verticalAlign:"-0.15em",marginRight:4}}/>Material Stok Kritis</>}
                 {dashModal==="tindakan"&&<><Hourglass weight="fill" size={16} style={{verticalAlign:"-0.15em",marginRight:4}}/>Butuh Tindakan Anda</>}
               </h3>
-              <button style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",color:C.muted,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setDashModal(null)}>✕</button>
+              <button style={{background:"transparent",border:"none",fontSize:18,cursor:"pointer",color:C.muted,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setDashModal(null)}><X weight="bold" size={16}/></button>
             </div>
 
             {(dashModal==="totalItem"||dashModal==="nilai") && (
@@ -163,7 +165,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
                 {lowStocks.map(s=>(
                   <div key={s.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
+                      <div style={{fontSize:12,fontWeight:600,lineHeight:1.3,overflowWrap:"anywhere",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{s.name}</div>
                       <div style={{fontSize:12,color:C.muted}}><MapPin weight="fill" size={12} style={{verticalAlign:"-0.15em"}}/> {s.lokasi||"-"}</div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>

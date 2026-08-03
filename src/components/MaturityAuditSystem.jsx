@@ -333,8 +333,8 @@ export function MaturityAuditEditor({
                         const selectedItemId = assignmentTargets[file.driveFileId] || activeAspect.requiredEvidence[0]?.id || "";
                         const targetItem = activeAspect.requiredEvidence.find(item => item.id === selectedItemId);
                         return <div key={file.driveFileId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 9, fontSize: 12 }}>
-                          <span style={{ color: C.text, fontWeight: 800, maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
-                          <select value={selectedItemId} onChange={event => setAssignmentTargets(previous => ({ ...previous, [file.driveFileId]: event.target.value }))} style={{ minWidth: 170, fontSize: 12 }}>
+                          <span style={{ flex: 1, minWidth: 0, color: C.text, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</span>
+                          <select aria-label="Tetapkan evidence ke item audit" value={selectedItemId} onChange={event => setAssignmentTargets(previous => ({ ...previous, [file.driveFileId]: event.target.value }))} style={{ minWidth: 0, flex: 1, fontSize: 12 }}>
                             {activeAspect.requiredEvidence.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
                           </select>
                           <button type="button" onClick={async () => {
@@ -541,7 +541,7 @@ export function MaturityAuditEditor({
                                       style={{
                                         color: C.text,
                                         fontWeight: 700,
-                                        maxWidth: 240,
+                                        maxWidth: "min(240px, 45vw)",
                                         overflow: "hidden",
                                         textOverflow: "ellipsis",
                                         whiteSpace: "nowrap",
@@ -1136,7 +1136,7 @@ function Form5SHistory({ C, sty, isMobile, assessments, selectedUpt, gudangList 
               return <button key={item.id} onClick={() => setSelectedId(item.id)} style={{ width: "100%", textAlign: "left", padding: "12px", marginBottom: 5, borderRadius: 9, border: `1px solid ${active ? C.accent : C.border}`, background: active ? "#eff6ff" : C.surface, color: C.text, cursor: "pointer" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontWeight: 850 }}><span>{MONTH_LABELS[(item.bulan || 1) - 1]} {item.tahun}</span><span style={{ color: Number(item.scorePercent) >= 80 ? C.green : C.accent }}>{Number(item.scorePercent || 0).toFixed(1)}%</span></div>
                 <div style={{ fontSize: 12, color: C.muted, marginTop: 5 }}>{item.gudangNama || "Gudang belum diisi"} · {item.auditor || "Auditor belum diisi"}</div>
-                <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{format5SDate(item.createdAt)}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{format5SDate(item.createdAt)}</div>
               </button>;
             })}
           </div>
@@ -1306,7 +1306,7 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAsse
 
   const tdBase = {
     border: `1px solid ${C.border}`,
-    padding: "10px 14px",
+    padding: isMobile ? "10px 10px" : "10px 14px",
     verticalAlign: "middle",
     fontSize: 13,
     lineHeight: 1.5,
@@ -1388,7 +1388,7 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAsse
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 0 : 680, background: C.surface }}>
           <thead>
             <tr>
-              <td colSpan={isMobile ? 3 : 4} style={{
+              <td colSpan={isMobile ? 2 : 4} style={{
                 background: HEADER_BG, color: "white", textAlign: "center",
                 fontWeight: 900, fontSize: 16, padding: "14px 16px",
                 letterSpacing: "1px", textTransform: "uppercase"
@@ -1397,10 +1397,10 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAsse
               </td>
             </tr>
             <tr>
-              <th style={{ ...thBase, width: 110 }}>5S</th>
+              {!isMobile && <th style={{ ...thBase, width: 110 }}>5S</th>}
               {!isMobile && <th style={{ ...thBase, width: 220 }}>Definition</th>}
               <th style={{ ...thBase }}>Indikator</th>
-              <th style={{ ...thBase, width: 90 }}>Checklist</th>
+              <th style={{ ...thBase, width: isMobile ? 56 : 90 }}>Checklist</th>
             </tr>
           </thead>
 
@@ -1408,10 +1408,24 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAsse
             {FORM_5S.map((cat) => {
               const catChecked = checks[cat.id].filter(Boolean).length;
               const rows = cat.indicators.length;
-              return cat.indicators.map((ind, ii) => (
+              const catHeaderRow = isMobile && (
+                <tr key={`${cat.id}-head`} style={{ background: C.bg }}>
+                  <td colSpan={2} style={{ ...tdBase, fontWeight: 800, fontSize: 14, color: C.text }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span>{cat.label}</span>
+                      <span style={{ fontSize: 13, color: C.muted, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{catChecked}/{rows}</span>
+                    </div>
+                    <details style={{ marginTop: 6, fontSize: 13, color: C.muted, fontWeight: 400 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 700 }}>Definisi</summary>
+                      <div style={{ marginTop: 4, fontStyle: "italic" }}>{cat.definition}</div>
+                    </details>
+                  </td>
+                </tr>
+              );
+              const indicatorRows = cat.indicators.map((ind, ii) => (
                 <tr key={`${cat.id}-${ii}`}
                   style={{ background: ii % 2 === 0 ? C.surface : C.bg }}>
-                  {ii === 0 && (
+                  {!isMobile && ii === 0 && (
                     <td rowSpan={rows} style={{
                       ...tdBase,
                       background: C.bg,
@@ -1443,45 +1457,51 @@ export function Form5STab({ C, sty, currentUser, gudangList = [], maturity5SAsse
                   )}
                   <td style={{ ...tdBase, color: C.text }}>
                     {ind}
-                    {isMobile && ii === 0 && (
-                      <details style={{ marginTop: 6, fontSize: 13, color: C.muted }}>
-                        <summary style={{ cursor: "pointer", fontWeight: 700 }}>Definisi</summary>
-                        <div style={{ marginTop: 4, fontStyle: "italic" }}>{cat.definition}</div>
-                      </details>
-                    )}
                   </td>
                   <td style={{ ...tdBase, textAlign: "center" }}>
                     <button
                       onClick={() => toggle(cat.id, ii)}
                       title={checks[cat.id][ii] ? "Klik untuk hapus centang" : "Klik untuk centang"}
                       style={{
-                        width: 24, height: 24,
-                        borderRadius: 6,
-                        border: `2px solid ${checks[cat.id][ii] ? C.green : C.border}`,
-                        background: checks[cat.id][ii] ? C.green : C.surface,
+                        width: isMobile ? 44 : 24, height: isMobile ? 44 : 24,
+                        padding: 0,
+                        border: "none",
+                        background: "transparent",
                         cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                         flexShrink: 0,
-                        boxShadow: checks[cat.id][ii] ? "0 2px 8px rgba(16, 185, 129, 0.2)" : "none",
                         outline: "none"
                       }}
                     >
-                      {checks[cat.id][ii] && (
-                        <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
-                          <polyline points="2,7 5,10 11,3" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
+                      <span style={{
+                        width: 24, height: 24,
+                        borderRadius: 6,
+                        border: `2px solid ${checks[cat.id][ii] ? C.green : C.border}`,
+                        background: checks[cat.id][ii] ? C.green : C.surface,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "background .2s ease, border-color .2s ease",
+                        flexShrink: 0,
+                        boxShadow: checks[cat.id][ii] ? "0 2px 8px rgba(16, 185, 129, 0.2)" : "none"
+                      }}>
+                        {checks[cat.id][ii] && (
+                          <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
+                            <polyline points="2,7 5,10 11,3" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
                     </button>
                   </td>
                 </tr>
               ));
+              return <React.Fragment key={cat.id}>{catHeaderRow}{indicatorRows}</React.Fragment>;
             })}
 
             <tr>
-              <td colSpan={isMobile ? 2 : 3} style={{
+              <td colSpan={isMobile ? 1 : 3} style={{
                 ...tdBase,
                 textAlign: "center",
                 fontWeight: 800,

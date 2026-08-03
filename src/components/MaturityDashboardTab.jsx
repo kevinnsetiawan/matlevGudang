@@ -55,15 +55,17 @@ export function MaturityDashboardTab({
             return (
               <div className="operations-page">
               <div className="kpi-banner" style={{
+                flexDirection: isMobile ? "column" : undefined,
+                alignItems: isMobile ? "stretch" : undefined,
                 justifyContent: "space-between",
-                padding: "18px 24px",
-                marginBottom: 24,
+                padding: isMobile ? "14px 16px" : "18px 24px",
+                marginBottom: isMobile ? 16 : 24,
                 flexWrap: "wrap",
-                gap: 16
+                gap: isMobile ? 12 : 16
               }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "1.5px" }}>WILAYAH AUDIT</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: "#93c5fd", textTransform: "uppercase", letterSpacing: "1.5px" }}>WILAYAH AUDIT</span>
                     <span style={{ padding: "2px 10px", borderRadius: 20, background: "rgba(255,255,255,0.12)", color: "#fff", fontSize: 12, fontWeight: 800, border: "1px solid rgba(255,255,255,0.25)" }}>{statusLabel}</span>
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "white", letterSpacing: "-0.4px" }}>{selectedMaturityUpt}</div>
@@ -76,10 +78,10 @@ export function MaturityDashboardTab({
                   background: "rgba(255,255,255,0.1)",
                   border: "1px solid rgba(255,255,255,0.2)",
                   borderRadius: 14,
-                  padding: "12px 20px",
-                  textAlign: "right"
+                  padding: isMobile ? "10px 14px" : "12px 20px",
+                  textAlign: isMobile ? "left" : "right"
                 }}>
-                  <div style={{ fontSize: 10, color: "#93c5fd", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px" }}>Level Maturity</div>
+                  <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 800, textTransform: "uppercase", letterSpacing: "1px" }}>Level Maturity</div>
                   <div style={{ fontSize: 28, fontWeight: 950, color: "white", margin: "2px 0", lineHeight: 1.1, letterSpacing: "-1px" }}>Level {currentLevel}</div>
                   <div style={{ fontSize: 12, color: "#93c5fd", fontWeight: 700 }}>{MATURITY_LEVELS[currentLevel] || "Basic"}</div>
                 </div>
@@ -115,16 +117,17 @@ export function MaturityDashboardTab({
                 )}
               </div>
 
-              {/* Sub-tab navigation */}
+              {/* Sub-tab navigation — dibungkus supaya punya separator ke konten di bawahnya */}
+              <div style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: isMobile ? 14 : 16, marginBottom: isMobile ? 16 : 20 }}>
               <div style={{
                 display: "flex",
                 flexDirection: isMobile ? "column" : "row",
                 gap: 6,
-                marginBottom: 24,
-                background: C.bg,
+                background: C.surface,
                 borderRadius: 12,
                 padding: 5,
-                border: `1.5px solid ${C.border}`,
+                border: `1px solid ${C.border}`,
+                boxShadow: "0 1px 2px rgba(16,24,40,0.04)",
                 overflowX: isMobile ? "visible" : "auto",
                 WebkitOverflowScrolling: "touch"
               }}>
@@ -149,6 +152,7 @@ export function MaturityDashboardTab({
                     whiteSpace: "nowrap"
                   }}>{s.label}</button>
                 ))}
+              </div>
               </div>
 
               {/*  DASHBOARD AUDIT  */}
@@ -244,11 +248,11 @@ export function MaturityDashboardTab({
                           justifyContent: "space-between",
                           minHeight: 220
                         }}>
-                          <div style={{ display: "flex", justifyContent: "space-around", alignItems: "flex-end", height: 160, paddingBottom: 10, borderBottom: "1.5px solid #cbd5e1" }}>
+                          <div style={{ display: "flex", justifyContent: "center", gap: 4, alignItems: "flex-end", height: 160, paddingBottom: 10, borderBottom: "1.5px solid #cbd5e1" }}>
                             {uptAuditHistory.map(bar => {
                               const heightPct = (bar.score / 5) * 100;
                               return (
-                                <div key={bar.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", width: `${Math.min(15, 100 / uptAuditHistory.length)}%`, height: "100%", justifyContent: "flex-end" }}>
+                                <div key={bar.id} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "1 1 0", minWidth: 0, maxWidth: 72, height: "100%", justifyContent: "flex-end" }}>
                                   <span style={{ fontSize: 12, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>{bar.score.toFixed(2)}</span>
                                   <div style={{
                                     width: "100%",
@@ -261,9 +265,9 @@ export function MaturityDashboardTab({
                               );
                             })}
                           </div>
-                          <div style={{ display: "flex", justifyContent: "space-around", paddingTop: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "center", gap: 4, paddingTop: 8 }}>
                             {uptAuditHistory.map(item => (
-                              <div key={item.id} style={{ width: `${Math.min(15, 100 / uptAuditHistory.length)}%`, textAlign: "center", fontSize: 11, fontWeight: 800, color: "#64748b" }}>S{item.semester} {item.tahun}</div>
+                              <div key={item.id} style={{ flex: "1 1 0", minWidth: 0, maxWidth: 72, textAlign: "center", fontSize: 12, fontWeight: 800, color: "#64748b", lineHeight: 1.15 }}>S{item.semester} {item.tahun}</div>
                             ))}
                           </div>
                         </div>
@@ -281,9 +285,9 @@ export function MaturityDashboardTab({
                             alignItems: "center"
                           }}>
                             <div>
-                              <div style={{ fontSize: 10, color: "#0369a1", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>Skor Terbaru</div>
+                              <div style={{ fontSize: 12, color: "#0369a1", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px" }}>Skor Terbaru</div>
                               <div style={{ fontSize: 22, fontWeight: 900, color: "#0369a1", margin: "2px 0", lineHeight: 1.1 }}>{latestHistory.score.toFixed(2)}</div>
-                              <div style={{ fontSize: 11, color: HISTORY_STATUS_COLOR[latestHistory.status] || "#0284c7", fontWeight: 600 }}>Semester {latestHistory.semester} {latestHistory.tahun} - {HISTORY_STATUS_LABEL[latestHistory.status] || latestHistory.status}</div>
+                              <div style={{ fontSize: 12, color: HISTORY_STATUS_COLOR[latestHistory.status] || "#0284c7", fontWeight: 600 }}>Semester {latestHistory.semester} {latestHistory.tahun} - {HISTORY_STATUS_LABEL[latestHistory.status] || latestHistory.status}</div>
                             </div>
                           </div>
 
@@ -302,7 +306,7 @@ export function MaturityDashboardTab({
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>S{item.semester} {item.tahun}</span>
                                 <span style={{
-                                  fontSize: 10,
+                                  fontSize: 12,
                                   fontWeight: 800,
                                   padding: "2px 6px",
                                   borderRadius: 12,
@@ -340,7 +344,7 @@ export function MaturityDashboardTab({
                             }}>
                               <div style={{ flex: 1, minWidth: 0, paddingRight: 10 }}>
                                 <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{item.title}</div>
-                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.desc}</div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2, lineHeight: 1.35, overflowWrap: "anywhere", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{item.desc}</div>
                               </div>
                               <span style={{
                                 background: item.bg,
@@ -376,7 +380,7 @@ export function MaturityDashboardTab({
                             }}>
                               <div style={{ flex: 1, minWidth: 0, paddingRight: 10 }}>
                                 <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{item.title}</div>
-                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.desc}</div>
+                                <div style={{ fontSize: 12, color: "#64748b", marginTop: 2, lineHeight: 1.35, overflowWrap: "anywhere", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{item.desc}</div>
                               </div>
                               <span style={{
                                 background: item.bg,
@@ -658,9 +662,9 @@ export function MaturityDashboardTab({
                             <div style={{ textAlign: "right", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                               <div style={{ fontSize: 13, color: C.muted }}>{fmtDate(a.updatedAt || a.createdAt)}</div>
                               <div style={{ display: "flex", gap: 4 }}>
-                                <button style={{ ...sty.btn("ghost", "sm"), fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={e => { e.stopPropagation(); exportMaturityAuditExcel(a); }}>Export</button>
+                                <button style={{ ...sty.btn("ghost", "sm"), display: "inline-flex", alignItems: "center", gap: 4 }} onClick={e => { e.stopPropagation(); exportMaturityAuditExcel(a); }}>Export</button>
                                 {hasRole(currentUser, "ADMIN", "SUPERADMIN", "TL") && (
-                                  <button style={{ ...sty.btn("ghost", "sm"), fontSize: 11, color: C.red, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={e => { e.stopPropagation(); deleteMaturityAudit(a.id); }}>Hapus</button>
+                                  <button style={{ ...sty.btn("ghost", "sm"), color: C.red, display: "inline-flex", alignItems: "center", gap: 4 }} onClick={e => { e.stopPropagation(); deleteMaturityAudit(a.id); }}>Hapus</button>
                                 )}
                               </div>
                             </div>

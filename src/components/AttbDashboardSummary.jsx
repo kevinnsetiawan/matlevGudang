@@ -2,6 +2,7 @@
 import { getUserUptScope } from "../lib/roles.js";
 import { fmtRp } from "../lib/utils.js";
 import { ATTB_STAGES, attbStageIndex } from "../lib/attb.js";
+import { FolderOpen, Toolbox } from "@phosphor-icons/react";
 
 // Ringkasan ATTB untuk Dashboard — fokus data yang dilihat manajemen: nilai aset yang
 // akan dihapusbukukan, estimasi nilai lelang (recovery), sebaran tahap pipeline, item
@@ -38,7 +39,7 @@ export function AttbDashboardSummary({ attbList = [], bongkaranPool = [], C, sty
     <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${ditahan?"#f59e0b":C.accent}`,cursor:"pointer"}} onClick={()=>setTab("attb")}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:12}}>
         <div>
-          <div style={{fontSize:14,fontWeight:900}}>🗂️ Ringkasan ATTB — Penghapusan Aset</div>
+          <div style={{fontSize:14,fontWeight:900}}><FolderOpen weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:5}}/>Ringkasan ATTB — Penghapusan Aset</div>
           <div style={{fontSize:12,color:C.muted}}>Scope: <b>{scopeLabel}</b> — nilai aset, progres pipeline &amp; item tertahan.</div>
         </div>
         <button style={sty.btn("ghost","sm")} onClick={(e)=>{e.stopPropagation(); setTab("attb");}}>Buka Menu</button>
@@ -58,7 +59,7 @@ export function AttbDashboardSummary({ attbList = [], bongkaranPool = [], C, sty
       {/* Pipeline funnel — sebaran item per tahap + inflow bongkaran TUG-10 */}
       <div style={{display:"flex",alignItems:"stretch",gap:6,flexWrap:"wrap"}}>
         <div style={{flex:"0 0 auto",display:"flex",flexDirection:"column",justifyContent:"center",padding:"8px 10px",borderRadius:8,border:`1px dashed #cbd5e1`,background:"#f8fafc",minWidth:96}}>
-          <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase"}}>🧰 Bongkaran</div>
+          <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase"}}><Toolbox weight="fill" size={12} style={{verticalAlign:"-0.15em",marginRight:4}}/>Bongkaran</div>
           <div style={{fontSize:18,fontWeight:900,color:"#6b7280"}}>{bongkaranBelum}</div>
           <div style={{fontSize:12,color:C.muted}}>belum diusulkan</div>
         </div>

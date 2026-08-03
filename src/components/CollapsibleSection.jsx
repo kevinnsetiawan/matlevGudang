@@ -1,5 +1,6 @@
 // Komponen CollapsibleSection — dipindah dari App.jsx (refactor Fase 4d).
 import { useState } from "react";
+import { CaretDown, CaretRight } from "@phosphor-icons/react";
 
 // Sub-section Dashboard yang bisa dibuka/tutup (klik judul). Status buka/tutup
 // disimpan per-user di localStorage supaya konsisten antar kunjungan.
@@ -12,7 +13,7 @@ export function CollapsibleSection({ id, title, icon, defaultOpen = true, C, chi
   return (
     <div style={{ marginBottom: 14 }}>
       <button onClick={toggle} style={{ width:"100%", display:"flex", alignItems:"center", gap:8, background:"transparent", border:"none", borderBottom:`1px solid ${C.border}`, padding:"8px 2px", cursor:"pointer", textAlign:"left" }}>
-        <span style={{ fontSize:12, color:C.muted, width:14, flexShrink:0 }}>{open ? "▼" : "▶"}</span>
+        <span style={{ display:"flex", alignItems:"center", color:C.muted, width:14, flexShrink:0 }}>{open ? <CaretDown weight="bold" size={12}/> : <CaretRight weight="bold" size={12}/>}</span>
         <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{icon} {title}</span>
         {!open && <span style={{ fontSize:12, color:C.muted, marginLeft:"auto" }}>klik untuk buka</span>}
       </button>
