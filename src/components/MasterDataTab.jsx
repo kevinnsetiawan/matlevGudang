@@ -2,8 +2,9 @@
 // Murni relokasi tab "Master Data" (tab==="master") beserta semua sub-tab
 // (katalog, satpam, timmutu, organisasi, gudang, akun, migrasi, auditLog, perms).
 // JSX/logic tidak diubah — hanya relokasi.
+import { useState } from "react";
 import { can } from "../lib/perms.js";
-import { ROLES, hasRole } from "../lib/roles.js";
+import { ROLES, hasRole, roleTier } from "../lib/roles.js";
 import { getSAPBadgeStyle } from "../lib/sap.js";
 import { getSAPLabel } from "../lib/ragShared.mjs";
 import { uid, fmtDate } from "../lib/utils.js";
@@ -16,6 +17,7 @@ import { AuditLogPage } from "./AuditLogPage.jsx";
 import { PermMatrixPage } from "./PermMatrixPage.jsx";
 
 export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockSubTab, filteredKatalog, satpamList, timMutuList, uitList, uptList, ultgList, users, gudangList, lokasiList, subGudangList, visibleGudangList, openAddKatalog, openAddSatpam, openAddUIT, openAddGudang, openAddAkun, importGudangOpen, setImportGudangOpen, showGudangMaintenance, setShowGudangMaintenance, importLokasiOpen, setImportLokasiOpen, gudangCapacityImports, setGudangCapacityImports, saveToCloud, showToast, backfillGudangCoordFromCapacity, dedupeGudangDanSubGudang, isKodeDuplicateInSubGudang, setLokasiList, syncLokasi, maraUploadProgress, maraUploadLoading, uploadMaraToDB, katalogList, katalogSearch, setKatalogSearch, katalogFilterBelumMara, setKatalogFilterBelumMara, setBarcodePrintOpen, pagedKatalog, stocks, openEditKatalog, deleteKatalog, katalogPageSize, setKatalogPageSize, katalogPageClamped, setKatalogPage, katalogTotalPages, openEditSatpam, deleteSatpam, openEditTimMutu, orgSearch, setOrgSearch, collapsedUitIds, setCollapsedUitIds, openAddUPT, openEditUIT, deleteUIT, openAddULTG, openEditUPT, deleteUPT, openEditULTG, deleteULTG, expandedGudangId, setExpandedGudangId, openEditGudang, deleteGudang, showGudangDenahTools, setShowGudangDenahTools, uploadDenahGudang, denahLoading, mapConfigGudangId, setMapConfigGudangId, pendingMapLokasi, setPendingMapLokasi, manualAddMode, setManualAddMode, ocrSuggestGudangId, setOcrSuggestGudangId, ocrSuggestSubGudangId, setOcrSuggestSubGudangId, ocrSuggestions, setOcrSuggestions, assignLokasiKoordinat, suggestKodeFromOcr, expandedSubGudangToolsIds, setExpandedSubGudangToolsIds, uploadDenahSubGudang, denahSubLoading, mapConfigSubGudangId, setMapConfigSubGudangId, pendingMapLokasiSub, setPendingMapLokasiSub, manualAddModeSub, setManualAddModeSub, assignLokasiKoordinatSub, openEditLokasi, requestDeleteLokasi, selectedSubGudangId, setSelectedSubGudangId, openEditAkun, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, setStocks, setKatalogList, setTxns, reloadRolePerms }) {
+  const [akunSearch, setAkunSearch] = useState("");
   return (
           <div className={`workspace-page master-page master-page--${stockSubTab}`}>
             <div className="workspace-page-toolbar">
@@ -684,42 +686,78 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             )}
 
             {/* ── SUB-TAB: KELOLA AKUN (aksi.kelolaAkun, default ADMIN) ── */}
-            {stockSubTab==="akun" && can(currentUser, "aksi.kelolaAkun", rolePerms) && (
+            {stockSubTab==="akun" && can(currentUser, "aksi.kelolaAkun", rolePerms) && (() => {
+              const TIER_BADGE = {
+                PUSAT: { label: "Pusat", color: "#6d28d9", bg: "#ede9fe", border: "#ddd6fe" },
+                UIT: { label: "UIT", color: "#1e3a8a", bg: "#dbeafe", border: "#bfdbfe" },
+                UPT: { label: "UPT", color: "#166534", bg: "#dcfce7", border: "#bbf7d0" },
+                GLOBAL: { label: "Global", color: "#374151", bg: "#f3f4f6", border: "#e5e7eb" },
+              };
+              const TIER_ORDER = { PUSAT: 0, GLOBAL: 1, UIT: 2, UPT: 3 };
+              const unitLabel = (u, tier) => {
+                if (tier === "PUSAT") return "Nasional (Logistik Pusat)";
+                if (tier === "GLOBAL") return "Semua unit";
+                if (tier === "UIT") return uitList.find(x=>x.id===u.uitId)?.nama || "—";
+                const uptNama = uptList.find(p=>p.id===u.uptId)?.nama;
+                const ultgNama = ultgList.find(g=>g.id===u.ultgId)?.nama;
+                if (!uptNama) return "—";
+                return ultgNama ? `${uptNama} • ${ultgNama}` : uptNama;
+              };
+              const rows = users.map(u => {
+                const tier = roleTier(u.role);
+                return { u, tier, unit: unitLabel(u, tier) };
+              }).sort((a,b) => TIER_ORDER[a.tier]-TIER_ORDER[b.tier] || (a.u.name||"").localeCompare(b.u.name||""));
+              const q = akunSearch.trim().toLowerCase();
+              const filtered = !q ? rows : rows.filter(({u,tier,unit}) =>
+                [u.name, u.username, ROLES[u.role]||u.role, u.jabatan, unit].some(v => (v||"").toLowerCase().includes(q)) || TIER_BADGE[tier].label.toLowerCase().includes(q)
+              );
+              return (
               <div style={sty.card}>
                 {users.length===0 ? (
                   <div style={{textAlign:"center",color:C.muted,padding:30}}>Belum ada akun terdaftar.</div>
                 ) : (
+                  <>
+                  <input style={{...sty.input,marginBottom:12,maxWidth:360}} placeholder="Cari nama, username, role, atau unit…" value={akunSearch} onChange={e=>setAkunSearch(e.target.value)}/>
+                  {filtered.length===0 ? (
+                    <div style={{textAlign:"center",color:C.muted,padding:30}}>Tidak ada akun cocok dengan "{akunSearch}".</div>
+                  ) : (
                   <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-                  <table style={{width:"100%",minWidth:640,borderCollapse:"collapse",fontSize:12}}>
+                  <table style={{width:"100%",minWidth:720,borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{borderBottom:`2px solid ${C.border}`,textAlign:"left"}}>
                         <th style={{padding:"8px 6px"}}>Nama</th>
                         <th style={{padding:"8px 6px"}}>Username</th>
                         <th style={{padding:"8px 6px"}}>Role</th>
+                        <th style={{padding:"8px 6px"}}>Jenjang</th>
                         <th style={{padding:"8px 6px"}}>Jabatan</th>
-                        <th style={{padding:"8px 6px"}}>UPT</th>
-                        <th style={{padding:"8px 6px"}}>ULTG</th>
+                        <th style={{padding:"8px 6px"}}>Unit</th>
                         <th style={{padding:"8px 6px"}}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {users.map(u=>(
+                      {filtered.map(({u,tier,unit})=>{
+                        const badge = TIER_BADGE[tier];
+                        return (
                         <tr key={u.id} style={{borderBottom:`1px solid ${C.border}`}}>
                           <td style={{padding:"8px 6px",fontWeight:700}}>{u.name}</td>
                           <td style={{padding:"8px 6px",color:C.muted}}>{u.username}</td>
                           <td style={{padding:"8px 6px"}}>{ROLES[u.role]||u.role}</td>
+                          <td style={{padding:"8px 6px"}}><span style={{fontSize:11,fontWeight:700,color:badge.color,background:badge.bg,border:`1px solid ${badge.border}`,padding:"1px 6px",borderRadius:6}}>{badge.label}</span></td>
                           <td style={{padding:"8px 6px",color:C.muted}}>{u.jabatan||"-"}</td>
-                          <td style={{padding:"8px 6px",color:C.muted}}>{uptList.find(p=>p.id===u.uptId)?.nama||"-"}</td>
-                          <td style={{padding:"8px 6px",color:C.muted}}>{ultgList.find(g=>g.id===u.ultgId)?.nama||"-"}</td>
+                          <td style={{padding:"8px 6px",color:C.muted}}>{unit}</td>
                           <td style={{padding:"8px 6px"}}><button style={sty.btn("ghost","sm")} onClick={()=>openEditAkun(u)}>✏️ Edit</button></td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                   </div>
+                  )}
+                  </>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {/* ── SUB-TAB: MIGRASI DATA (ADMIN only) ── */}
             {stockSubTab==="migrasi" && hasRole(currentUser, "ADMIN") && (

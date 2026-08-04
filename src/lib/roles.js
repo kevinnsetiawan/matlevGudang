@@ -10,6 +10,14 @@ export const ROLES = { ADMIN: "Admin Gudang", TL: "TL Logistik", ASMAN: "Asman K
 
 export const CAN_CREATE = ["ADMIN", "TL"];
 
+// Jenjang akun untuk tampilan (Kelola Akun) — turunan langsung dari hirarki di atas.
+export function roleTier(role) {
+  if (role === "ADMIN_LOG_PUSAT") return "PUSAT";
+  if (role === "ADMIN_UIT" || role === "ASMAN_LOG_UIT" || role === "MGR_LOGISTIK_UIT") return "UIT";
+  if (role === "SUPERADMIN") return "GLOBAL";
+  return "UPT";
+}
+
 // SUPERADMIN bypass semua gate role-specific (akses & approval lintas UPT/UIT/ULTG) —
 // dipakai lewat hasRole() di seluruh App.jsx, bukan dicek manual satu-satu.
 export function hasRole(currentUser, ...allowedRoles) {
