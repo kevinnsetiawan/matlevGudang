@@ -10,7 +10,7 @@ import { OperationsHero } from "./OperationsHero.jsx";
 
 // AttbTab — pipeline monitoring penghapusan aset material ATTB, lihat docs/ATTB_SPEC.md.
 // Pola konsisten HeavyEquipmentTabV2: chip filter + kartu, scoping UPT via effectiveUptFilter.
-export function AttbTab({ attbList, currentUser, users, sty, C, createItem, saveEdit, submitToKI, approveToKI, rejectToKI, advanceStage, markBelumLanjut, bulkImport, showToast, gudangList=[], subGudangList=[], lokasiList=[], setPetaMiniDetail, deleteItem, askConfirmDelete, bongkaranPool=[], handleImg }) {
+export function AttbTab({ attbList, currentUser, uptList, users, sty, C, createItem, saveEdit, submitToKI, approveToKI, rejectToKI, advanceStage, markBelumLanjut, bulkImport, showToast, gudangList=[], subGudangList=[], lokasiList=[], setPetaMiniDetail, deleteItem, askConfirmDelete, bongkaranPool=[], handleImg }) {
   const canDelete = hasRole(currentUser, "ADMIN");
   // Key TUG-10 yang sudah "diusulkan" jadi item ATTB (untuk tandai pool yg sudah dipakai).
   const promotedKeys = new Set(attbList.map(a=>a.sourceTug10Key).filter(Boolean));
@@ -64,7 +64,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
   async function setAttbLokasi(item, newLokasiId) {
     await saveEdit(item.id, { lokasiId: newLokasiId || null });
   }
-  const myUpt = getUserUptScope(currentUser);
+  const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
   const effectiveUptFilter = isMSB ? myUptSelected : (myUpt || "");
@@ -427,7 +427,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
               <tr><td colSpan={7} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada item ATTB untuk filter ini.</td></tr>
             )}
             {pagedList.map(item=>{
-              const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item);
+              const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item, uptList);
               const borderColor = item.lanjutBelumLanjut ? "#f59e0b" : stageColor(item.stage);
               const loc = resolveLokasiMaster(item);
               const selGudangId = attbGudangFilter[item.id] ?? item.gudangId ?? loc?.gdg?.id ?? "";
@@ -596,7 +596,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
         {pagedList.map(item=>{
           const borderColor = item.lanjutBelumLanjut ? "#f59e0b" : stageColor(item.stage);
           const loc = resolveLokasiMaster(item);
-          const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item);
+          const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item, uptList);
           const mobileLocationSummary = [
             loc?.gdg?.kode || loc?.gdg?.nama,
             loc?.lok?.kode || loc?.lok?.nama,

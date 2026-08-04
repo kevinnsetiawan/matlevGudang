@@ -39,8 +39,8 @@ function EquipmentPhotoInput({ foto, nama, handleImg, setForm, sty, C, showToast
   </>;
 }
 
-export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, sty, C, handleImg, saveEdit, createEquipment, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
-  const myUpt = getUserUptScope(currentUser);
+export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList, users, sty, C, handleImg, saveEdit, createEquipment, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
+  const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
@@ -435,7 +435,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, users, 
                   </div>
                   <div style={{fontSize:12,fontWeight:700,marginBottom:2}}>{loan.namaPekerjaan||"-"}</div>
                   <div style={{fontSize:12,color:C.muted,marginBottom:isActive?6:0}}>{loan.tanggalAmbil} s/d {loan.tanggalKembali}</div>
-                  {isActive&&isPendingHeavyEquipmentLoan(loan)&&canApproveHeavyEquipmentLoan(currentUser,loan)&&(
+                  {isActive&&isPendingHeavyEquipmentLoan(loan)&&canApproveHeavyEquipmentLoan(currentUser,loan,uptList)&&(
                     <div className="equipment-loan-card__approval" style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
                       {rejectingId===loan.id
                         ?<><input style={{...sty.input,flex:"1 1 160px"}} value={reason} onChange={e=>setReason(e.target.value)} placeholder="Alasan penolakan"/><span className="approval-actions approval-actions--compact"><button className="approval-btn--danger" onClick={()=>{rejectLoan(loan.id,reason);setRejectingId(null);setReason("");}}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button><button className="approval-btn--cancel" onClick={()=>{setRejectingId(null);setReason("");}}>Batal</button></span></>

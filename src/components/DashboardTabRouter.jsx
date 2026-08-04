@@ -66,7 +66,7 @@ export function DashboardTabRouter(props) {
           <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
         ) : (
         <DashboardAsman
-          stocks={enrichedStocks} txns={txns} katalogList={katalogList}
+          stocks={enrichedStocks} txns={txns} katalogList={katalogList} uptList={uptList}
           rencanaKedatanganList={rencanaKedatanganList}
           myPendingApprovals={myPendingApprovals}
           topN={topN} setTopN={setTopN}
@@ -88,7 +88,7 @@ export function DashboardTabRouter(props) {
 
         {dashTab==="detail" && (
         <DashboardDefault
-          stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList}
+          stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList} uptList={uptList}
           rencanaKedatanganList={rencanaKedatanganList}
           myPendingApprovals={myPendingApprovals}
           lowStocks={lowStocks} totalVal={totalVal}

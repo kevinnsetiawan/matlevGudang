@@ -13,7 +13,7 @@ import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
 import { Package, Money, Warning, Hourglass, Tractor, ClockCounterClockwise, ChartLineUp, CalendarBlank, MapPin, Buildings, Nut, CheckCircle, Circle, X } from "@phosphor-icons/react";
 
-export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool, isMobile = false }) {
+export function DashboardDefault({ stocks, txns, katalogList, lokasiList, uptList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool, isMobile = false }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
 
   const jenisBreakdown = JENIS_BARANG.map(jb => ({
@@ -52,12 +52,12 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
       <div className="dashboard-default-saldo"><KPISaldoCards stocks={stocks} C={C} sty={sty}/></div>
       {(heavyEquipmentList?.length>0 || heavyEquipmentLoans?.length>0) && (
         <CollapsibleSection id={isMobile ? "default-mobile-alatberat" : "alatberat"} title="Alat Berat" icon={<Tractor weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
-          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
       {(attbList?.length>0 || attbBongkaranPool?.length>0) && (
         <CollapsibleSection id={isMobile ? "default-mobile-attb" : "attb"} title="Aset ATTB (Penghapusan)" icon={<Buildings weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
-          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
       {(()=>{

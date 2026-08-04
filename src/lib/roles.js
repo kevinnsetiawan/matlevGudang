@@ -1,5 +1,4 @@
 // Role & user-scope primitives — dipindah dari App.jsx (refactor Fase 3d).
-import { UPT } from "../constants.js";
 
 // Hirarki resmi (keputusan user 2026-08-02):
 //   UPT   (lihat 1 UPT sendiri) : ADMIN, TL, ASMAN, MANAGER, MGR_ULTG, ADMIN_ULTG
@@ -40,10 +39,22 @@ export function canAccessGudang(user, gudangId) {
   return allowed.includes(gudangId);
 }
 
-export function getUserUptScope(user) {
-  // currentUser.upt/uptName/uptKode/uptId nyaris selalu kosong untuk akun biasa (belum di-assign
-  // per-user) — fallback ke const UPT global (deployment ini = 1 UPT), pola sama seperti `myUpt`
-  // di HeavyEquipmentTabV2 dan AI Agent, supaya scoping tidak diam-diam lolos jadi "boleh semua".
-  const appUptShort = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
-  return user?.upt || user?.uptName || user?.uptKode || user?.uptId || appUptShort || "";
+// Pagar isolasi multi-UPT (Gelombang 1, 2026-08-04): dulu fallback ke konstanta UPT global
+// (aman selama cuma 1 UPT). Sekarang UPT kedua akan onboarding, jadi fallback harus SADAR
+// JUMLAH UPT di uptList — kalau cuma 1 UPT terdaftar, perilaku lama dipertahankan persis;
+// begitu ada 2+, akun tanpa upt/uptId eksplisit tidak lagi diam-diam dianggap UPT pertama.
+// Nilai yang berasal dari uptList WAJIB dipangkas prefix "UPT " — versi lama memangkasnya
+// (`"UPT Surabaya"` -> `"Surabaya"`) dan nilai itulah yang tersimpan di data existing
+// (attb_list.upt / heavy_equipment.upt diisi dari fungsi ini, App.jsx:3810). Tanpa pangkas,
+// perbandingan `getUserUptScope(user) === item.upt` gagal dan approval ATTB/Alat Berat mati.
+const stripUptPrefix = (s) => (s || "").replace(/^UPT\s+/i, "").trim();
+
+export function getUserUptScope(user, uptList) {
+  if (user?.upt || user?.uptName || user?.uptKode) return user.upt || user.uptName || user.uptKode;
+  if (user?.uptId) {
+    const found = Array.isArray(uptList) ? uptList.find(u => u.id === user.uptId) : null;
+    if (found?.nama) return stripUptPrefix(found.nama);
+  }
+  if (Array.isArray(uptList) && uptList.length === 1) return stripUptPrefix(uptList[0]?.nama);
+  return "";
 }

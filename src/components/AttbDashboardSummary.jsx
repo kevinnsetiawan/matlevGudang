@@ -7,8 +7,8 @@ import { FolderOpen, Toolbox } from "@phosphor-icons/react";
 // Ringkasan ATTB untuk Dashboard — fokus data yang dilihat manajemen: nilai aset yang
 // akan dihapusbukukan, estimasi nilai lelang (recovery), sebaran tahap pipeline, item
 // yang tertahan (bottleneck), dan inflow material bongkaran dari TUG-10.
-export function AttbDashboardSummary({ attbList = [], bongkaranPool = [], C, sty, setTab, currentUser }) {
-  const myUpt = getUserUptScope(currentUser);
+export function AttbDashboardSummary({ attbList = [], bongkaranPool = [], C, sty, setTab, currentUser, uptList }) {
+  const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
   const scoped = isMSB ? attbList : attbList.filter(a=>a.upt===myUpt);
   const scopeLabel = isMSB ? "Semua UPT" : (myUpt || "UPT");

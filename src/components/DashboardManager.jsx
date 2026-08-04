@@ -74,12 +74,12 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
       <KPISaldoCards stocks={stocks} C={C} sty={sty}/>
       {(heavyEquipmentList?.length>0 || heavyEquipmentLoans?.length>0) && (
         <CollapsibleSection id="alatberat" title="Alat Berat" icon={<Tractor weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} C={C}>
-          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
       {(attbList?.length>0 || attbBongkaranPool?.length>0) && (
         <CollapsibleSection id="attb" title="Aset ATTB (Penghapusan)" icon={<Buildings weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} C={C}>
-          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
 

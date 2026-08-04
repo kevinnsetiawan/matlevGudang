@@ -3759,7 +3759,7 @@ export default function PLNWarehouse() {
   async function approveHeavyEquipmentLoan(loanId, catatan="") {
     const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
     if (!loan || !isPendingHeavyEquipmentLoan(loan)) return;
-    if (!canApproveHeavyEquipmentLoan(currentUser, loan)) { showToast("Hanya Asman UPT pemilik alat yang bisa approve peminjaman ini.","error"); return; }
+    if (!canApproveHeavyEquipmentLoan(currentUser, loan, uptList)) { showToast("Hanya Asman UPT pemilik alat yang bisa approve peminjaman ini.","error"); return; }
     const ownerUpt = getHeavyEquipmentLoanOwnerUpt(loan);
     const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
     const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, ownerUpt, requesterUpt, status:"DIPINJAM", approvedBy:currentUser.id, approvedAt:Date.now(), catatanApproval:catatan } : l);
@@ -3774,7 +3774,7 @@ export default function PLNWarehouse() {
     if (!reason?.trim()) { showToast("Masukkan alasan penolakan.","error"); return; }
     const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
     if (!loan || !isPendingHeavyEquipmentLoan(loan)) return;
-    if (!canApproveHeavyEquipmentLoan(currentUser, loan)) { showToast("Hanya Asman UPT pemilik alat yang bisa menolak peminjaman ini.","error"); return; }
+    if (!canApproveHeavyEquipmentLoan(currentUser, loan, uptList)) { showToast("Hanya Asman UPT pemilik alat yang bisa menolak peminjaman ini.","error"); return; }
     const ownerUpt = getHeavyEquipmentLoanOwnerUpt(loan);
     const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
     const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, ownerUpt, requesterUpt, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason.trim() } : l);
@@ -3807,7 +3807,7 @@ export default function PLNWarehouse() {
     const item = {
       ...form,
       id: `ATTB-${uid().slice(-8)}`,
-      upt: form.upt || getUserUptScope(currentUser),
+      upt: form.upt || getUserUptScope(currentUser, uptList),
       stage: "USULAN_AE1",
       approvalStatus: "DRAFT",
       lanjutBelumLanjut: false,
@@ -3843,7 +3843,7 @@ export default function PLNWarehouse() {
   async function approveAttbToKI(id, catatan="") {
     const item = attbList.find(a=>a.id===id);
     if (!item || !isPendingAttbApproval(item)) return;
-    if (!canApproveAttb(currentUser, item)) { showToast("Hanya Asman UPT pengaju yang bisa approve item ini.","error"); return; }
+    if (!canApproveAttb(currentUser, item, uptList)) { showToast("Hanya Asman UPT pengaju yang bisa approve item ini.","error"); return; }
     const now = Date.now();
     const next = attbList.map(a => a.id===id ? {
       ...a, approvalStatus:"APPROVED", approvedBy:currentUser.id, approvedAt:now, catatanApproval:catatan,
@@ -3859,7 +3859,7 @@ export default function PLNWarehouse() {
     if (!alasan?.trim()) { showToast("Masukkan alasan penolakan.","error"); return; }
     const item = attbList.find(a=>a.id===id);
     if (!item || !isPendingAttbApproval(item)) return;
-    if (!canApproveAttb(currentUser, item)) { showToast("Hanya Asman UPT pengaju yang bisa menolak item ini.","error"); return; }
+    if (!canApproveAttb(currentUser, item, uptList)) { showToast("Hanya Asman UPT pengaju yang bisa menolak item ini.","error"); return; }
     const next = attbList.map(a => a.id===id ? { ...a, approvalStatus:"DRAFT", rejectedBy:currentUser.id, rejectedAt:Date.now(), alasanTolak:alasan.trim() } : a);
     setAttbList(next);
     await saveToCloud({attbList: next});
@@ -5457,14 +5457,14 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   ) : [];
   const pendingTxns = txns.filter(t=>t.status==="PENDING");
   const stockCountPendingCount = stockCountList.reduce((a,s)=>a+s.items.filter(i=>i.approval==="PENDING").length, 0);
-  const heavyEquipmentPendingCount = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)).length;
+  const heavyEquipmentPendingCount = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l, uptList)).length;
   // Overdue reminder discope ke UPT user sendiri (pemilik ATAU peminjam alat) — sebelumnya
   // dihitung global tanpa filter sama sekali, jadi 1 alat overdue di UPT lain pun ikut muncul
   // sebagai badge di menu Alat Berat untuk SEMUA login, termasuk yang tidak ada urusan sama sekali.
-  const myUptForHeavyEquipment = getUserUptScope(currentUser);
+  const myUptForHeavyEquipment = getUserUptScope(currentUser, uptList);
   const heavyEquipmentOverdueCount = heavyEquipmentLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE" &&
     (getHeavyEquipmentLoanOwnerUpt(l)===myUptForHeavyEquipment || getHeavyEquipmentLoanRequesterUpt(l)===myUptForHeavyEquipment)).length;
-  const attbPendingCount = attbList.filter(a=>isPendingAttbApproval(a) && canApproveAttb(currentUser, a)).length;
+  const attbPendingCount = attbList.filter(a=>isPendingAttbApproval(a) && canApproveAttb(currentUser, a, uptList)).length;
   const attbBelumLanjutCount = attbList.filter(a=>a.lanjutBelumLanjut && (a.upt===myUptForHeavyEquipment || hasRole(currentUser,"MSB","Manager UIT"))).length;
   // Pool material Bongkaran ATTB (MTU) dari TUG-10 — sumber kandidat ATTB sebelum
   // tahap AE.1. Diturunkan dari transaksi TUG-10 (retur) yang punya stockItem
@@ -5829,6 +5829,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             equipmentList={heavyEquipmentList}
             loans={heavyEquipmentLoans}
             currentUser={currentUser}
+            uptList={uptList}
             users={users}
             sty={sty}
             C={C}
@@ -5847,6 +5848,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <AttbTab
             attbList={attbList}
             currentUser={currentUser}
+            uptList={uptList}
             users={users}
             sty={sty}
             C={C}
