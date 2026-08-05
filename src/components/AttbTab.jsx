@@ -695,7 +695,7 @@ export function AttbTab({ attbList, currentUser, uptList, users, sty, C, createI
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,flexWrap:"wrap",gap:10}}>
           <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.muted}}>
             Tampilkan
-            <select style={{...sty.select,width:"auto",padding:"4px 8px",minHeight:"unset",fontSize:12}} value={attbPageSize} onChange={e=>setAttbPageSize(Number(e.target.value))}>
+            <select style={{...sty.select,width:"auto",paddingTop:4,paddingBottom:4,paddingLeft:8,paddingRight:8,minHeight:"unset",fontSize:12}} value={attbPageSize} onChange={e=>setAttbPageSize(Number(e.target.value))}>
               {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
             </select>
             item per halaman — {filteredList.length} total

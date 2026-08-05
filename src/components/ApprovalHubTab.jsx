@@ -79,7 +79,7 @@ export function ApprovalHubTab({
             </div>
             <div className="approval-pagesize">
               Tampilkan
-              <select style={{...sty.select,width:"auto",padding:"3px 6px",minHeight:"unset",fontSize:12}} value={approvalPageSize} onChange={e=>setApprovalPageSize(Number(e.target.value))}>
+              <select style={{...sty.select,width:"auto",paddingTop:3,paddingBottom:3,paddingLeft:6,paddingRight:6,minHeight:"unset",fontSize:12}} value={approvalPageSize} onChange={e=>setApprovalPageSize(Number(e.target.value))}>
                 {[10,20,50].map(n=><option key={n} value={n}>{n}</option>)}
               </select>
               <span>item</span>
