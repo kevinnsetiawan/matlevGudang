@@ -31,6 +31,15 @@ const TXN_PHOTO_SLOTS = [
 
 export const _isDataUrl = (v) => typeof v === "string" && v.startsWith("data:");
 
+// Header auth untuk request sinkron: apikey TETAP anon key (identitas proyek),
+// tapi Authorization pakai access token sesi user yang login (bukan anon key)
+// supaya RLS bisa membedakan penulis asli, bukan cuma "siapa saja".
+async function authHeaders() {
+  const { data: { session } = {} } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sesi login berakhir. Masuk ulang untuk menyinkronkan data.");
+  return { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` };
+}
+
 function rowSyncKey(r) {
   return `${r.katalogId}|${r.ts}|${r.masuk}|${r.keluar}|${r.docType}`;
 }
@@ -53,11 +62,7 @@ export async function syncTUG15ToSupabase(rows, katalogList) {
   const newRows = rows.filter(r => r.katalogId && r.katalogId!=="-" && !synced.has(rowSyncKey(r)));
   if (newRows.length === 0) return { katalogCount: 0, historyCount: 0 };
 
-  const headers = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-  };
+  const headers = { ...(await authHeaders()), "Content-Type": "application/json" };
 
   // 1. Upsert katalog yang dipakai (FK target â€” harus ada dulu sebelum insert history)
   const katalogIds = [...new Set(newRows.map(r=>r.katalogId))];
@@ -110,11 +115,7 @@ export async function syncStockQtyToSupabase(stocks, katalogList) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
-  const headers = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-  };
+  const headers = { ...(await authHeaders()), "Content-Type": "application/json" };
 
   // Jumlahkan qty per katalog (1 katalog bisa ada di banyak lokasi/baris stok)
   const qtyMap = {};
@@ -239,7 +240,7 @@ export async function syncFotoMaterialToSupabase(stocks, katalogList) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
-  const headers = { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` };
+  const headers = await authHeaders();
   let synced = {};
   try { synced = JSON.parse(localStorage.getItem(FOTO_SYNCED_HASHES_STORAGE) || "{}"); } catch { synced = {}; }
 
