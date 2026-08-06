@@ -443,10 +443,11 @@ function addLiveSearchFields(row, fields) {
   };
 }
 
-export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacyRows = [], context = {}) {
+export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _legacyRows = [], context = {}) {
   const { dateFrom, dateTo, katalogId, jenisBarang, sapStatus } = filter;
   const docTypes = [...new Set(["TUG9", "TUG8", "TUG10", "TUG3", "TUG5", ...(filter.docTypes || [])])];
-  const source = filter.source || "ALL";
+  // TUG-15 canonical: history archive lama tidak pernah menjadi input laporan.
+  const source = "BARU";
   const searchText = filter.searchText || "";
   const ultgList = context.ultgList || filter.ultgList || [];
   const uitList = context.uitList || filter.uitList || [];
@@ -687,26 +688,6 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     if (!liveByKatalog.has(r.katalogId)) liveByKatalog.set(r.katalogId, []);
     liveByKatalog.get(r.katalogId).push(r);
   });
-  // Arsip legacy ikut rekonsiliasi saldo, tetapi tetap ditampilkan sebagai
-  // baris LAMA di bawah. Cocokkan kode setelah normalisasi AppSheet agar
-  // histori lama tidak memutus baseline atau membuat saldo dobel.
-  const katalogByCode = new Map(katalogList.map(k => [normalizeKatalogCode(k.katalog), k]).filter(([code]) => code));
-  legacyRows.forEach(item => {
-    const kat = katalogByCode.get(normalizeKatalogCode(item.no_katalog));
-    if (!kat) return;
-    const stock = (stocks || []).find(s => s.katalogId === kat.id);
-    if (!stock) return;
-    if (!liveByKatalog.has(kat.id)) liveByKatalog.set(kat.id, []);
-    const qty = Number(item.qty || 0) || 0;
-    const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
-    const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
-    liveByKatalog.get(kat.id).push({
-      katalogId: kat.id, katalog: kat.katalog, deskripsi: kat.name, satuan: kat.satuan || "-",
-      merk: kat.merk || kat.merek || "-", type: kat.type || kat.tipe || "-", sapStatus: getSAPStatus(kat.katalog),
-      sapLabel: getSAPLabel(kat.katalog), jenisBarang: stock.jenisBarang || "Persediaan", warehouseName: "Tidak tercatat",
-      masuk: isMasuk ? qty : 0, keluar: isKeluar ? qty : 0, affectsSaldo: true, ts: item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0,
-    });
-  });
   liveByKatalog.forEach((events, kid) => {
     const currentQty = (stocks || []).filter(s => s.katalogId === kid).reduce((a, s) => a + (s.qty || 0), 0);
     let running = currentQty;
@@ -733,49 +714,6 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
       notes: "Saldo awal sebelum transaksi tercatat di aplikasi (migrasi data).",
     }));
   });
-
-  if (source !== "BARU") {
-    legacyRows.forEach(item => {
-      if (!docTypes.includes(item.doc_type)) return;
-      const katalog = item.no_katalog || "-";
-      const deskripsi = item.nama_material || "-";
-      const matchedKatalog = katalogByCode.get(normalizeKatalogCode(katalog));
-      const selectedKatalog = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
-      // Kode legacy tidak punya FK ke master aktif; filter barang hanya boleh memakai
-      // kecocokan kode persis agar arsip tidak "divalidasi" atau dipetakan ulang.
-      if (selectedKatalog && String(selectedKatalog.katalog || "") !== String(katalog)) return;
-      if (jenisBarang !== "ALL" || sapStatus !== "ALL") return;
-      const ts = item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0;
-      const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
-      const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
-      rows.push({
-        id:item.id || item.sync_key || item.item_id || `${item.doc_type}:${item.doc_id}`,
-        materialId:"",
-        requestedQty:0,
-        katalog, deskripsi, merk:"-", type:"-", satuan:item.satuan || "-", valuasi:0,
-        masuk: isMasuk ? Number(item.qty || 0) : 0,
-        keluar: isKeluar ? Number(item.qty || 0) : 0,
-        upt: item.source_upt || "-",
-        tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
-        keterangan: item.catatan || item.unit_lawan || "-",
-        tanggalMutasi: item.tanggal || "-", ts,
-        katalogId: matchedKatalog?.id || "-", sapStatus:"ARSIP", sapLabel:"Arsip lama", jenisBarang:"-",
-        docType:item.doc_type || "-", lokasiId:"", lokasiKode:item.lokasi_kode || "-",
-        warehouseName:legacyWarehouseName(item.lokasi_kode, item.source_upt),
-        eventKind:String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate:item.tanggal || "-",
-        documentNo:item.doc_id || "-", jobName:"-", workLocation:item.lokasi_kode || "-",
-        counterparty:item.unit_lawan || "-", unit:item.unit_lawan || "-", unitLawan:item.unit_lawan || "-",
-        contractRefs:"-", documentRefs:item.doc_id || "-", notes:item.catatan || "-",
-        storageLocation:item.lokasi_kode || "-",
-        quality:[item.match_confidence !== null && item.match_confidence !== undefined ? `Match ${item.match_confidence}%` : "", item.issue_flags].filter(Boolean).join(" | ") || "-",
-        source:"LAMA", sourceLabel:"Lama", materialKey:matchedKatalog
-          ? historyMaterialKey(matchedKatalog.katalog, matchedKatalog.name, "live")
-          : historyMaterialKey(katalog, deskripsi, "legacy", item.id || item.sync_key || item.item_id),
-        legacyId:item.id, legacyDocId:item.doc_id || null, legacySyncKey:item.sync_key, fotoBarangUrl:item.foto_barang_url || null,
-        issueFlags:item.issue_flags || null, matchConfidence:item.match_confidence,
-      });
-    });
-  }
 
   const visibleRows = rows.filter(row => row.ts >= fromMs && row.ts <= toMs && (!searchText || matchesSearchTokens(row, searchText)));
   visibleRows.sort((a,b)=>a.ts-b.ts);

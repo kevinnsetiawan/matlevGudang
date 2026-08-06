@@ -115,7 +115,7 @@ test.describe("TUG-15 complete history direction filter", () => {
   });
 });
 
-test("combined mutation rows keep legacy separate and search across dates", async ({ isolatedPage:page }) => {
+test("mutation rows ignore legacy input and keep new data only", async ({ isolatedPage:page }) => {
   await openApp(page);
   const result = await page.evaluate(async () => {
     const { buildMutasiRows } = await import("/src/lib/supabaseSync.js");
@@ -156,9 +156,8 @@ test("combined mutation rows keep legacy separate and search across dates", asyn
   expect(result.inRange).toHaveLength(1);
   expect(result.inRange[0].source).toBe("BARU");
   expect(result.allDates).toHaveLength(2);
-  expect(result.allDates.map(row => row.source).sort()).toEqual(["BARU", "LAMA"]);
-  expect(result.allDates.find(row => row.source === "LAMA")).toMatchObject({ masuk:0, keluar:3 });
-  expect(new Set(result.allDates.map(row => row.materialKey)).size).toBe(1);
+  expect(result.allDates.every(row => row.source === "BARU")).toBeTruthy();
+  expect(result.allDates.reduce((sum, row) => sum + row.keluar, 0)).toBe(2);
   expect(result.unknown).toHaveLength(2);
   expect(new Set(result.unknown.map(row => row.materialKey)).size).toBe(2);
 });
@@ -334,9 +333,9 @@ test("row mapping preserves merk/type", async ({ isolatedPage:page }) => {
       { id:"legacy", doc_type:"TUG9", doc_id:"L", tanggal:"2026-01-01", jenis_transaksi:"KELUAR", lokasi_kode:"BLOK-A", source_upt:"UPT Surabaya", satuan:"BUAH", qty:1 },
       { id:"legacy-explicit", doc_type:"TUG9", doc_id:"L2", tanggal:"2026-01-02", jenis_transaksi:"KELUAR", lokasi_kode:"GUDANG BANGIL - UPT PROBOLINGGO / BLOK-A", source_upt:"UPT Surabaya", satuan:"BUAH", qty:1 },
     ], { gudangList:gudang });
-    return { merk:mapped[0].merk, type:mapped[0].type, warehouse:live[0].warehouseName, legacyWarehouse:legacy[0].warehouseName, explicitLegacyWarehouse:legacy[1].warehouseName };
+    return { merk:mapped[0].merk, type:mapped[0].type, warehouse:live[0].warehouseName, legacyRows:legacy.length };
   });
-  expect(result).toMatchObject({ merk:"Katalog Merk", type:"Katalog Type", warehouse:"Gudang Ketintang", legacyWarehouse:"UPT Surabaya", explicitLegacyWarehouse:"GUDANG BANGIL" });
+  expect(result).toMatchObject({ merk:"Katalog Merk", type:"Katalog Type", warehouse:"Gudang Ketintang", legacyRows:0 });
 });
 
 test("row mapping canonicalizes inbound catalog ID mismatch to stock catalog", async ({ isolatedPage:page }) => {
@@ -355,15 +354,14 @@ test("row mapping canonicalizes inbound catalog ID mismatch to stock catalog", a
   expect(result).toEqual({ ids:["K-STOCK","K-STOCK"], saldo:0 });
 });
 
-test("legacy outgoing is reconciled by a Migrasi Data baseline", async ({ isolatedPage:page }) => {
+test("legacy outgoing does not create Migrasi Data baseline", async ({ isolatedPage:page }) => {
   await openApp(page);
   const result = await page.evaluate(async () => {
     const { buildMutasiRows } = await import("/src/lib/supabaseSync.js");
     const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"", docTypes:["TUG9"] };
     return buildMutasiRows([], [{ id:"K-LA", katalog:"1002090509", name:"LA 150kV", satuan:"SET" }], [{ id:"S-LA", katalogId:"K-LA", qty:0 }], filter, [], [{ id:"L-6", doc_type:"TUG9", doc_id:"TUG/6", tanggal:"2025-01-01", jenis_transaksi:"KELUAR", no_katalog:"2090509", nama_material:"LA 150kV", qty:6 }]);
   });
-  expect(result.some(row => row.tugBaDoc === "Migrasi Data" && row.masuk === 6)).toBeTruthy();
-  expect(result.filter(row => row.katalogId === "K-LA").at(-1).saldoAkhir).toBe(0);
+  expect(result).toEqual([]);
 });
 
 test.describe("long monthly PDF", () => {
