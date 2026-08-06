@@ -1225,7 +1225,14 @@ export default function PLNWarehouse() {
         ? syncMasterTableRows("heavy_equipment", heHint, e => ({ upt: e.upt || null }))
         : syncMasterTable("heavy_equipment", he, e => ({ upt: e.upt || null })) });
     }
-    if (overrides.heavyEquipmentLoans !== undefined) syncTasks.push({ label: "Peminjaman Alat Berat", promise: syncMasterTable("heavy_equipment_loans", hel, l => ({
+    if (overrides.heavyEquipmentLoans !== undefined) syncTasks.push({ label: "Peminjaman Alat Berat", promise: (Array.isArray(hints.heavyEquipmentLoansChangedRows) && hints.heavyEquipmentLoansChangedRows.length > 0)
+      ? syncMasterTableRows("heavy_equipment_loans", hints.heavyEquipmentLoansChangedRows, l => ({
+        equipment_id: l.equipmentId || null,
+        status: l.status || null,
+        owner_upt: getHeavyEquipmentLoanOwnerUpt(l) || null,
+        requester_upt: getHeavyEquipmentLoanRequesterUpt(l) || null,
+      }))
+      : syncMasterTable("heavy_equipment_loans", hel, l => ({
       equipment_id: l.equipmentId || null,
       status: l.status || null,
       owner_upt: getHeavyEquipmentLoanOwnerUpt(l) || null,
@@ -3753,7 +3760,7 @@ export default function PLNWarehouse() {
     };
     const nextLoans = [loan, ...heavyEquipmentLoans];
     setHeavyEquipmentLoans(nextLoans);
-    await saveToCloud({heavyEquipmentLoans: nextLoans});
+    await saveToCloud({heavyEquipmentLoans: nextLoans}, {heavyEquipmentLoansChangedRows: [loan]});
     showToast("Peminjaman alat diajukan. Menunggu approval Asman.");
   }
   async function approveHeavyEquipmentLoan(loanId, catatan="") {
@@ -3766,7 +3773,7 @@ export default function PLNWarehouse() {
     const nextEquipment = heavyEquipmentList.map(eq=>eq.id===loan.equipmentId ? { ...eq, availabilityStatus:"DIPINJAM", activeLoanId:loanId, borrowedToUpt:requesterUpt, borrowedJobName:getHeavyEquipmentLoanJobName(loan), borrowedUntil:getHeavyEquipmentLoanReturnDate(loan) } : eq);
     setHeavyEquipmentLoans(nextLoans);
     setHeavyEquipmentList(nextEquipment);
-    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment});
+    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment}, {heavyEquipmentLoansChangedRows: [nextLoans.find(l=>l.id===loanId)]});
     await logApprovalHistory({type:"HEAVY_EQUIPMENT_LOAN", decision:"APPROVED", title:`Peminjaman alat ${loan.equipmentId}: ${ownerUpt} -> ${requesterUpt}`, requestedBy:loan.requestedBy, requestedAt:loan.requestedAt});
     showToast("Peminjaman alat disetujui.");
   }
@@ -3779,7 +3786,7 @@ export default function PLNWarehouse() {
     const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
     const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, ownerUpt, requesterUpt, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason.trim() } : l);
     setHeavyEquipmentLoans(nextLoans);
-    await saveToCloud({heavyEquipmentLoans: nextLoans});
+    await saveToCloud({heavyEquipmentLoans: nextLoans}, {heavyEquipmentLoansChangedRows: [nextLoans.find(l=>l.id===loanId)]});
     await logApprovalHistory({type:"HEAVY_EQUIPMENT_LOAN", decision:"REJECTED", title:`Peminjaman alat ${loan.equipmentId}: ${ownerUpt} -> ${requesterUpt}`, requestedBy:loan.requestedBy, requestedAt:loan.requestedAt});
     showToast("Peminjaman alat ditolak.", "error");
   }
@@ -3791,7 +3798,7 @@ export default function PLNWarehouse() {
     const nextEquipment = heavyEquipmentList.map(eq=>eq.id===loan.equipmentId ? { ...eq, availabilityStatus:"TERSEDIA", activeLoanId:null, borrowedToUpt:null, borrowedJobName:null, borrowedUntil:null } : eq);
     setHeavyEquipmentLoans(nextLoans);
     setHeavyEquipmentList(nextEquipment);
-    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment});
+    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment}, {heavyEquipmentLoansChangedRows: [nextLoans.find(l=>l.id===loanId)]});
     showToast("Alat ditandai sudah kembali.");
   }
   // ATTB — lihat docs/ATTB_SPEC.md. Tahap1 (Usulan AE.1): createAttbItem (DRAFT) ->
