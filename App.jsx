@@ -18,7 +18,7 @@ import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
-import { ROLES, hasRole, getUserUptScope, canAccessGudang } from "./src/lib/roles.js";
+import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
 import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
 import { can } from "./src/lib/perms.js";
@@ -546,7 +546,7 @@ export default function PLNWarehouse() {
   const [txnForm, setTxnForm] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang ${WAREHOUSE}.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
+  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang PLN.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [ragSyncing, setRagSyncing] = useState(false);
@@ -5092,18 +5092,19 @@ export default function PLNWarehouse() {
     setChatHistory(h=>[...h,{role:"user",text:msg}]);
     setChatLoading(true);
 
-    // Pak War memakai scope akun yang sama dengan layar operasional. Akun UPT tidak
-    // boleh mendapat snapshot nasional hanya karena chat dipanggil dari komponen global.
-    const assistantGlobal = hasRole(currentUser, "SUPERADMIN", "ADMIN_LOG_PUSAT", "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT");
+    // Pak War memakai scope akun yang sama dengan layar operasional. Dulu UIT dianggap
+    // "global" (nasional) — sekarang dataScope (getScopeUptIds) membatasi ke semua UPT
+    // di UIT-nya, sama seperti layar operasional lain (fix Gelombang 2 multi-UPT).
+    const assistantGlobal = dataScope === null;
     const assistantStocks = assistantGlobal ? enrichedStocks : enrichedStocks.filter(s => {
       const lokasi = lokasiList.find(l => l.id === s.lokasiId);
       const gudang = lokasi?.gudangId ? gudangList.find(g => g.id === lokasi.gudangId) : null;
-      return gudang?.uptId === currentUser?.uptId;
+      return inScopeUpt(gudang?.uptId || null, dataScope);
     });
     const assistantStockIds = new Set(assistantStocks.map(s => s.id));
     const assistantTxns = assistantGlobal ? txns : txns.filter(t => {
       if ((t.stockItems || []).some(si => assistantStockIds.has(si.stockId))) return true;
-      return users.find(u => u.id === t.createdBy)?.uptId === currentUser?.uptId;
+      return inScopeUpt(t.uptId || users.find(u => u.id === t.createdBy)?.uptId || null, dataScope);
     });
     const scopedEnrichedStocks = assistantStocks;
     const scopedTxns = assistantTxns;
@@ -5160,9 +5161,13 @@ export default function PLNWarehouse() {
     // hardcoded. Kalau Cohere/knowledge base belum siap, lewati saja (tetap
     // jawab pakai snapshot biasa) — RAG di sini bersifat tambahan, bukan
     // syarat AI Agent bisa jalan.
+    // RAG chunks (rag_chunks) belum ter-tag per-UPT — qty/lokasi di chunk katalog & txn
+    // bisa dari UPT lain, jadi untuk akun UPT-scoped RAG dilewati supaya tidak bocor data
+    // UPT lain. Snapshot di atas sudah discope. Akun global (UIT/Pusat) tetap pakai RAG.
     let ragContextText = "Belum ada hasil pencarian (Knowledge Base RAG belum disinkron atau belum terkonfigurasi).";
+    if (!assistantGlobal) ragContextText = `Knowledge Base RAG dilewati untuk akun UPT — jawab hanya dari data ${currentUptNama} pada snapshot di atas.`;
     try {
-      if (supabase && import.meta.env.VITE_COHERE_API_KEY) {
+      if (assistantGlobal && supabase && import.meta.env.VITE_COHERE_API_KEY) {
         const [queryVector] = await cohereEmbed([msg], "search_query");
         const { data: matches, error } = await supabase.rpc("match_rag_chunks", { query_embedding: queryVector, match_count: 8 });
         if (error) throw error;
@@ -5176,7 +5181,7 @@ export default function PLNWarehouse() {
       ragContextText = `(Pencarian Knowledge Base gagal: ${e.message})`;
     }
 
-    const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk ${WAREHOUSE}.
+    const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk Gudang ${currentUptNama}.
 
 PERSONA & GAYA JAWABAN:
 Kamu Pak War, staf senior gudang PLN yang menjawab pertanyaan rekan kerja. Pakai
@@ -5443,6 +5448,27 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // stock record so the rest of the UI/PDF/forecast code can use familiar
   // fields (name, katalog, category, unit, lokasi) without modification.
   const enrichedStocks = enrichStocks(stocks, katalogList, lokasiList);
+  // Cakupan UPT 3-tier (UPT sendiri | semua UPT di UIT | nasional) untuk SEMUA layar
+  // operasional — sumber tunggal getScopeUptIds/inScopeUpt (src/lib/roles.js, Gelombang 2
+  // multi-UPT). Data mentah (stocks/txns/attbList) tetap utuh untuk mutasi/approval lintas-UPT;
+  // yang discope hanya turunan yang di-oper ke tab DISPLAY.
+  const dataScope = getScopeUptIds(currentUser, uptList);
+  const scopedEnrichedStocks = dataScope === null ? enrichedStocks : enrichedStocks.filter(s => {
+    const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
+    const uptId = gid ? gudangList.find(g => g.id === gid)?.uptId : null;
+    return inScopeUpt(uptId, dataScope);
+  });
+  const scopedStockIds = dataScope === null ? null : new Set(scopedEnrichedStocks.map(s => s.id));
+  // Junction rows mentah, versi scoped — dipakai layar yang butuh bentuk pra-enrich (mis. Forecast).
+  const scopedStocks = dataScope === null ? stocks : stocks.filter(s => scopedStockIds.has(s.id));
+  const scopedTxns = dataScope === null ? txns : txns.filter(t => inScopeUpt(t.uptId || users.find(u => u.id === t.createdBy)?.uptId || null, dataScope));
+  const scopedAttbUptNames = dataScope === null ? null : new Set(
+    uptList.filter(u => dataScope.includes(u.id)).map(u => (u.nama || "").replace(/^UPT\s+/i, "").trim())
+  );
+  const scopedAttbList = scopedAttbUptNames === null ? attbList : attbList.filter(a => !a.upt || scopedAttbUptNames.has(a.upt));
+  // Opname & Stock Count discope lewat UPT pembuat/pengunggah (tak ada field uptId di sesi).
+  const scopedOpnameList = dataScope === null ? opnameList : opnameList.filter(o => inScopeUpt(users.find(u => u.id === o.dibuatOleh)?.uptId || null, dataScope));
+  const scopedStockCountList = dataScope === null ? stockCountList : stockCountList.filter(sc => inScopeUpt(users.find(u => u.id === sc.uploadedBy)?.uptId || null, dataScope));
   // UPT adalah pagar pertama; gudang_ids hanya mempersempit scope itu.
   // SUPERADMIN tetap global, sedangkan akun UIT/ULTG mengikuti hierarki unitnya.
   const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
@@ -5493,6 +5519,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // dihitung global tanpa filter sama sekali, jadi 1 alat overdue di UPT lain pun ikut muncul
   // sebagai badge di menu Alat Berat untuk SEMUA login, termasuk yang tidak ada urusan sama sekali.
   const myUptForHeavyEquipment = getUserUptScope(currentUser, uptList);
+  // Nama UPT untuk brand sidebar/header — ikut UPT user login, bukan konstanta hardcoded UPT (Surabaya).
+  const currentUptNama = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId)?.nama || UPT;
   const heavyEquipmentOverdueCount = heavyEquipmentLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE" &&
     (getHeavyEquipmentLoanOwnerUpt(l)===myUptForHeavyEquipment || getHeavyEquipmentLoanRequesterUpt(l)===myUptForHeavyEquipment)).length;
   const attbPendingCount = attbList.filter(a=>isPendingAttbApproval(a) && canApproveAttb(currentUser, a, uptList)).length;
@@ -5528,10 +5556,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     return items.sort((a,b)=>(b.tanggal||0)-(a.tanggal||0));
   }, [txns, katalogList]);
   // Material kritis AGREGAT per katalog (total semua lokasi ≤ minimum) — dipakai seluruh dashboard.
-  const lowStocks = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
-  const forecastSoon = getMaterialAkanHabis(enrichedStocks, katalogList, txns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
-  const totalVal = enrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
-  const filteredStocks = enrichedStocks.filter(s=>{
+  // Discope per UPT (Gelombang 2 multi-UPT): dashboard/forecast bukan lagi agregat nasional
+  // untuk akun UPT/UIT.
+  const lowStocks = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
+  const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
+  const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
+  const filteredStocks = scopedEnrichedStocks.filter(s=>{
     const lokForSearch = lokasiList.find(l=>l.id===s.lokasiId);
     const gdgForSearch = (lokForSearch?.gudangId || s.gudangId)
       ? gudangList.find(g=>g.id===(lokForSearch?.gudangId || s.gudangId))
@@ -5555,8 +5585,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
-  const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
-  const activeTugTxns = tugSubTab==="TUG15" ? [] : txns.filter(t=>t.docType===tugSubTab);
+  const filteredTxns = scopedTxns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
+  const activeTugTxns = tugSubTab==="TUG15" ? [] : scopedTxns.filter(t=>t.docType===tugSubTab);
   const activeTugSummary = [
     {label:"Total Dokumen",val:activeTugTxns.length},
     {label:"Menunggu",val:activeTugTxns.filter(t=>t.status==="PENDING").length,cls:"is-alert"},
@@ -5703,7 +5733,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         tugExpanded={tugExpanded} setTugExpanded={setTugExpanded} tugGroup={tugGroup} setTugGroup={setTugGroup} setTugSubTab={setTugSubTab} isUltgRole={isUltgRole}
         masterExpanded={masterExpanded} setMasterExpanded={setMasterExpanded} stockSubTab={stockSubTab} setStockSubTab={setStockSubTab}
         opnameExpanded={opnameExpanded} setOpnameExpanded={setOpnameExpanded} opnameSubTab={opnameSubTab} setOpnameSubTab={setOpnameSubTab} stockCountPendingCount={stockCountPendingCount}
-        currentUser={currentUser} rolePerms={rolePerms}
+        currentUser={currentUser} rolePerms={rolePerms} uptNama={currentUptNama}
         cloudSaving={cloudSaving} dataRefreshing={dataRefreshing} lastSaved={lastSaved}
       />
       {/* MAIN */}
@@ -5712,7 +5742,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
             setMobileMenuOpen={setMobileMenuOpen} pageMeta={pageMeta} accountMenuRef={accountMenuRef}
             theme={theme} setTheme={setTheme} accountMenuOpen={accountMenuOpen} setAccountMenuOpen={setAccountMenuOpen}
-            UPT={UPT} openGantiPassword={openGantiPassword} loggingOut={loggingOut} handleLogout={handleLogout}
+            UPT={currentUptNama} openGantiPassword={openGantiPassword} loggingOut={loggingOut} handleLogout={handleLogout}
           />
 
         <div className="app-content" style={{padding:isMobile?16:"clamp(18px, 2vw, 30px)"}}>
@@ -5725,11 +5755,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             setMaturityForm={setMaturityForm} setMaturityModal={setMaturityModal}
             dashTab={dashTab} setDashTab={setDashTab}
             totalVal={totalVal} lowStocks={lowStocks} forecastSoon={forecastSoon} myPendingApprovals={myPendingApprovals}
-            stockCountPendingCount={stockCountPendingCount} attbPendingCount={attbPendingCount} attbBelumLanjutCount={attbBelumLanjutCount} stockCountList={stockCountList}
+            stockCountPendingCount={stockCountPendingCount} attbPendingCount={attbPendingCount} attbBelumLanjutCount={attbBelumLanjutCount} stockCountList={scopedStockCountList}
             setTab={setTab} setOpnameSubTab={setOpnameSubTab}
-            enrichedStocks={enrichedStocks} txns={txns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
+            enrichedStocks={scopedEnrichedStocks} txns={scopedTxns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
             topN={topN} setTopN={setTopN} pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
-            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={attbList} attbBongkaranPool={attbBongkaranPool}
+            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={scopedAttbList} attbBongkaranPool={attbBongkaranPool}
             materialCadangData={materialCadangData} gudangList={gudangList} petaWilayahDivRef={petaWilayahDivRef}
           />
         )}
@@ -5744,7 +5774,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
             {opnameSubTab==="opname" ? (
               <StockOpnameTab
-                opnameList={opnameList}
+                opnameList={scopedOpnameList}
                 stocks={stocks}
                 katalogList={katalogList}
                 currentUser={currentUser}
@@ -5758,6 +5788,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 deleteOpname={deleteOpname}
                 openScanner={openScanner}
                 showToast={showToast}
+                uptList={uptList}
                 gudangList={gudangList}
                 lokasiList={lokasiList}
                 addNonStockFoundItem={addNonStockFoundItem}
@@ -5765,7 +5796,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               />
             ) : (
               <StockCountTab
-                stockCountList={stockCountList}
+                stockCountList={scopedStockCountList}
                 currentUser={currentUser}
                 sty={sty} C={C}
                 previewStockCount={previewStockCount}
@@ -5817,7 +5848,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
             photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}
             photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
-            enrichedStocks={enrichedStocks} pagedStocks={pagedStocks}
+            enrichedStocks={scopedEnrichedStocks} pagedStocks={pagedStocks}
             setStockDetailId={setStockDetailId}
             katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList}
             subGudangList={subGudangList} visibleGudangList={visibleGudangList}
@@ -5841,7 +5872,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             activeTugSummary={activeTugSummary} rolePerms={rolePerms}
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
             openNewTxn={openNewTxn}
-            txns={txns} filteredTxns={filteredTxns} users={users} enrichedStocks={enrichedStocks} stocks={stocks}
+            txns={scopedTxns} filteredTxns={filteredTxns} users={users} enrichedStocks={scopedEnrichedStocks} stocks={stocks}
             katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
             tug15Filter={tug15Filter} setTug15Filter={setTug15Filter}
             setDocPreview={setDocPreview} handleImg={handleImg}
@@ -5877,7 +5908,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
         {tab==="attb" && (
           <AttbTab
-            attbList={attbList}
+            attbList={scopedAttbList}
             currentUser={currentUser}
             uptList={uptList}
             users={users}
@@ -6000,10 +6031,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* AI AGENT — chat AI murni, terpisah dari Forecast Stok */}
         {tab==="ai" && (
           <AIAgentPage
-            enrichedStocks={enrichedStocks}
+            enrichedStocks={scopedEnrichedStocks}
             katalogList={katalogList}
-            stocks={stocks}
-            txns={txns}
+            stocks={scopedStocks}
+            txns={scopedTxns}
             rencanaKedatanganList={rencanaKedatanganList}
             chatHistory={chatHistory}
             setChatHistory={setChatHistory}
@@ -6018,7 +6049,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             ragSyncing={ragSyncing}
             ragLastSync={ragLastSync}
             currentUser={currentUser}
-            C={C} sty={sty}
+            C={C} sty={sty} uptNama={currentUptNama}
           />
         )}
 
@@ -6027,8 +6058,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <ForecastStokPage
             katalogList={katalogList}
             setKatalogList={setKatalogList}
-            stocks={stocks}
-            txns={txns}
+            stocks={scopedStocks}
+            txns={scopedTxns}
             forecastDetail={forecastDetail}
             setForecastDetail={setForecastDetail}
             forecastDetailResult={forecastDetailResult}
@@ -6188,7 +6219,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         <KartuGantungModal
           katalog={kartuGantungDetail}
           stocks={stocks} txns={txns} lokasiList={lokasiList} gudangList={gudangList} subGudangList={subGudangList}
-          sty={sty} C={C}
+          sty={sty} C={C} uptNama={currentUptNama}
           onClose={()=>setKartuGantungDetail(null)}
         />
       )}

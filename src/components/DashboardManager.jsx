@@ -11,7 +11,7 @@ import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
 import { Package, Warning, Hourglass, Tractor, ClipboardText, Siren, Buildings } from "@phosphor-icons/react";
 
-export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
+export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, uptNama, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiCadang = stocks.filter(s=>s.jenisBarang==="Cadang").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const nilaiPersediaan = stocks.filter(s=>s.jenisBarang==="Persediaan").reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
@@ -32,11 +32,11 @@ export function DashboardManager({ stocks, txns, katalogList, uptList, rencanaKe
           <div className="dashboard-manager__hero-copy">
             <span>PT PLN (Persero) · UIT JBM</span>
             <h2>Dashboard Eksekutif Material</h2>
-            <p>Ringkasan posisi inventori dan aktivitas operasional UPT Surabaya</p>
+            <p>Ringkasan posisi inventori dan aktivitas operasional {uptNama}</p>
             <small>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</small>
           </div>
           <div className="dashboard-manager__inventory">
-            <span>Total nilai inventori · UPT Surabaya</span>
+            <span>Total nilai inventori · {uptNama}</span>
             <strong>{fmtRp(nilaiTotal)}</strong>
             <div className="dashboard-manager__inventory-grid">
               {[

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { WAREHOUSE } from "../constants.js";
 import { fmtDate } from "../lib/utils.js";
 import { hasRole } from "../lib/roles.js";
 import { AIFaqPanel } from "./AIFaqPanel.jsx";
@@ -36,7 +35,7 @@ function renderAIText(text) {
 export function AIAgentPage({
   chatHistory, setChatHistory, chatInput, setChatInput,
   chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState,
-  syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, C, sty,
+  syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, C, sty, uptNama,
 }) {
   const [view, setView] = useState("chat");
   const [syncPct, setSyncPct] = useState(null);
@@ -75,7 +74,7 @@ export function AIAgentPage({
         <header className="ai-conversation__header">
           <div className="ai-conversation__identity">
             <div className="ai-conversation__avatar" aria-hidden="true">PW</div>
-            <div><span>Asisten operasional WARNOTO</span><strong>Pak War</strong><small>Terhubung dengan data {WAREHOUSE}</small></div>
+            <div><span>Asisten operasional WARNOTO</span><strong>Pak War</strong><small>Terhubung dengan data Gudang {uptNama}</small></div>
           </div>
           {hasRole(currentUser,"ADMIN") && <div className="ai-conversation__admin">
             <button disabled={syncPct!==null} onClick={handleSync}>{syncPct!==null?`Sinkron ${syncPct}%`:"Sinkron data"}</button>
@@ -130,7 +129,7 @@ export function AIAgentPage({
           </label>
           <div className="ai-composer__actions">
             <div>
-              {!isWelcome && <button className="ai-composer__reset" title="Mulai percakapan baru" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data gudang ${WAREHOUSE}?`}])}>Percakapan baru</button>}
+              {!isWelcome && <button className="ai-composer__reset" title="Mulai percakapan baru" onClick={()=>setChatHistory([{role:"ai",text:`Halo, saya Pak War. Apa yang ingin Anda ketahui tentang data Gudang ${uptNama}?`}])}>Percakapan baru</button>}
               <span className="ai-composer__hint">Enter untuk kirim · Shift + Enter untuk baris baru</span>
             </div>
             <button className="ai-composer__send" onClick={()=>sendChat()} disabled={chatLoading||!chatInput.trim()}>{chatLoading?"Menganalisis...":"Kirim pertanyaan"}</button>

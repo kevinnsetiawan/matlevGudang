@@ -10,7 +10,7 @@ import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
 import { Package, Money, Warning, Hourglass, ClipboardText } from "@phosphor-icons/react";
 
-export function DashboardAsman({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, attbList, attbBongkaranPool, isMobile }) {
+export function DashboardAsman({ stocks, txns, katalogList, uptList, rencanaKedatanganList, myPendingApprovals, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, heavyEquipmentList, heavyEquipmentLoans, currentUser, uptNama, attbList, attbBongkaranPool, isMobile }) {
   const nilaiTotal = stocks.reduce((a,s)=>a+(s.qty||0)*(s.price||0),0);
   const stokKritis = getKritisAgg(stocks, buildMonthlySeriesByKatalog(txns, stocks));
   const akanHabis = getMaterialAkanHabis(stocks, katalogList, txns, 5);
@@ -21,9 +21,9 @@ export function DashboardAsman({ stocks, txns, katalogList, uptList, rencanaKeda
       <div style={{marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div>
-            <p style={{color:C.muted,fontSize:13}}>UPT Surabaya • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
+            <p style={{color:C.muted,fontSize:13}}>{uptNama} • {new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
           </div>
-          <span style={{padding:"4px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8",fontSize:12,fontWeight:700}}>UPT Surabaya</span>
+          <span style={{padding:"4px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8",fontSize:12,fontWeight:700}}>{uptNama}</span>
         </div>
       </div>
 

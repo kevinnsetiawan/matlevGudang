@@ -21,6 +21,8 @@ export function DashboardTabRouter(props) {
     heavyEquipmentList, heavyEquipmentLoans, attbList, attbBongkaranPool,
     materialCadangData, gudangList, petaWilayahDivRef,
   } = props;
+  // Nama UPT untuk label dashboard — ikut UPT user login, bukan hardcoded Surabaya.
+  const dashUptNama = (uptList||[]).find(u=>u.id===currentUser?.uptId)?.nama || "UPT Surabaya";
   return (
     <>
       <div className="dashboard-command">
@@ -53,7 +55,7 @@ export function DashboardTabRouter(props) {
           pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
           C={C} sty={sty} setTab={setTab}
           heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-          currentUser={currentUser}
+          currentUser={currentUser} uptNama={dashUptNama}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           isMobile={isMobile}
         />
@@ -73,7 +75,7 @@ export function DashboardTabRouter(props) {
           pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
           C={C} sty={sty} setTab={setTab}
           heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-          currentUser={currentUser}
+          currentUser={currentUser} uptNama={dashUptNama}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           isMobile={isMobile}
         />
@@ -106,7 +108,7 @@ export function DashboardTabRouter(props) {
 
       {dashTab==="ringkasan" && (
         <DashboardRingkasanBlock
-          C={C} currentUser={currentUser} gudangList={gudangList}
+          C={C} currentUser={currentUser} gudangList={gudangList} uptNama={dashUptNama}
           petaWilayahDivRef={petaWilayahDivRef} stockCountList={stockCountList}
           setTab={setTab} setOpnameSubTab={setOpnameSubTab}
         />

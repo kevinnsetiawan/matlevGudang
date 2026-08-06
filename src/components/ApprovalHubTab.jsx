@@ -2,7 +2,7 @@
 // dipindah dari App.jsx (refactor batch 2e). Membungkus pemanggilan <ApprovalTab/>.
 import { fmtDate } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
-import { ROLES, hasRole } from "../lib/roles.js";
+import { ROLES, hasRole, getScopeUptIds, inScopeUpt } from "../lib/roles.js";
 import {
   getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt,
   getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName,
@@ -31,12 +31,13 @@ export function ApprovalHubTab({
   stockCountList, approvalStockCountPage, setApprovalStockCountPage, approveStockCountItem, rejectStockCountItem,
   txns, approvalHistoryList, approvalHistoryPage, setApprovalHistoryPage,
 }) {
-  const historyScopeGlobal = hasRole(currentUser, "SUPERADMIN", "ADMIN_LOG_PUSAT", "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT");
-  const historyScopeUptId = currentUser?.uptId;
+  // UIT dulu dianggap "global" (nasional) — sekarang dibatasi ke semua UPT di UIT-nya lewat
+  // getScopeUptIds/inScopeUpt (sumber tunggal 3-tier, lihat src/lib/roles.js).
+  const historyScope = getScopeUptIds(currentUser, uptList);
   const userUptById = new Map((users || []).map(u => [u.id, u.uptId]));
-  const scopedApprovalHistory = historyScopeGlobal
+  const scopedApprovalHistory = historyScope === null
     ? approvalHistoryList
-    : approvalHistoryList.filter(h => userUptById.get(h.decidedBy) === historyScopeUptId || userUptById.get(h.requestedBy) === historyScopeUptId || h.uptId === historyScopeUptId);
+    : approvalHistoryList.filter(h => inScopeUpt(userUptById.get(h.decidedBy), historyScope) || inScopeUpt(userUptById.get(h.requestedBy), historyScope) || inScopeUpt(h.uptId, historyScope));
   const tugCount = myPendingApprovals.length;
   const capCount = hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
   const lokasiCount = hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0;
@@ -344,7 +345,7 @@ export function ApprovalHubTab({
           decidedBy: t.status==="REJECTED" ? t.rejectedBy : t.approvedBy,
           decidedAt: t.status==="REJECTED" ? t.rejectedAt : t.approvedAt,
         }));
-        const scopedHistTug = historyScopeGlobal ? histTUG : histTUG.filter(h => userUptById.get(h.decidedBy) === historyScopeUptId || userUptById.get(h.requestedBy) === historyScopeUptId || h.uptId === historyScopeUptId);
+        const scopedHistTug = historyScope === null ? histTUG : histTUG.filter(h => inScopeUpt(userUptById.get(h.decidedBy), historyScope) || inScopeUpt(userUptById.get(h.requestedBy), historyScope) || inScopeUpt(h.uptId, historyScope));
         const combinedAll = [...scopedApprovalHistory, ...scopedHistTug].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
         const combined = combinedAll.slice((approvalHistoryPage-1)*approvalPageSize, approvalHistoryPage*approvalPageSize);
         const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname", STOCK_COUNT:"📊 Stock Count"};

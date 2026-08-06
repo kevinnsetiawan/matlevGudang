@@ -10,7 +10,7 @@ import * as XLSX from "xlsx";
 
 export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
   saveOpname, submitOpname, approveOpname_Asman, approveOpname_Manager, rejectOpname, deleteOpname,
-  openScanner, showToast, gudangList, lokasiList, addNonStockFoundItem, isMobile }) {
+  openScanner, showToast, gudangList, lokasiList, addNonStockFoundItem, isMobile, uptList }) {
 
   const [activeTab, setActiveTab] = useState("list"); // "list"|"form-sap"|"form-nonsap"|"detail"
   const [activeOpname, setActiveOpname] = useState(null);
@@ -828,7 +828,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
   );
 
   function downloadBeritaAcara(opn) {
-    const html = buildBeritaAcaraHTML(opn, katalogList, users);
+    const html = buildBeritaAcaraHTML(opn, katalogList, users, uptList);
     const blob = new Blob([html],{type:"text/html"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

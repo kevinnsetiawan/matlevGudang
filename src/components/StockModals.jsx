@@ -110,11 +110,11 @@ export function DocPreviewModal({ docPreview, setDocPreview, docPreviewDoc, docK
             <div style={{color:"white",fontWeight:700,fontSize:14}}>📄 Dokumen {dp.docType.replace("TUG","TUG-")} — {dp.docNumbers?.[docKeyOf(dp)]||dp.draftLabel||dp.id}</div>
             <div style={{display:"flex",gap:8}}>
               <button style={{...sty.btn("success"),padding:"7px 16px"}} onClick={()=>{
-                if (dp.docType==="TUG10") downloadTUG10HTML(dp, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, showToast);
-                else if (dp.docType==="TUG3") downloadTUG3HTML(dp, katalogList, lokasiList, timMutuList, users, satpamList, showToast);
-                else if (dp.docType==="TUG5") downloadTUG5HTML(dp, katalogList, uitList, users, showToast, ultgList);
+                if (dp.docType==="TUG10") downloadTUG10HTML(dp, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, showToast, uptList);
+                else if (dp.docType==="TUG3") downloadTUG3HTML(dp, katalogList, lokasiList, timMutuList, users, satpamList, showToast, uptList);
+                else if (dp.docType==="TUG5") downloadTUG5HTML(dp, katalogList, uitList, users, showToast, ultgList, uptList);
                 else if (dp.docType==="TUG7") downloadTUG7HTML(dp, katalogList, uitList, uptList, users, showToast);
-                else downloadTUG9HTML(dp, enrichedStocks, users, satpamList, showToast);
+                else downloadTUG9HTML(dp, enrichedStocks, users, satpamList, showToast, uptList);
               }}>⬇️ Unduh File (untuk Print/PDF)</button>
               <button style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:600}} onClick={()=>setDocPreview(null)}>✕ Tutup</button>
             </div>
@@ -122,7 +122,7 @@ export function DocPreviewModal({ docPreview, setDocPreview, docPreviewDoc, docK
           <div style={{flex:1,background:"#e5e7eb",overflow:"hidden"}}>
             <iframe
               title="Document Preview"
-              srcDoc={dp.docType==="TUG10" ? buildTUG10HTML(dp, katalogList, lokasiList, users, satpamList, gudangList, subGudangList) : dp.docType==="TUG3" ? buildTUG3HTML(dp, katalogList, lokasiList, timMutuList, users, satpamList) : dp.docType==="TUG5" ? buildTUG5HTML(dp, katalogList, uitList, users, ultgList) : dp.docType==="TUG7" ? buildTUG7HTML(dp, katalogList, uitList, uptList, users) : buildTUG9HTML(dp, enrichedStocks, users, satpamList)}
+              srcDoc={dp.docType==="TUG10" ? buildTUG10HTML(dp, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, uptList) : dp.docType==="TUG3" ? buildTUG3HTML(dp, katalogList, lokasiList, timMutuList, users, satpamList, uptList) : dp.docType==="TUG5" ? buildTUG5HTML(dp, katalogList, uitList, users, ultgList, uptList) : dp.docType==="TUG7" ? buildTUG7HTML(dp, katalogList, uitList, uptList, users) : buildTUG9HTML(dp, enrichedStocks, users, satpamList, uptList)}
               style={{width:"100%",height:"100%",border:"none"}}
             />
           </div>

@@ -4,7 +4,7 @@ import { hasRole } from "../lib/roles.js";
 import { fmtDate } from "../lib/utils.js";
 
 export function DashboardRingkasanBlock({
-  C, currentUser, gudangList, petaWilayahDivRef, stockCountList,
+  C, currentUser, gudangList, uptNama, petaWilayahDivRef, stockCountList,
   setTab, setOpnameSubTab,
 }){
   return (
@@ -12,7 +12,7 @@ export function DashboardRingkasanBlock({
             <section className="dashboard-insight-card dashboard-map-card">
               <div className="dashboard-insight-card__header">
                 <div>
-                  <strong>Peta Wilayah Gudang UPT Surabaya</strong>
+                  <strong>Peta Wilayah Gudang {uptNama}</strong>
                   <span>{gudangList.filter(g=>g.lat!=null&&g.lng!=null).length} dari {gudangList.length} gudang memiliki koordinat GPS</span>
                 </div>
                 <span className="dashboard-insight-card__badge">Peta operasional</span>

@@ -1,7 +1,7 @@
 // Komponen HeavyEquipmentTabV2 — dipindah dari App.jsx (refactor Fase 5b).
 import { useState } from "react";
 import { UIT } from "../constants.js";
-import { hasRole, getUserUptScope } from "../lib/roles.js";
+import { hasRole, getUserUptScope, roleTier } from "../lib/roles.js";
 import { downloadHeavyEquipmentLoanHTML } from "../lib/docBuilders.js";
 import { canApproveHeavyEquipmentLoan, getEquipmentCategory, getHeavyEquipmentLoanJobName, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanRuntimeStatus, getHeavyEquipmentLoanStartDate, isPendingHeavyEquipmentLoan, normalizeHeavyEquipmentLoanStatus } from "../lib/heavyEquipment.js";
 import { OperationsHero } from "./OperationsHero.jsx";
@@ -73,7 +73,15 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
   // filter UPT sama sekali di sini, jadi peminjaman antar 2 UPT lain (sama sekali tidak
   // melibatkan UPT Surabaya) ikut nongol ke semua orang yang buka menu ini. Dipakai untuk
   // Overdue panel, KPI ringkasan, dan Peminjaman & Histori sekaligus supaya konsisten.
-  const scopedLoans = normalizedLoans.filter(l => !effectiveUptFilter || l.ownerUpt===effectiveUptFilter || l.requesterUpt===effectiveUptFilter);
+  // Role UIT (bukan MSB, tanpa uptId) melihat riwayat & armada SEMUA UPT di UIT-nya — bukan
+  // nasional. Set nama UPT (terpangkas prefix, sesuai ownerUpt/requesterUpt) dalam UIT viewer.
+  // null untuk non-UIT (UPT sudah dibatasi effectiveUptFilter; Pusat/SUPERADMIN nasional).
+  const uitScopeNames = roleTier(currentUser?.role) === "UIT"
+    ? new Set(uptList.filter(u => u.uitId === currentUser?.uitId).map(u => (u.nama||"").replace(/^UPT\s+/i,"").trim()))
+    : null;
+  const scopedLoans = normalizedLoans.filter(l =>
+    (!effectiveUptFilter || l.ownerUpt===effectiveUptFilter || l.requesterUpt===effectiveUptFilter)
+    && (!uitScopeNames || uitScopeNames.has(l.ownerUpt) || uitScopeNames.has(l.requesterUpt)));
   const uptOptions = Array.from(new Set([
     ...equipmentList.map(e=>e.upt),
     ...normalizedLoans.map(l=>l.ownerUpt),
@@ -96,7 +104,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
   const overdueCount = scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").length;
   // Alat yang ter-scope ke UPT aktif (non-MSB dikunci ke UPT sendiri) — dipakai KPI di bawah &
   // status grid. Dulu 3 count ini dihitung dari equipmentList mentah tanpa filter UPT.
-  const scopedEquipment = equipmentList.filter(e=>!effectiveUptFilter||e.upt===effectiveUptFilter);
+  const scopedEquipment = equipmentList.filter(e=>(!effectiveUptFilter||e.upt===effectiveUptFilter) && (!uitScopeNames||uitScopeNames.has(e.upt)));
   const issueCount = scopedEquipment.filter(e=>["PERLU_SERVICE","RUSAK"].includes(e.statusAlat)).length;
   const availableCount = scopedEquipment.filter(e=>e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat)).length;
   const maintenanceCount = scopedEquipment.filter(e=>e.statusAlat==="MAINTENANCE").length;

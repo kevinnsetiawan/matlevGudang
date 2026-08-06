@@ -58,3 +58,24 @@ export function getUserUptScope(user, uptList) {
   if (Array.isArray(uptList) && uptList.length === 1) return stripUptPrefix(uptList[0]?.nama);
   return "";
 }
+
+// Cakupan UPT yang boleh dilihat akun — sumber tunggal 3-tier untuk SEMUA scoping data
+// (stok, alat berat, TUG, approval, Pak War, RAG). Ganti pola lama `hasRole(...global...)`
+// yang memperlakukan UIT = nasional. Return:
+//   null            = nasional (Pusat/SUPERADMIN): lihat semua UPT tanpa filter
+//   array upt id    = UIT: semua UPT di UIT-nya; UPT/ULTG: [uptId sendiri]
+// Konvensi filter: pakai inScopeUpt(uptId, scope) — null selalu true.
+export function getScopeUptIds(user, uptList) {
+  const tier = roleTier(user?.role);
+  if (tier === "GLOBAL" || tier === "PUSAT") return null;
+  if (tier === "UIT") return (Array.isArray(uptList) ? uptList : []).filter(u => u.uitId === user?.uitId).map(u => u.id);
+  return user?.uptId ? [user.uptId] : [];
+}
+
+// True kalau uptId masuk cakupan viewer. scope null = nasional (semua lolos).
+// uptId kosong (entitas belum di-assign UPT) TIDAK diblok — sama seperti canAccessGudang.
+export function inScopeUpt(uptId, scope) {
+  if (scope === null || scope === undefined) return true;
+  if (!uptId) return true;
+  return scope.includes(uptId);
+}
