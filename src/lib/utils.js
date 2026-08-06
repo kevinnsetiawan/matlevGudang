@@ -156,7 +156,9 @@ export function parseSAPRowsFromXLSX(arrayBuffer) {
   const wb = XLSX.read(arrayBuffer, { type: "array" });
   let allRaw = [];
   wb.SheetNames.forEach(sheetName => {
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: false });
+    // raw:true menjaga nilai numerik Excel apa adanya. raw:false bisa mengubah angka 1.96
+    // menjadi teks berformat lokal "1.960", lalu parser SAP salah menganggapnya 1960.
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: true });
     if (!rows.length) return;
     const norm = v => String(v ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
     const aliases = {
@@ -231,6 +233,7 @@ export function parseIndoNumber(raw) {
 
 // Angka dari SAP: koma = desimal, titik = ribuan. Satuan/teks di belakang angka diabaikan.
 export function parseSAPNumber(raw) {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
   const s = String(raw ?? "").trim().replace(/[^\d.,-]/g, "");
   if (!s) return 0;
   if (s.includes(",")) return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
@@ -246,7 +249,8 @@ export function parseAppNumber(raw) {
 
 export function mapSAPRow(obj) {
   // Normalize key lookup - try exact then trimmed
-  const get = (key) => (obj[key] ?? obj[key.trim()] ?? "").toString().trim();
+  const getRaw = (key) => obj[key] ?? obj[key.trim()] ?? "";
+  const get = (key) => String(getRaw(key)).trim();
 
   const materialRaw = get("Material");
   const katalog = materialRaw.replace(/^0+/, "");
@@ -257,8 +261,8 @@ export function mapSAPRow(obj) {
   // punya heuristik titik-ribuan vs desimal. Inkonsistensi ini sumber bug qty "103,5 meter"
   // kebaca "1.035" yang dilaporkan user 2026-07-07 — SANGAT BERBAHAYA karena mendistorsi qty
   // stok. Lihat definisi parseIndoNumber untuk aturan lengkapnya.
-  const qty = parseSAPNumber(get("Unrestricted Use Stock"));
-  const harga = Math.round(parseSAPNumber(get("Harga Satuan")));
+  const qty = parseSAPNumber(getRaw("Unrestricted Use Stock"));
+  const harga = Math.round(parseSAPNumber(getRaw("Harga Satuan")));
 
   const valType = get("Valuation Type").toUpperCase();
   const digitCount = katalog.length;
