@@ -7,7 +7,8 @@ import * as XLSX from "xlsx";
 
 export function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount, saveStockCountSession, approveStockCountItem, rejectStockCountItem, deleteStockCountSession }) {
   const [uploading, setUploading] = useState(false);
-  const [expandedId, setExpandedId] = useState(stockCountList[0]?.id || null);
+  const orderedStockCountList = [...stockCountList].sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+  const [expandedId, setExpandedId] = useState(orderedStockCountList[0]?.id || null);
   const [catatanDraft, setCatatanDraft] = useState({}); // itemId -> teks catatan sedang diketik
   const [draftItems, setDraftItems] = useState(null); // hasil baca file, BELUM disimpan — masih bisa direview/dicoret per item
   const [saving, setSaving] = useState(false);
@@ -152,9 +153,9 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
         );
       })()}
 
-      {stockCountList.length===0 ? (
+      {orderedStockCountList.length===0 ? (
         !draftItems && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada sesi Stock Count. {hasRole(currentUser, "ADMIN") && "Klik \"Upload CSV/XLSX SAP\" untuk mulai."}</div>
-      ) : stockCountList.map(session => {
+      ) : orderedStockCountList.map(session => {
         const isOpen = expandedId===session.id;
         const mismatch = session.items.filter(i=>i.status!=="AKURAT").sort((a,b)=>b.selisihPct-a.selisihPct);
         return (
