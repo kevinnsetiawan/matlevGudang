@@ -5092,21 +5092,37 @@ export default function PLNWarehouse() {
     setChatHistory(h=>[...h,{role:"user",text:msg}]);
     setChatLoading(true);
 
+    // Pak War memakai scope akun yang sama dengan layar operasional. Akun UPT tidak
+    // boleh mendapat snapshot nasional hanya karena chat dipanggil dari komponen global.
+    const assistantGlobal = hasRole(currentUser, "SUPERADMIN", "ADMIN_LOG_PUSAT", "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT");
+    const assistantStocks = assistantGlobal ? enrichedStocks : enrichedStocks.filter(s => {
+      const lokasi = lokasiList.find(l => l.id === s.lokasiId);
+      const gudang = lokasi?.gudangId ? gudangList.find(g => g.id === lokasi.gudangId) : null;
+      return gudang?.uptId === currentUser?.uptId;
+    });
+    const assistantStockIds = new Set(assistantStocks.map(s => s.id));
+    const assistantTxns = assistantGlobal ? txns : txns.filter(t => {
+      if ((t.stockItems || []).some(si => assistantStockIds.has(si.stockId))) return true;
+      return users.find(u => u.id === t.createdBy)?.uptId === currentUser?.uptId;
+    });
+    const scopedEnrichedStocks = assistantStocks;
+    const scopedTxns = assistantTxns;
+
     // Build rich context from live system data
     const now = new Date();
     const tiga_bulan_lalu = Date.now() - 90*24*60*60*1000;
-    const txnRecent = txns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
+    const txnRecent = scopedTxns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
 
     // Top 20 material by nilai
-    const top20 = [...enrichedStocks]
+    const top20 = [...scopedEnrichedStocks]
       .sort((a,b)=>(b.qty*b.price)-(a.qty*a.price))
       .slice(0,20);
 
     // Stok kritis
-    const kritis = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
+    const kritis = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
 
     // Pending approvals
-    const pending = txns.filter(t=>t.status==="PENDING");
+    const pending = scopedTxns.filter(t=>t.status==="PENDING");
     const pendingDetailText = pending.length===0 ? "Tidak ada transaksi pending." : pending
       .map(t=>{
         const creator = users.find(u=>u.id===t.createdBy);
@@ -5130,7 +5146,7 @@ export default function PLNWarehouse() {
     const usageSummary = {};
     txnRecent.forEach(t=>{
       (t.stockItems||[]).forEach(si=>{
-        const s = enrichedStocks.find(x=>x.id===si.stockId);
+        const s = scopedEnrichedStocks.find(x=>x.id===si.stockId);
         if(!s) return;
         if(!usageSummary[s.name]) usageSummary[s.name]={total:0,count:0};
         usageSummary[s.name].total += si.qty||0;
@@ -5189,8 +5205,8 @@ ${MATERIAL_GLOSSARY}
 ---
 SNAPSHOT DATA SISTEM SAAT INI:
 
-INVENTORI (${enrichedStocks.length} item total):
-Nilai total: Rp ${fmtNum(Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
+INVENTORI (${scopedEnrichedStocks.length} item total):
+Nilai total: Rp ${fmtNum(Math.round(scopedEnrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
 Top 20 material by nilai:
 ${top20.map(s=>`- ${s.name} [${s.katalog}]: ${fmtNum(s.qty)} ${s.unit} | Rp ${fmtNum(Math.round(s.qty*s.price))} | lokasi: ${s.lokasi||"-"}`).join('\n')}
 
@@ -5200,7 +5216,7 @@ ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok
 PEMAKAIAN 3 BULAN TERAKHIR (top 10):
 ${topPakai.map(([nama,d])=>`- ${nama}: ${d.total} unit (${d.count}x transaksi)`).join('\n')}
 
-${formatStockStatsText(enrichedStocks)}
+${formatStockStatsText(scopedEnrichedStocks)}
 
 TUG PENDING APPROVAL (${pending.length} transaksi):
 ${pendingDetailText}
@@ -5220,11 +5236,11 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         .replace(/[^a-z0-9\s-]/g," ")
         .split(/\s+/)
         .filter(word=>word.length>=3 && !["berapa","material","gudang","stoknya","tolong","pak","war","yang","untuk","dengan","dari","saat","sekarang","hari","ini"].includes(word));
-      const matchedStocks = enrichedStocks.filter(stock=>{
+      const matchedStocks = scopedEnrichedStocks.filter(stock=>{
         const haystack = `${stock.name||""} ${stock.katalog||""} ${stock.jenisBarang||""}`.toLowerCase();
         return keywords.length>0 && keywords.some(keyword=>haystack.includes(keyword));
       }).slice(0,8);
-      const totalValue = enrichedStocks.reduce((sum,stock)=>sum+(stock.qty*stock.price),0);
+      const totalValue = scopedEnrichedStocks.reduce((sum,stock)=>sum+(stock.qty*stock.price),0);
       const localNotice = "Layanan AI sedang tidak tersedia, jadi informasi berikut saya bacakan langsung dari data WARNOTO.";
 
       if (/pending|approval|persetujuan|dokumen|tug/.test(normalized)) {
@@ -5244,7 +5260,7 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         const usageText = topPakai.length===0 ? "Belum ada transaksi pemakaian yang cukup." : topPakai.map(([name,data])=>`- **${name}** — ${fmtNum(data.total)} unit dalam ${data.count} transaksi`).join("\n");
         return `${localNotice}\n\nIni pemakaian material tertinggi dalam 3 bulan terakhir:\n${usageText}\n\nKalau perlu proyeksi lebih rinci, silakan buka menu Forecast Stok.`;
       }
-      return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(enrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
+      return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(scopedEnrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
     }
 
     try {

@@ -31,6 +31,12 @@ export function ApprovalHubTab({
   stockCountList, approvalStockCountPage, setApprovalStockCountPage, approveStockCountItem, rejectStockCountItem,
   txns, approvalHistoryList, approvalHistoryPage, setApprovalHistoryPage,
 }) {
+  const historyScopeGlobal = hasRole(currentUser, "SUPERADMIN", "ADMIN_LOG_PUSAT", "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT");
+  const historyScopeUptId = currentUser?.uptId;
+  const userUptById = new Map((users || []).map(u => [u.id, u.uptId]));
+  const scopedApprovalHistory = historyScopeGlobal
+    ? approvalHistoryList
+    : approvalHistoryList.filter(h => userUptById.get(h.decidedBy) === historyScopeUptId || userUptById.get(h.requestedBy) === historyScopeUptId || h.uptId === historyScopeUptId);
   const tugCount = myPendingApprovals.length;
   const capCount = hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
   const lokasiCount = hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0;
@@ -338,7 +344,8 @@ export function ApprovalHubTab({
           decidedBy: t.status==="REJECTED" ? t.rejectedBy : t.approvedBy,
           decidedAt: t.status==="REJECTED" ? t.rejectedAt : t.approvedAt,
         }));
-        const combinedAll = [...approvalHistoryList, ...histTUG].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
+        const scopedHistTug = historyScopeGlobal ? histTUG : histTUG.filter(h => userUptById.get(h.decidedBy) === historyScopeUptId || userUptById.get(h.requestedBy) === historyScopeUptId || h.uptId === historyScopeUptId);
+        const combinedAll = [...scopedApprovalHistory, ...scopedHistTug].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
         const combined = combinedAll.slice((approvalHistoryPage-1)*approvalPageSize, approvalHistoryPage*approvalPageSize);
         const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname", STOCK_COUNT:"📊 Stock Count"};
         const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","OPNAME","STOCK_COUNT","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];
