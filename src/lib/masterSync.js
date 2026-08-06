@@ -3,6 +3,7 @@
 import { supabase } from "../supabaseClient.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./openLocationCode.js";
 import { isDemoMode } from "./demo.js";
+import { mapStockScopeRow } from "./stockScope.js";
 
 // Satpam, Tim Mutu, UIT, UPT, Gudang, Lokasi dulu hanya tersimpan di
 // localStorage/CLOUD (per-browser, tidak sinkron antar device/user). Sekarang
@@ -90,7 +91,9 @@ export async function loadMasterTable(table) {
     ({ data, error } = await supabase.from(table).select("*"));
     if (error) { console.error(`loadMasterTable(${table}): ${error.message}`, error); return null; }
   }
-  return data.map(row => ({ ...row.data, id: row.id }));
+  return data.map(row => (table === "stock_opname" || table === "stock_count")
+    ? mapStockScopeRow(row)
+    : ({ ...row.data, id: row.id }));
 }
 
 // extraCols(item) => kolom tambahan per baris (FK/status) di luar id & data, opsional

@@ -20,6 +20,7 @@ import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildT
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
 import { ROLES, hasRole, getUserUptScope, canAccessGudang } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
+import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
 import { can } from "./src/lib/perms.js";
 import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentStatusFromKondisi, normalizeHeavyEquipmentRecord, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName, normalizeHeavyEquipmentLoanStatus, isPendingHeavyEquipmentLoan, getHeavyEquipmentLoanRuntimeStatus, canApproveHeavyEquipmentLoan, getEquipmentCategory } from "./src/lib/heavyEquipment.js";
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
@@ -1012,7 +1013,7 @@ export default function PLNWarehouse() {
   // to the latest React state via stateRef (always up to date, avoids stale
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
-  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
+  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview, users, currentUser };
 
   // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
   // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
@@ -1245,8 +1246,15 @@ export default function PLNWarehouse() {
     // (widget akurasi Dashboard "hilang" kalau dibuka dari device/browser lain karena datanya
     // memang tidak pernah keluar dari localStorage device asal). Sekarang auto-backup ke
     // Supabase tiap kali berubah, pola sama seperti heavy_equipment (schema.sql section 22).
-    if (overrides.opnameList !== undefined) syncTasks.push({ label: "Stock Opname", promise: syncMasterTable("stock_opname", opn, o => ({ status: o.status || null })) });
-    if (overrides.stockCountList !== undefined) syncTasks.push({ label: "Stock Count", promise: syncMasterTable("stock_count", sc) });
+    // Probe read-only dulu. Sebelum migration kolom upt_id belum ada; jangan
+    // mengirim kolom typed karena PostgREST akan menolak seluruh upsert (PGRST204).
+    const stockScopeLive = !isDemoMode() && (overrides.opnameList !== undefined || overrides.stockCountList !== undefined)
+      ? await stockScopeColumnsAvailable(supabase)
+      : false;
+    const stockScopeContext = { profiles: stateRef.current.users, currentUser: stateRef.current.currentUser };
+    const scopedCols = item => stockScopeExtraCols(item, stockScopeContext, stockScopeLive);
+    if (overrides.opnameList !== undefined) syncTasks.push({ label: "Stock Opname", promise: syncMasterTable("stock_opname", opn, o => ({ status: o.status || null, ...scopedCols(o) })) });
+    if (overrides.stockCountList !== undefined) syncTasks.push({ label: "Stock Count", promise: syncMasterTable("stock_count", sc, scopedCols) });
     const syncResults = await Promise.all(syncTasks.map(task => task.promise));
     const failedLabels = syncTasks.filter((task, i) => syncResults[i] === false).map(task => task.label);
     if (failedLabels.length > 0) {
