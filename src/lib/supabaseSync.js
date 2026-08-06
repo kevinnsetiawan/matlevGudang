@@ -60,7 +60,7 @@ export async function syncTUG15ToSupabase(rows, katalogList) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
   const synced = getSyncedKeys();
-  const newRows = rows.filter(r => r.katalogId && r.katalogId!=="-" && !synced.has(rowSyncKey(r)));
+  const newRows = rows.filter(r => r.source !== "LAMA" && r.affectsSaldo !== false && r.katalogId && r.katalogId!=="-" && !synced.has(rowSyncKey(r)));
   if (newRows.length === 0) return { katalogCount: 0, historyCount: 0 };
 
   const headers = { ...(await authHeaders()), "Content-Type": "application/json" };
@@ -447,7 +447,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
   const { dateFrom, dateTo, katalogId, jenisBarang, sapStatus } = filter;
   const docTypes = [...new Set(["TUG9", "TUG8", "TUG10", "TUG3", "TUG5", ...(filter.docTypes || [])])];
   // TUG-15 canonical: history archive lama tidak pernah menjadi input laporan.
-  const source = "BARU";
+  const source = filter.source || "ALL";
   const searchText = filter.searchText || "";
   const ultgList = context.ultgList || filter.ultgList || [];
   const uitList = context.uitList || filter.uitList || [];
@@ -714,6 +714,36 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
       notes: "Saldo awal sebelum transaksi tercatat di aplikasi (migrasi data).",
     }));
   });
+
+  // Arsip lama hanya untuk tampilan laporan/history. Tidak ikut saldo canonical.
+  if (source !== "BARU") {
+    const katalogByCode = new Map((katalogList || []).map(k => [normalizeKatalogCode(k.katalog), k]).filter(([code]) => code));
+    (_legacyRows || []).forEach(item => {
+      if (!docTypes.includes(item.doc_type)) return;
+      const katalog = item.no_katalog || "-";
+      const selected = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
+      if (selected && String(selected.katalog || "") !== String(katalog)) return;
+      if (jenisBarang !== "ALL" || sapStatus !== "ALL") return;
+      const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
+      const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
+      const matched = katalogByCode.get(normalizeKatalogCode(katalog));
+      const ts = item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0;
+      rows.push({
+        id: item.id || item.sync_key || item.item_id || `${item.doc_type}:${item.doc_id}`,
+        katalog, deskripsi: item.nama_material || "-", merk: "-", type: "-", satuan: item.satuan || "-", valuasi: 0,
+        masuk: isMasuk ? Number(item.qty || 0) : 0, keluar: isKeluar ? Number(item.qty || 0) : 0,
+        upt: item.source_upt || "-", tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
+        keterangan: item.catatan || item.unit_lawan || "-", tanggalMutasi: item.tanggal || "-", ts,
+        katalogId: matched?.id || "-", sapStatus: "ARSIP", sapLabel: "Arsip lama", jenisBarang: "-", docType: item.doc_type || "-",
+        lokasiId: "", lokasiKode: item.lokasi_kode || "-", warehouseName: legacyWarehouseName(item.lokasi_kode, item.source_upt),
+        eventKind: String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate: item.tanggal || "-", documentNo: item.doc_id || "-",
+        jobName: "-", workLocation: item.lokasi_kode || "-", counterparty: item.unit_lawan || "-", unit: item.unit_lawan || "-",
+        notes: item.catatan || "-", storageLocation: item.lokasi_kode || "-", quality: "-", source: "LAMA", sourceLabel: "Lama",
+        affectsSaldo: false, materialKey: historyMaterialKey(katalog, item.nama_material || "-", "legacy", item.id || item.sync_key || item.item_id),
+        legacyId: item.id, legacyDocId: item.doc_id || null, legacySyncKey: item.sync_key, fotoBarangUrl: item.foto_barang_url || null,
+      });
+    });
+  }
 
   const visibleRows = rows.filter(row => row.ts >= fromMs && row.ts <= toMs && (!searchText || matchesSearchTokens(row, searchText)));
   visibleRows.sort((a,b)=>a.ts-b.ts);

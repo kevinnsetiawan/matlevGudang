@@ -3,10 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { JENIS_BARANG, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { getSAPBadgeStyle } from "../lib/sap.js";
-import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase } from "../lib/supabaseSync.js";
+import { buildMutasiRows, loadLegacyHistoryArchive, resolveLegacyPrivateUrl, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase } from "../lib/supabaseSync.js";
 import { buildMonitoringWorkbook, buildTUG15ReportModel } from "../lib/tug15Report.js";
 
 export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter, lokasiList, gudangList }) {
+  const [legacy, setLegacy] = useState({ rows:[], documents:[], loading:true, error:null });
   const autoSyncedRef = useRef(false);
   const [historyItem, setHistoryItem] = useState(null);
   const [historyViewMode, setHistoryViewMode] = useState("FULL");
@@ -16,11 +17,22 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
 
-  const rows = buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, [], { gudangList });
+  useEffect(() => {
+    let active = true;
+    loadLegacyHistoryArchive().then(result => {
+      if (!active) return;
+      setLegacy({ ...result, loading:false });
+    }).catch(error => {
+      if (active) setLegacy({ rows:[], documents:[], loading:false, error });
+    });
+    return () => { active = false; };
+  }, []);
+
+  const rows = buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacy.rows, { gudangList });
   const allHistoryRows = useMemo(() => buildMutasiRows(txns, katalogList, stocks, {
     ...filter, dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"",
     docTypes:["TUG9","TUG8","TUG10","TUG3","TUG5"],
-  }, lokasiList, [], { gudangList }), [txns, katalogList, stocks, filter, lokasiList, gudangList]);
+  }, lokasiList, legacy.rows, { gudangList }), [txns, katalogList, stocks, filter, lokasiList, legacy.rows, gudangList]);
   const selectedHistoryRows = useMemo(() => historyItem
     ? allHistoryRows.filter(row => row.materialKey === historyItem.materialKey).sort((a,b)=>(b.ts||0)-(a.ts||0))
     : [], [allHistoryRows, historyItem]);
@@ -29,6 +41,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     return selectedHistoryRows.filter(row => row.eventKind === historyTypeFilter);
   }, [selectedHistoryRows, historyTypeFilter]);
   const displayedHistoryRows = historyViewMode === "ROW" && historyItem ? [historyItem] : visibleHistoryRows;
+  const documentsByKey = useMemo(() => new Map(legacy.documents.map(doc => [`${doc.doc_type}|${doc.doc_id}`, doc])), [legacy.documents]);
   // rows dari buildMutasiRows() sengaja ascending (lama→baru) untuk perhitungan saldo
   // berjalan & export PDF/Excel (ledger kronologis). Tabel di layar dibalik supaya
   // transaksi terbaru tampil di atas, tanpa mengubah rows asli yang dipakai downloadTUG15.
@@ -37,7 +50,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     const start = (page - 1) * pageSize;
     return displayRows.slice(start, start + pageSize);
   }, [displayRows, page, pageSize]);
-  useEffect(() => { setPage(1); }, [filter]);
+  useEffect(() => { setPage(1); }, [filter, legacy.rows]);
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(rows.length / pageSize));
     setPage(current => Math.min(current, maxPage));
@@ -50,9 +63,16 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     setHistoryTypeFilter("ALL");
   }
 
+  async function openAttachment(url) {
+    if (!url) return;
+    setAttachmentState({ loading:true, error:"" });
+    try { const resolved = await resolveLegacyPrivateUrl(url); if (!resolved) throw new Error("Lampiran tidak tersedia."); window.open(resolved, "_blank", "noopener,noreferrer"); setAttachmentState({ loading:false, error:"" }); }
+    catch (err) { setAttachmentState({ loading:false, error:err.message || "Lampiran tidak dapat dibuka." }); }
+  }
+
   async function handleSyncSupabase() {
     try {
-      await syncTUG15ToSupabase(allHistoryRows, katalogList);
+      await syncTUG15ToSupabase(allHistoryRows.filter(row => row.source !== "LAMA" && row.affectsSaldo !== false), katalogList);
       await syncStockQtyToSupabase(stocks, katalogList);
       await syncFotoMaterialToSupabase(stocks, katalogList);
     } catch (err) {
@@ -64,7 +84,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   // Guard useRef supaya hanya jalan sekali per mount, tidak retry-loop kalau gagal.
   useEffect(() => {
     if (autoSyncedRef.current) return;
-    if (allHistoryRows.length === 0) return;
+    if (legacy.loading || allHistoryRows.length === 0) return;
     autoSyncedRef.current = true;
     handleSyncSupabase();
   }, [allHistoryRows]);
@@ -130,7 +150,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
         <div style={{marginBottom:12}}>
           <label style={sty.label}>Sumber Data</label>
           <div style={{display:"flex",gap:8,marginTop:6,flexWrap:"wrap"}}>
-            {[{id:"BARU",label:"Data Baru"}].map(option=>{
+            {[{id:"ALL",label:"Semua Sumber"},{id:"BARU",label:"Baru"},{id:"LAMA",label:"Lama"}].map(option=>{
               const active = (filter.source||"ALL") === option.id;
               return <button key={option.id} type="button" style={{padding:"5px 14px",borderRadius:20,border:`1px solid ${active?C.accent:C.border}`,background:active?C.accent:"white",color:active?"white":C.muted,fontSize:12,cursor:"pointer",fontWeight:active?700:400}} onClick={()=>setFilter(f=>({...f,source:option.id}))}>{option.label}</button>;
             })}
@@ -166,6 +186,8 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             <span style={{fontSize:12,color:C.muted}}>{rows.length} baris ditemukan</span>
           </div>
         </div>
+        {legacy.loading && <div style={{marginTop:10,fontSize:12,color:C.muted}}>Memuat arsip history lama…</div>}
+        {legacy.error && <div style={{marginTop:10,fontSize:12,color:C.red||"#dc2626"}}>Arsip history lama belum dapat dimuat: {legacy.error.message || "periksa koneksi atau ketersediaan tabel arsip."}</div>}
       </div>
 
       <div style={{...sty.card, marginBottom:16, border:`2px solid ${C.accent}`, background:"#eff6ff"}}>
@@ -211,7 +233,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
                 return (
                   <tr key={i} role="button" tabIndex={0} aria-label={`Buka detail transaksi ${r.deskripsi || r.katalog}`} onClick={()=>openHistoryForRow(r)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openHistoryForRow(r);}}} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"white":"#f9fafb",cursor:"pointer"}}>
                     <td style={{padding:"5px 8px",textAlign:"center",color:C.muted}}>{(page-1)*pageSize+i+1}</td>
-                    <td style={{padding:"5px 8px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:11,fontWeight:700,background:"#dbeafe",color:"#1d4ed8"}}>Data Baru</span></td>
+                    <td style={{padding:"5px 8px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:11,fontWeight:700,background:r.source==="LAMA"?"#fef3c7":"#dbeafe",color:r.source==="LAMA"?"#92400e":"#1d4ed8"}}>{r.sourceLabel||"Baru"}</span></td>
                     <td style={{padding:"5px 8px",fontFamily:"monospace",fontSize:12}}>{r.katalog}</td>
                     <td style={{padding:"5px 8px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.deskripsi}</td>
                     <td style={{padding:"5px 8px"}}><span style={{padding:"2px 6px",borderRadius:20,fontSize:12,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{r.sapStatus}</span></td>
@@ -269,7 +291,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             {attachmentState.loading && <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Menyiapkan lampiran…</div>}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {displayedHistoryRows.map((row,index)=>{
-                const doc = null;
+                const doc = row.source === "LAMA" ? documentsByKey.get(`${row.docType}|${row.legacyDocId || row.documentNo}`) : null;
                 const hasContractRef = row.contractRefs && row.contractRefs !== "-";
                 const contractText = hasContractRef
                   ? `${row.contractRefs}${row.docType==="TUG3"?" (referensi penerimaan, bukan penelusuran lot)":""}`
@@ -280,7 +302,8 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
                     && candidate.contractRefs
                     && candidate.contractRefs !== "-")
                   : null;
-                const attachments = [];
+                const legacyDoc = row.source === "LAMA" ? documentsByKey.get(`${row.docType}|${row.legacyDocId || row.documentNo}`) : null;
+                const attachments = legacyDoc ? [["Surat Jalan", legacyDoc.foto_surat_jalan_url], ["SIM/KTP", legacyDoc.foto_sim_ktp_url], ["Kendaraan", legacyDoc.foto_kendaraan_url], ["PDF", legacyDoc.pdf_url], ["Berita Acara", legacyDoc.berita_acara_url], ["Lampiran", legacyDoc.lampiran_url]].filter(([,url]) => url) : (row.fotoBarangUrl ? [["Foto Barang", row.fotoBarangUrl]] : []);
                 const isInbound = row.eventKind === "MASUK";
                 const isOutbound = row.eventKind === "KELUAR";
                 const eventColor = isInbound ? (C.green || "#16a34a") : isOutbound ? (C.red || "#dc2626") : C.border;

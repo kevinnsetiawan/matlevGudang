@@ -155,9 +155,10 @@ test("mutation rows ignore legacy input and keep new data only", async ({ isolat
 
   expect(result.inRange).toHaveLength(1);
   expect(result.inRange[0].source).toBe("BARU");
-  expect(result.allDates).toHaveLength(2);
-  expect(result.allDates.every(row => row.source === "BARU")).toBeTruthy();
-  expect(result.allDates.reduce((sum, row) => sum + row.keluar, 0)).toBe(2);
+  expect(result.allDates).toHaveLength(3);
+  expect(result.allDates.map(row => row.source).sort()).toEqual(["BARU", "BARU", "LAMA"]);
+  expect(result.allDates.filter(row => row.source === "BARU").reduce((sum, row) => sum + row.keluar, 0)).toBe(2);
+  expect(result.allDates.find(row => row.source === "LAMA")).toMatchObject({ keluar:3 });
   expect(result.unknown).toHaveLength(2);
   expect(new Set(result.unknown.map(row => row.materialKey)).size).toBe(2);
 });
@@ -361,7 +362,8 @@ test("legacy outgoing does not create Migrasi Data baseline", async ({ isolatedP
     const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"", docTypes:["TUG9"] };
     return buildMutasiRows([], [{ id:"K-LA", katalog:"1002090509", name:"LA 150kV", satuan:"SET" }], [{ id:"S-LA", katalogId:"K-LA", qty:0 }], filter, [], [{ id:"L-6", doc_type:"TUG9", doc_id:"TUG/6", tanggal:"2025-01-01", jenis_transaksi:"KELUAR", no_katalog:"2090509", nama_material:"LA 150kV", qty:6 }]);
   });
-  expect(result).toEqual([]);
+  expect(result).toHaveLength(1);
+  expect(result[0]).toMatchObject({ source:"LAMA", keluar:6, affectsSaldo:false, saldoAwal:null, saldoAkhir:null });
 });
 
 test.describe("long monthly PDF", () => {
