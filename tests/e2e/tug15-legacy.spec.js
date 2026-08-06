@@ -339,6 +339,22 @@ test("row mapping preserves merk/type", async ({ isolatedPage:page }) => {
   expect(result).toMatchObject({ merk:"Katalog Merk", type:"Katalog Type", warehouse:"Gudang Ketintang", legacyWarehouse:"UPT Surabaya", explicitLegacyWarehouse:"GUDANG BANGIL" });
 });
 
+test("row mapping canonicalizes inbound catalog ID mismatch to stock catalog", async ({ isolatedPage:page }) => {
+  await openApp(page);
+  const result = await page.evaluate(async () => {
+    const { buildMutasiRows } = await import("/src/lib/supabaseSync.js");
+    const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"", docTypes:["TUG3","TUG9"] };
+    const katalog = [{ id:"K-STOCK", katalog:"LA150", name:"LA 150kV", satuan:"SET" }, { id:"K-INBOUND", katalog:"LA150", name:"LA 150kV", satuan:"SET" }];
+    const stocks = [{ id:"S-1", katalogId:"K-STOCK", lokasiId:"" }];
+    const rows = buildMutasiRows([
+      { id:"OUT", docType:"TUG9", status:"APPROVED", approvedAt:Date.now(), stockItems:[{ stockId:"S-1", qty:1 }] },
+      { id:"IN", docType:"TUG3", status:"APPROVED", stage:"APPROVED", approvedAt:Date.now(), stockItems:[{ katalogMode:"existing", katalogId:"K-INBOUND", qty:1 }] }
+    ], katalog, stocks, filter, [], []);
+    return { ids:rows.map(r=>r.katalogId), saldo:rows.reduce((n,r)=>n+r.masuk-r.keluar,0) };
+  });
+  expect(result).toEqual({ ids:["K-STOCK","K-STOCK"], saldo:0 });
+});
+
 test.describe("long monthly PDF", () => {
   const longTxns = Array.from({ length:26 }, (_, index) => {
     const date = new Date(Date.UTC(2024 + Math.floor(index / 12), index % 12, 1)).getTime();

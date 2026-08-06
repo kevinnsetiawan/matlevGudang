@@ -481,6 +481,18 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     return match ? match[1].trim() : (sourceUpt || "Tidak tercatat");
   };
 
+  // Canonicalize catalog references by name when old/new transaction IDs differ.
+  // Prefer the catalog ID actually used by stock rows (the same bucket as outbound rows).
+  const canonicalByName = new Map();
+  (stocks || []).forEach(s => {
+    const k = katalogList.find(item => item.id === s.katalogId);
+    if (k?.name && !canonicalByName.has(k.name)) canonicalByName.set(k.name, k);
+  });
+  const resolveCanonicalKatalog = (item, initial) => {
+    if (!initial) return initial;
+    return canonicalByName.get(initial.name) || initial;
+  };
+
   const rows = [];
 
   txns.forEach(t => {
@@ -500,7 +512,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     if (t.docType==="TUG9" || t.docType==="TUG8") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
         const stockRow = stocks.find(s=>s.id===si.stockId);
-        const kat = katalogList.find(k=>k.id===stockRow?.katalogId);
+        const kat = resolveCanonicalKatalog(si, katalogList.find(k=>k.id===stockRow?.katalogId));
         if (!shouldIncludeKatalog(kat, stockRow)) return;
         rows.push(addLiveSearchFields({
           katalog: kat.katalog||"-", deskripsi: kat.name, merk:resolveMerk(kat, si), type:resolveType(kat, si),
@@ -537,13 +549,13 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
 
     if (t.docType==="TUG10") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
-        const kat = si.katalogMode==="existing"
+        const kat = resolveCanonicalKatalog(si, si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
           // Material baru: transaksi tidak menyimpan katalogId hasil auto-create saat approve,
           // jadi resolve ke entry katalogList asli lewat nama (pola sama dgn buildKartuGantungHistory
           // di sap.js). Tanpa ini, event MASUK masuk bucket saldo berbeda dari event KELUAR (saldo minus).
           : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
-            || { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+            || { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" });
         const fakeStockRow = { jenisBarang: STATUS_RETUR_TO_JENIS[si.statusMaterial]||"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
@@ -582,11 +594,11 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
 
     if (t.docType==="TUG3" && t.stage==="APPROVED") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
-        const kat = si.katalogMode==="existing"
+        const kat = resolveCanonicalKatalog(si, si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
           // idem TUG10: match nama ke katalogList asli supaya katalogId sama dgn event KELUAR
           : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
-            || { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+            || { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" });
         const fakeStockRow = { jenisBarang:"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
