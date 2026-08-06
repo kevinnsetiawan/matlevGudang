@@ -156,10 +156,41 @@ export function parseSAPRowsFromXLSX(arrayBuffer) {
   const wb = XLSX.read(arrayBuffer, { type: "array" });
   let allRaw = [];
   wb.SheetNames.forEach(sheetName => {
-    const raw = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: "" });
-    if (raw.length === 0) return;
-    const hasKolomMaterial = Object.keys(raw[0]).some(k => k.trim() === "Material");
-    if (hasKolomMaterial) allRaw = allRaw.concat(raw);
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: "", raw: false });
+    if (!rows.length) return;
+    const norm = v => String(v ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const aliases = {
+      katalog: ["material", "matl"],
+      nama: ["materialdescription", "materialdesc", "description"],
+      satuan: ["baseunitofmeasure", "unit", "uom"],
+      qty: ["unrestrictedusestock", "uustock", "unrestrictedstock", "qty", "quantity"],
+      valuationType: ["valuationtype", "valtype"],
+      harga: ["hargasatuan", "unitprice", "price"],
+      valuationDesc: ["valuationdescription", "valuationdesc"],
+    };
+    const findHeader = (row, names) => row.findIndex(cell => names.includes(norm(cell)));
+    const headerIndex = rows.findIndex(row => {
+      const materialIdx = findHeader(row, aliases.katalog);
+      const qtyIdx = findHeader(row, aliases.qty);
+      return materialIdx >= 0 && qtyIdx >= 0;
+    });
+    if (headerIndex < 0) return;
+    const header = rows[headerIndex];
+    const indexes = Object.fromEntries(Object.entries(aliases).map(([field, names]) => [field, findHeader(header, names)]));
+    for (const row of rows.slice(headerIndex + 1)) {
+      const material = indexes.katalog >= 0 ? row[indexes.katalog] : "";
+      if (!String(material ?? "").trim()) continue;
+      const value = field => indexes[field] >= 0 ? row[indexes[field]] : "";
+      allRaw.push({
+        Material: value("katalog"),
+        "Material Description": value("nama"),
+        "Base Unit of Measure": value("satuan"),
+        "Unrestricted Use Stock": value("qty"),
+        "Valuation Type": value("valuationType"),
+        "Harga Satuan": value("harga"),
+        "Valuation Description": value("valuationDesc"),
+      });
+    }
   });
   return allRaw.map(obj => mapSAPRow(obj)).filter(r => r && r.katalog);
 }
@@ -198,6 +229,21 @@ export function parseIndoNumber(raw) {
   return parseFloat(cleaned) || 0;
 }
 
+// Angka dari SAP: koma = desimal, titik = ribuan. Satuan/teks di belakang angka diabaikan.
+export function parseSAPNumber(raw) {
+  const s = String(raw ?? "").trim().replace(/[^\d.,-]/g, "");
+  if (!s) return 0;
+  if (s.includes(",")) return parseFloat(s.replace(/\./g, "").replace(",", ".")) || 0;
+  return parseFloat(s.replace(/\./g, "")) || 0;
+}
+
+// Angka yang diketik di aplikasi: titik = desimal, koma = ribuan (format tampilan id-ID).
+export function parseAppNumber(raw) {
+  const s = String(raw ?? "").trim().replace(/[^\d.,-]/g, "");
+  if (!s) return 0;
+  return parseFloat(s.replace(/,/g, "")) || 0;
+}
+
 export function mapSAPRow(obj) {
   // Normalize key lookup - try exact then trimmed
   const get = (key) => (obj[key] ?? obj[key.trim()] ?? "").toString().trim();
@@ -211,8 +257,8 @@ export function mapSAPRow(obj) {
   // punya heuristik titik-ribuan vs desimal. Inkonsistensi ini sumber bug qty "103,5 meter"
   // kebaca "1.035" yang dilaporkan user 2026-07-07 — SANGAT BERBAHAYA karena mendistorsi qty
   // stok. Lihat definisi parseIndoNumber untuk aturan lengkapnya.
-  const qty = parseIndoNumber(get("Unrestricted Use Stock"));
-  const harga = Math.round(parseIndoNumber(get("Harga Satuan")));
+  const qty = parseSAPNumber(get("Unrestricted Use Stock"));
+  const harga = Math.round(parseSAPNumber(get("Harga Satuan")));
 
   const valType = get("Valuation Type").toUpperCase();
   const digitCount = katalog.length;

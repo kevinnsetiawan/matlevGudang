@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { UPT } from "../constants.js";
 import { supabase } from "../supabaseClient.js";
-import { fmtDateOnly, parseIndoNumber, uid } from "../lib/utils.js";
+import { fmtDateOnly, parseSAPNumber, uid } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { normalizeKatalog } from "../lib/sap.js";
 import { logAudit } from "../lib/audit.js";
@@ -61,18 +61,16 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
       const desc = String(row["Material Description"]||row["material description"]||"").trim();
       const satuan = String(row["Base Unit of Measure"]||"").trim() || "BH";
       // Dulu SELALU menghapus semua titik dulu baru konversi koma — kalau nilai aslinya pakai
-      // titik sebagai TANDA DESIMAL (mis. "103.5", bukan ribuan), titiknya ikut terhapus jadi
-      // "1035" (SANGAT BERBAHAYA, qty stok terdistorsi 10x). Sekarang pakai parseIndoNumber yang
-      // membedakan titik-ribuan vs titik-desimal berdasar polanya, bukan asumsi buta (bug
-      // dilaporkan user 2026-07-07).
-      const qty = parseIndoNumber(row["Unrestricted Use Stock"]||row["unrestricted use stock"]);
+      // SAP memakai koma sebagai desimal dan titik sebagai pemisah ribuan. Jangan pakai parser
+      // angka aplikasi di jalur ini: "2,627 M" harus menjadi 2.627, bukan 2627.
+      const qty = parseSAPNumber(row["Unrestricted Use Stock"]||row["unrestricted use stock"]);
       const valType = String(row["Valuation Type"]||"").trim().toUpperCase();
-      const harga = parseIndoNumber(row["Harga Satuan"]);
+      const harga = parseSAPNumber(row["Harga Satuan"]);
       const materialType = String(row["Material Type"]||"").trim().toUpperCase();
       const plant = String(row["Plant"]||"").trim();
-      const qiStock = parseIndoNumber(row["Quality Inspection Stock"]);
-      const blockedStock = parseIndoNumber(row["Blocked Stock"]);
-      const transitStock = parseIndoNumber(row["In Transit Stock"]);
+      const qiStock = parseSAPNumber(row["Quality Inspection Stock"]);
+      const blockedStock = parseSAPNumber(row["Blocked Stock"]);
+      const transitStock = parseSAPNumber(row["In Transit Stock"]);
 
       const kodePanjang10 = noKat.length === 10;
       let jenisBarang;
