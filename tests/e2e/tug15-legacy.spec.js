@@ -355,6 +355,17 @@ test("row mapping canonicalizes inbound catalog ID mismatch to stock catalog", a
   expect(result).toEqual({ ids:["K-STOCK","K-STOCK"], saldo:0 });
 });
 
+test("legacy outgoing is reconciled by a Migrasi Data baseline", async ({ isolatedPage:page }) => {
+  await openApp(page);
+  const result = await page.evaluate(async () => {
+    const { buildMutasiRows } = await import("/src/lib/supabaseSync.js");
+    const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", source:"ALL", searchText:"", docTypes:["TUG9"] };
+    return buildMutasiRows([], [{ id:"K-LA", katalog:"1002090509", name:"LA 150kV", satuan:"SET" }], [{ id:"S-LA", katalogId:"K-LA", qty:0 }], filter, [], [{ id:"L-6", doc_type:"TUG9", doc_id:"TUG/6", tanggal:"2025-01-01", jenis_transaksi:"KELUAR", no_katalog:"2090509", nama_material:"LA 150kV", qty:6 }]);
+  });
+  expect(result.some(row => row.tugBaDoc === "Migrasi Data" && row.masuk === 6)).toBeTruthy();
+  expect(result.filter(row => row.katalogId === "K-LA").at(-1).saldoAkhir).toBe(0);
+});
+
 test.describe("long monthly PDF", () => {
   const longTxns = Array.from({ length:26 }, (_, index) => {
     const date = new Date(Date.UTC(2024 + Math.floor(index / 12), index % 12, 1)).getTime();

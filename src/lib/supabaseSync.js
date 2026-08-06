@@ -8,6 +8,7 @@ import { getSAPLabel } from "./ragShared.mjs";
 import { getSAPStatus } from "./sap.js";
 import { syncMasterTable } from "./masterSync.js";
 import { isDemoMode } from "./demo.js";
+import { normalizeKatalogCode } from "./normalizeKatalogCode.js";
 
 // Marker sync harus mengikuti endpoint. Jangan baca marker global lama: marker
 // dari Supabase Cloud tidak boleh menekan recheck idempoten ke self-host baru.
@@ -679,14 +680,32 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
   // dihitung MUNDUR dari qty stok nyata (bukan qty stok polos) supaya tidak dobel-hitung
   // kalau material sudah punya transaksi tercatat. Hanya untuk katalog yang benar-benar
   // tidak punya arsip lama — kalau ada arsip, arsip itulah awal mulanya.
-  const legacyKatalogCodes = new Set(legacyRows.map(item => String(item.no_katalog || "").trim()).filter(c => c && c !== "-"));
   const liveByKatalog = new Map();
   rows.forEach(r => {
     if (r.source !== "BARU" || r.affectsSaldo === false) return;
     if (!r.katalogId || r.katalogId === "-") return;
-    if (legacyKatalogCodes.has(String(r.katalog || "").trim())) return;
     if (!liveByKatalog.has(r.katalogId)) liveByKatalog.set(r.katalogId, []);
     liveByKatalog.get(r.katalogId).push(r);
+  });
+  // Arsip legacy ikut rekonsiliasi saldo, tetapi tetap ditampilkan sebagai
+  // baris LAMA di bawah. Cocokkan kode setelah normalisasi AppSheet agar
+  // histori lama tidak memutus baseline atau membuat saldo dobel.
+  const katalogByCode = new Map(katalogList.map(k => [normalizeKatalogCode(k.katalog), k]).filter(([code]) => code));
+  legacyRows.forEach(item => {
+    const kat = katalogByCode.get(normalizeKatalogCode(item.no_katalog));
+    if (!kat) return;
+    const stock = (stocks || []).find(s => s.katalogId === kat.id);
+    if (!stock) return;
+    if (!liveByKatalog.has(kat.id)) liveByKatalog.set(kat.id, []);
+    const qty = Number(item.qty || 0) || 0;
+    const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
+    const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
+    liveByKatalog.get(kat.id).push({
+      katalogId: kat.id, katalog: kat.katalog, deskripsi: kat.name, satuan: kat.satuan || "-",
+      merk: kat.merk || kat.merek || "-", type: kat.type || kat.tipe || "-", sapStatus: getSAPStatus(kat.katalog),
+      sapLabel: getSAPLabel(kat.katalog), jenisBarang: stock.jenisBarang || "Persediaan", warehouseName: "Tidak tercatat",
+      masuk: isMasuk ? qty : 0, keluar: isKeluar ? qty : 0, affectsSaldo: true, ts: item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0,
+    });
   });
   liveByKatalog.forEach((events, kid) => {
     const currentQty = (stocks || []).filter(s => s.katalogId === kid).reduce((a, s) => a + (s.qty || 0), 0);
@@ -720,6 +739,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
       if (!docTypes.includes(item.doc_type)) return;
       const katalog = item.no_katalog || "-";
       const deskripsi = item.nama_material || "-";
+      const matchedKatalog = katalogByCode.get(normalizeKatalogCode(katalog));
       const selectedKatalog = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
       // Kode legacy tidak punya FK ke master aktif; filter barang hanya boleh memakai
       // kecocokan kode persis agar arsip tidak "divalidasi" atau dipetakan ulang.
@@ -739,7 +759,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
         tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
         keterangan: item.catatan || item.unit_lawan || "-",
         tanggalMutasi: item.tanggal || "-", ts,
-        katalogId: "-", sapStatus:"ARSIP", sapLabel:"Arsip lama", jenisBarang:"-",
+        katalogId: matchedKatalog?.id || "-", sapStatus:"ARSIP", sapLabel:"Arsip lama", jenisBarang:"-",
         docType:item.doc_type || "-", lokasiId:"", lokasiKode:item.lokasi_kode || "-",
         warehouseName:legacyWarehouseName(item.lokasi_kode, item.source_upt),
         eventKind:String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate:item.tanggal || "-",
@@ -748,7 +768,9 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
         contractRefs:"-", documentRefs:item.doc_id || "-", notes:item.catatan || "-",
         storageLocation:item.lokasi_kode || "-",
         quality:[item.match_confidence !== null && item.match_confidence !== undefined ? `Match ${item.match_confidence}%` : "", item.issue_flags].filter(Boolean).join(" | ") || "-",
-        source:"LAMA", sourceLabel:"Lama", materialKey:historyMaterialKey(katalog, deskripsi, "legacy", item.id || item.sync_key || item.item_id),
+        source:"LAMA", sourceLabel:"Lama", materialKey:matchedKatalog
+          ? historyMaterialKey(matchedKatalog.katalog, matchedKatalog.name, "live")
+          : historyMaterialKey(katalog, deskripsi, "legacy", item.id || item.sync_key || item.item_id),
         legacyId:item.id, legacyDocId:item.doc_id || null, legacySyncKey:item.sync_key, fotoBarangUrl:item.foto_barang_url || null,
         issueFlags:item.issue_flags || null, matchConfidence:item.match_confidence,
       });
@@ -760,7 +782,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
   const saldoMap = {};
   return visibleRows.map((r,i) => {
     if (r.affectsSaldo === false) return { ...r, saldoAwal:null, saldoAkhir:null, no:i+1 };
-    const saldoKey = r.source === "LAMA" ? `legacy:${r.materialKey}` : `live:${r.katalogId}`;
+    const saldoKey = r.source === "LAMA" && r.katalogId === "-" ? `legacy:${r.materialKey}` : `live:${r.katalogId}`;
     const prev = saldoMap[saldoKey] || 0;
     const saldo = prev + r.masuk - r.keluar;
     saldoMap[saldoKey] = saldo;
