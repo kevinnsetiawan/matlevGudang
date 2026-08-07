@@ -5435,6 +5435,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             gudangCapacityList={visibleCapacityList}
             gudangCapacityImports={gudangCapacityImports}
             gudangList={visibleGudangList}
+            uptList={uptList}
             subGudangList={subGudangList}
             lokasiList={lokasiList}
             stocks={enrichedStocks}

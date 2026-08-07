@@ -9,14 +9,14 @@ const mapPercent = value => {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
 };
-export function PetaGudangTab({ gudangList = [], subGudangList = [], lokasiList = [], stocks = [], sty, C, gudangCapacityList = [] }) {
+export function PetaGudangTab({ gudangList = [], subGudangList = [], lokasiList = [], stocks = [], sty, C, gudangCapacityList = [], uptOptions = [], uptFilter = "", setUptFilter }) {
   const [selectedGudangId, setSelectedGudangId] = useState(gudangList[0]?.id || "");
   const [selectedScopeId, setSelectedScopeId] = useState("main");
   const [hoveredLokasi, setHoveredLokasi] = useState(null);
   const [filterHanyaBerisi, setFilterHanyaBerisi] = useState(false);
 
   useEffect(() => {
-    if (!gudangList.length) return;
+    if (!gudangList.length) { if (selectedGudangId) setSelectedGudangId(""); return; } // UPT tanpa gudang: kosongkan pilihan supaya sub-gudang tak nyangkut di UPT lain
     if (gudangList.some(g => g.id === selectedGudangId)) return;
     const withContent = gudangList.find(g => g.denahImageData || subGudangList.some(s => s.gudangId === g.id && s.denahImageData));
     setSelectedGudangId((withContent || gudangList[0]).id);
@@ -68,19 +68,32 @@ export function PetaGudangTab({ gudangList = [], subGudangList = [], lokasiList 
   };
 
   return <div>
-    <div className="warehouse-map-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-      <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>Visualisasi blok dan material pada denah gudang. Koordinat peta bersifat read-only.</p>
-      <div className="warehouse-map-toolbar__controls" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+    <div className="warehouse-map-toolbar" style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 12, marginBottom: 10, padding: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12 }}>
+      {uptOptions.length > 0 && (
+        <div className="warehouse-map-toolbar__field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: ".5px" }}>1. UPT</span>
+          <select aria-label="Filter UPT" style={{ ...sty.select, minHeight: 44, width: 190 }} value={uptFilter} onChange={e => setUptFilter?.(e.target.value)}>
+            <option value="">Semua UPT</option>
+            {uptOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="warehouse-map-toolbar__field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: ".5px" }}>{uptOptions.length > 0 ? "2. " : ""}Gudang</span>
         <select aria-label="Pilih Gudang" style={{ ...sty.select, minHeight: 44, width: 200 }} value={selectedGudangId} onChange={e => { setSelectedGudangId(e.target.value); setSelectedScopeId("main"); setHoveredLokasi(null); }}>
-          {gudangList.map(g => <option key={g.id} value={g.id}>{g.nama}</option>)}
+          {gudangList.length ? gudangList.map(g => <option key={g.id} value={g.id}>{g.nama}</option>) : <option value="">— tidak ada gudang —</option>}
         </select>
+      </div>
+      <div className="warehouse-map-toolbar__field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: ".5px" }}>{uptOptions.length > 0 ? "3. " : ""}Denah</span>
         <select aria-label="Pilih tampilan denah" style={{ ...sty.select, minHeight: 44, width: 220 }} value={selectedScopeId} onChange={e => selectScope(e.target.value)}>
           <option value="main">Gudang utama{gudang?.denahImageData ? "" : " (belum ada denah)"}</option>
           {mappedSubs.map(s => <option key={s.id} value={s.id}>Sub Gudang — {s.nama}</option>)}
         </select>
-        <label style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6, minHeight: 44 }}><input type="checkbox" checked={filterHanyaBerisi} onChange={e => setFilterHanyaBerisi(e.target.checked)} /> Hanya blok berisi barang</label>
       </div>
+      <label style={{ fontSize: 12, color: C.muted, display: "flex", alignItems: "center", gap: 6, minHeight: 44, marginLeft: "auto" }}><input type="checkbox" checked={filterHanyaBerisi} onChange={e => setFilterHanyaBerisi(e.target.checked)} /> Hanya blok berisi barang</label>
     </div>
+    <p style={{ color: C.muted, fontSize: 12, margin: "0 0 16px" }}>Visualisasi blok dan material pada denah gudang. Koordinat peta bersifat read-only.</p>
     {!gudangList.length && <div style={{ ...sty.card, textAlign: "center", padding: 60, color: C.muted }}>Belum ada Gudang.</div>}
     {gudang && !scope?.image && <div style={{ ...sty.card, textAlign: "center", padding: 48, color: C.muted }}>Denah {scope?.name || gudang.nama} belum diupload.</div>}
     {scope?.image && <>
