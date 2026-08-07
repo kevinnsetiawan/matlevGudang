@@ -76,7 +76,7 @@ export function AIAgentPage({
             <div className="ai-conversation__avatar" aria-hidden="true">PW</div>
             <div><span>Asisten operasional WARNOTO</span><strong>Pak War</strong><small>Terhubung dengan data Gudang {uptNama}</small></div>
           </div>
-          {hasRole(currentUser,"ADMIN") && <div className="ai-conversation__admin">
+          {hasRole(currentUser,"ADMIN","ADMIN_LOG_PUSAT","ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT") && <div className="ai-conversation__admin">
             <button disabled={syncPct!==null} onClick={handleSync}>{syncPct!==null?`Sinkron ${syncPct}%`:"Sinkron data"}</button>
             {syncPct!==null && <span className="ai-sync-mini"><i style={{width:`${syncPct}%`}}/></span>}
             <button className={view==="faq"?"is-active":""} onClick={()=>setView(value=>value==="faq"?"chat":"faq")}>FAQ</button>
