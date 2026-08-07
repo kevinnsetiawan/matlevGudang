@@ -337,6 +337,7 @@ export default function PLNWarehouse() {
   const [dashTab, setDashTab] = useState("ringkasan"); // ringkasan terpadu | overview gudang
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
+  const [stockUptFilter, setStockUptFilter] = useState(""); // "" = semua; hanya dipakai viewer multi-UPT (UIT/Pusat)
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(10);
   const [katalogPage, setKatalogPage] = useState(1);
@@ -5601,6 +5602,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const lowStocks = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
   const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
   const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
+  // Filter UPT untuk Data Stok — HANYA viewer multi-UPT: Pusat/SUPERADMIN (dataScope null) lihat
+  // semua UPT; UIT (dataScope >1) lihat UPT di UIT-nya. Akun 1 UPT tak dapat dropdown (kosong).
+  const stockUptFilterOptions = dataScope === null ? uptList
+    : (Array.isArray(dataScope) && dataScope.length > 1 ? uptList.filter(u => dataScope.includes(u.id)) : []);
   const filteredStocks = scopedEnrichedStocks.filter(s=>{
     const lokForSearch = lokasiList.find(l=>l.id===s.lokasiId);
     const gdgForSearch = (lokForSearch?.gudangId || s.gudangId)
@@ -5616,7 +5621,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
     const gid = lokasiList.find(l=>l.id===s.lokasiId)?.gudangId || s.gudangId || null;
     const mg = canAccessGudang(currentUser, gid);
-    return ms && mj && mg;
+    const mu = !stockUptFilter || (gudangList.find(g=>g.id===gid)?.uptId === stockUptFilter);
+    return ms && mj && mg && mu;
   });
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
@@ -5885,6 +5891,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             search={search} setSearch={setSearch}
             setPhotoSearchImg={setPhotoSearchImg} setPhotoSearchOpen={setPhotoSearchOpen}
             filterJenis={filterJenis} setFilterJenis={setFilterJenis}
+            stockUptFilter={stockUptFilter} setStockUptFilter={setStockUptFilter} stockUptFilterOptions={stockUptFilterOptions}
             filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
             photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}
             photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
