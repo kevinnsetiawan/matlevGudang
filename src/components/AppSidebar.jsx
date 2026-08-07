@@ -76,7 +76,7 @@ export function AppSidebar({
                   {tugExpanded && !sidebarCompact && (
                     <div className="sidebar-subnav" style={{marginBottom:4}}>
                       {(isUltgRole ? [
-                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Minta Barang",defaultSub:"TUG5"},
+                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Reservasi",defaultSub:"TUG5"},
                       ] : [
                         {id:"penerimaan",icon:<SidebarIcon name="inbound" size={16}/>,label:"Barang Masuk",defaultSub:"TUG3"},
                         {id:"pengeluaran",icon:<SidebarIcon name="outbound" size={16}/>,label:"Barang Keluar",defaultSub:"TUG9"},

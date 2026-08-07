@@ -97,13 +97,13 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
       {/* TUG-5 dari ULTG */}
       {(hasRole(currentUser, "ADMIN_ULTG","MGR_ULTG","ADMIN","TL")) && (
         <>
-          <div style={{fontSize:13,fontWeight:800,color:"#0369a1",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏘️ TUG-5 — Permintaan Material dari ULTG</div>
+          <div style={{fontSize:13,fontWeight:800,color:"#0369a1",borderBottom:`1px solid ${C.border}`,paddingBottom:6,marginTop:8,marginBottom:4}}>🏘️ Slip Reservasi — dari ULTG</div>
           {currentUser.role==="MGR_ULTG" && !currentUser.ultgId && (
             <div style={{...sty.card,background:"#fef2f2",border:"1px solid #fecaca",color:"#991b1b",fontSize:12,padding:12,marginBottom:8}}>
               ⚠️ Akun kamu belum terhubung ke unit ULTG manapun, jadi tombol "Setujui" tidak akan muncul di list manapun. Hubungi Admin untuk melengkapi field ULTG di profil kamu.
             </div>
           )}
-          {tug5UltgTxns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada TUG-5 dari ULTG.</div>}
+          {tug5UltgTxns.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20}}>Belum ada Reservasi dari ULTG.</div>}
           {tug5UltgTxns.slice(ultgListPage*5, ultgListPage*5+5).map(t=>{
             const ultg = (ultgList||[]).find(u=>u.id===t.ultgId);
             const creator = users.find(u=>u.id===t.createdBy)||{};
@@ -160,7 +160,7 @@ export function TUG5Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
                   {adoptedTug9?.status==="DRAFT" && hasRole(currentUser, "ADMIN","TL") && (
                     <button style={sty.btn("primary","sm")} onClick={()=>openDraftTug9(adoptedTug9)}>Lengkapi & Ajukan TUG-9</button>
                   )}
-                  <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat Dokumen TUG-5</button>
+                  <button style={sty.btn("ghost","sm")} onClick={()=>setDocPreview(t)}>📄 Lihat Slip Reservasi</button>
                 </div>
               </div>
             );

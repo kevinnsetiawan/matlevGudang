@@ -15,7 +15,7 @@ import { normalizeKatalogCode } from "./src/lib/normalizeKatalogCode.js";
 import { expandMonthlySeriesFromMap, tsbMonthlyForecast } from "./src/lib/tsbForecast.js";
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
-import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
+import { generateDocNumbers, generateReservasiDocNo, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
 import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
@@ -1674,6 +1674,14 @@ export default function PLNWarehouse() {
     if (currentUser && tab !== "dashboard" && !can(currentUser, "menu." + tab, rolePerms)) setTab("dashboard");
   }, [tab, currentUser, rolePerms]);
 
+  // Role ULTG cuma punya subnav Reservasi (TUG5). Default state app = penerimaan/TUG3
+  // → refresh di tab TUG menampilkan TUG-3/10 yang tidak relevan. Clamp ke permintaan/TUG5.
+  useEffect(() => {
+    if (!currentUser || !ULTG_ROLES.includes(currentUser.role)) return;
+    if (tugGroup !== "permintaan") setTugGroup("permintaan");
+    if (tugSubTab !== "TUG5") setTugSubTab("TUG5");
+  }, [currentUser, tugGroup, tugSubTab]);
+
   // Refresh transaksi TUG canonical dari server tiap kali tab Approval dibuka.
   // tug_transactions TIDAK punya realtime subscription (beda dari stocks) dan cuma
   // di-load sekali saat login — kalau approver lain (mis. TL) baru approve di
@@ -2167,8 +2175,8 @@ export default function PLNWarehouse() {
   // Cari barang dengan foto — dua mode:
   //  • "bentuk"   : embed foto query (Cohere image) → cocokkan ke stock_photo_embeddings
   //                 via RPC match_stock_photos (skor tertinggi per katalog, ≥75%, top 10).
-  //                 p_upt=null: WARNOTO saat ini single-UPT (Surabaya), semua embedding
-  //                 memang Surabaya. Saat multi-UPT nanti, isi p_upt sesuai UPT viewer.
+  //                 p_upt=null di RPC (katalog lintas-UPT); filter UPT client-side lewat
+  //                 allowedKatalog (katalog yang punya stok di scope efektif / stockUptFilter).
   //  • "nameplate": OCR.space baca teks nameplate di foto → cocokkan ke Master
   //                 Katalog (nomor katalog/nama/type/merk) DAN ke teks foto
   //                 nameplate tersimpan (fotoNameplateOcr) — matchNameplateAll.
@@ -2176,11 +2184,26 @@ export default function PLNWarehouse() {
     if (!photoSearchImg) return;
     setPhotoSearchLoading(true);
     try {
+      // Katalog hasil pencarian = master lintas-UPT. Filter benar = "katalog yang punya
+      // stok dalam scope efektif" (stockUptFilter kalau dipilih, else getScopeUptIds).
+      const uptOf = (s) => {
+        const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
+        return gid ? (gudangList.find(g => g.id === gid)?.uptId || null) : null;
+      };
+      const scope = getScopeUptIds(currentUser, uptList);
+      const allowedKatalog = new Set(
+        stocks
+          .filter(s => stockUptFilter ? uptOf(s) === stockUptFilter : inScopeUpt(uptOf(s), scope))
+          .map(s => String(s.katalog))
+          .filter(k => k && k !== "undefined" && k !== "null")
+      );
+      const keepInScope = (rows) => (rows || []).filter(r => allowedKatalog.has(String(r.katalog)));
+
       if (photoSearchMode === "nameplate") {
         const text = await ocrSpaceOCR(photoSearchImg);
         setPhotoSearchOcrText(text);
         setPhotoSearchResultMode("nameplate");
-        setPhotoSearchResults(matchNameplateAll(text, katalogList, stocks));
+        setPhotoSearchResults(keepInScope(matchNameplateAll(text, katalogList, stocks)));
         setPhotoSearchOpen(false);
       } else {
         if (!supabase) return;
@@ -2191,7 +2214,7 @@ export default function PLNWarehouse() {
         if (error) throw error;
         setPhotoSearchOcrText("");
         setPhotoSearchResultMode("bentuk");
-        setPhotoSearchResults(data || []);
+        setPhotoSearchResults(keepInScope(data || []));
         setPhotoSearchOpen(false);
       }
     } catch (e) {
@@ -3883,12 +3906,16 @@ export default function PLNWarehouse() {
     }
 
     if (docType === "TUG5" && formData.sourceType === "ULTG") {
-      // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
+      // Slip Reservasi dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
       // Setelah approve, jadi pengajuan yang bisa di-adopt Admin/TL UPT induk (bukan auto-chain TUG-7).
+      const parentUptId = ultgList.find(u => u.id === formData.ultgId)?.parentUptId || currentUser?.uptId;
+      const uptKode = uptList.find(u => u.id === parentUptId)?.kode || "UPT-SBY";
+      docNumbers = { ...docNumbers, tug5: generateReservasiDocNo(seq, Date.now(), uptKode) };
       const nt5u = {
         id: txnId,
         docType, docSeq: seq, docNumbers,
         ...formData,
+        uptId: formData.uptId || parentUptId,
         stage: "PENDING_MGR_ULTG",
         status: "PENDING",
         requiredApprover: "MGR_ULTG",
@@ -4374,25 +4401,25 @@ export default function PLNWarehouse() {
   // ══════════════════════════════════════════════════════════════════
 
   async function approveTUG5_MgrULTG(txn) {
-    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
+    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menyetujui Reservasi ini.","error"); return; }
     if (currentUser.role !== "SUPERADMIN") {
       if (!currentUser.ultgId) { showToast("Akun kamu belum terhubung ke unit ULTG manapun. Hubungi Admin untuk melengkapi profil.","error"); return; }
-      if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
+      if (txn.ultgId !== currentUser.ultgId) { showToast("Reservasi ini bukan dari unit ULTG kamu.","error"); return; }
     }
-    if (txn.stage !== "PENDING_MGR_ULTG") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
+    if (txn.stage !== "PENDING_MGR_ULTG") { showToast("Reservasi ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED_ULTG", status:"APPROVED", approvedByMgrUltg:currentUser.id, approvedAtMgrUltg:Date.now()} : t);
     setTxns(newTxns);
     await saveToCloud({txns: newTxns});
     logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug5, {stage:"APPROVED_ULTG"});
-    showToast(`✅ ${txn.docNumbers.tug5} disetujui! Menunggu di-adopt oleh Admin/TL UPT.`);
+    showToast(`✅ Reservasi ${txn.docNumbers.tug5} disetujui! Siap di-adopt Admin/TL UPT.`);
   }
   async function rejectTUG5_MgrULTG(txn, reason) {
-    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menolak TUG-5 ini.","error"); return; }
+    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menolak Reservasi ini.","error"); return; }
     if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
     const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
     setTxns(newTxns); await saveToCloud({txns: newTxns});
     logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug5, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug5} DITOLAK oleh Manager ULTG.`, "error");
+    showToast(`❌ Reservasi ${txn.docNumbers.tug5} DITOLAK oleh Manager ULTG.`, "error");
   }
   // Admin/TL UPT induk "mengadopsi" pengajuan ULTG → auto-create draft TUG-9 (editable, stok dipilih sendiri)
   async function adoptTUG5ULTG(txn) {
@@ -4407,7 +4434,7 @@ export default function PLNWarehouse() {
       docType: "TUG9", draftLabel:"DRAFT — nomor resmi saat diajukan",
       uptId: currentUserUptId || currentUser?.uptId || "",
       tug5Id: txn.id, tug5DocNo: txn.docNumbers.tug5,
-      namaPekerjaan: txn.keteranganUmum || "Permintaan Material ULTG",
+      namaPekerjaan: txn.keteranganUmum || "Reservasi Material ULTG",
       lokasiPekerjaan: ultg?.nama || "ULTG",
       perkiraanPembebanan: "", kodePerkiraan: txn.kodePerkiraan||"",
       keteranganBarang: txn.namaPekerjaan || txn.keteranganUmum || `Adopsi dari pengajuan ${ultg?.nama||""} — ${txn.docNumbers.tug5}`,
@@ -4427,7 +4454,7 @@ export default function PLNWarehouse() {
     const allTxns = [...newTxns, draftTug9];
     setTxns(allTxns);
     await saveToCloud({txns: allTxns});
-    showToast(`📋 Diadopsi! Draft TUG-9 dibuat — lengkapi & edit materialnya sebelum submit.`);
+    showToast(`📋 Reservasi diadopsi! Draft TUG-9 dibuat — lengkapi & edit materialnya sebelum submit.`);
     return draftTug9;
   }
   // Buka draft TUG-8/9 di form biasa. Nomor resmi hanya dibuat oleh RPC canonical
@@ -5288,6 +5315,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const isPengadaan = currentUser?.role === "PENGADAAN";
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
   const isUltgRole = ULTG_ROLES.includes(currentUser?.role);
+  const tugUiForUser = isUltgRole ? { ...TUG_UI, TUG5: { title:"Slip Reservasi Material", code:"RSV", chip:"Reservasi", buat:"Buat Slip Reservasi", desc:"Ajukan slip reservasi material — Admin ULTG ajukan → Manager ULTG approve → diadopsi UPT jadi TUG-9." } } : TUG_UI;
+  const tugGroupUiForUser = isUltgRole ? { ...TUG_GROUP_UI, permintaan: { icon:"📋", label:"Reservasi", hint:"Slip reservasi material dari ULTG ke UPT" } } : TUG_GROUP_UI;
   const navItems = (isPengadaan ? [
     {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
@@ -5324,7 +5353,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     dashboard: {eyebrow:"Operations Overview",title:hasRole(currentUser,"MANAGER")?"Dashboard Eksekutif":hasRole(currentUser,"ASMAN")?"Dashboard Operasional":"Dashboard Gudang"},
     stock: {eyebrow:"Inventory Control",title:"Data Stok Gudang"},
     master: {eyebrow:"Master Data",title:masterPageTitle},
-    transaction: {eyebrow:(TUG_UI[tugSubTab]||{}).code||"TUG",title:(TUG_UI[tugSubTab]||{}).title||"Transaksi TUG"},
+    transaction: {eyebrow:(tugUiForUser[tugSubTab]||{}).code||"TUG",title:(tugUiForUser[tugSubTab]||{}).title||"Transaksi TUG"},
     approval: {eyebrow:"Decision Center",title:"Approval"},
     heavyEquipment: {eyebrow:"Fleet Operations",title:"Alat Berat & Peminjaman"},
     attb: {eyebrow:"Asset Disposal Governance",title:"ATTB — Penghapusan Aset"},
@@ -5336,6 +5365,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     inspeksiMaterial: {eyebrow:"Material Assurance",title:"Inspeksi Material Cadang"},
     ai: {eyebrow:"Decision Support",title:"Pak War — Asisten Gudang"},
   }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
+  const tug5UptKode = txnForm?.docType === "TUG5" && txnForm?.sourceType === "ULTG"
+    ? uptList.find(u => u.id === (ultgList.find(x => x.id === txnForm.ultgId)?.parentUptId || currentUser?.uptId))?.kode || "UPT-SBY"
+    : null;
 
   return (
     <div className="app-shell" data-current-tab={tab} style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
@@ -5489,7 +5521,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="transaction" && (
           <TransactionHubTab
             C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
-            TUG_UI={TUG_UI} TUG_GROUP_UI={TUG_GROUP_UI}
+            TUG_UI={tugUiForUser} TUG_GROUP_UI={tugGroupUiForUser}
             tugGroup={tugGroup} tugSubTab={tugSubTab} setTugSubTab={setTugSubTab}
             activeTugSummary={activeTugSummary} rolePerms={rolePerms}
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
@@ -5888,7 +5920,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {gantiPasswordModal && <GantiPasswordModal setGantiPasswordModal={setGantiPasswordModal} gantiPasswordForm={gantiPasswordForm} setGantiPasswordForm={setGantiPasswordForm} gantiPasswordBusy={gantiPasswordBusy} submitGantiPassword={submitGantiPassword} sty={sty} />}
 
       {/* TXN MODAL - TUG5 FORM */}
-      {txnModal && txnForm && txnForm.docType==="TUG5" && <Tug5FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} uitList={uitList} ultgList={ultgList} katalogList={katalogList} tug5MaterialPage={tug5MaterialPage} setTug5MaterialPage={setTug5MaterialPage} tug5ExpandedIdx={tug5ExpandedIdx} setTug5ExpandedIdx={setTug5ExpandedIdx} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} />}
+      {txnModal && txnForm && txnForm.docType==="TUG5" && <Tug5FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} uitList={uitList} ultgList={ultgList} katalogList={katalogList} tug5MaterialPage={tug5MaterialPage} setTug5MaterialPage={setTug5MaterialPage} tug5ExpandedIdx={tug5ExpandedIdx} setTug5ExpandedIdx={setTug5ExpandedIdx} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} uptKode={tug5UptKode} />}
 
       {/* TXN MODAL - TUG9 / TUG8 FORM (outgoing material) */}
       {txnModal && txnForm && (txnForm.docType==="TUG9" || txnForm.docType==="TUG8") && <Tug98FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} gudangList={gudangList} satpamList={satpamList} enrichedStocks={enrichedStocks} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} openScanner={openScanner} handleImg={handleImg} handleMaterialImg={handleMaterialImg} editingDraftTxnId={editingDraftTxnId} setEditingDraftTxnId={setEditingDraftTxnId} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} />}

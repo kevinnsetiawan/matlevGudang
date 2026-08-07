@@ -24,6 +24,13 @@ export function generateDocNumbers(seq, date, docCode) {
   };
 }
 
+export function generateReservasiDocNo(seq, date, uptKode = "UPT-SBY") {
+  const d = new Date(date);
+  const roman = ROMAN[d.getMonth()];
+  const year = d.getFullYear();
+  return `${seq}.RSV/LOG-${uptKode}/${roman}/${year}`; // format: 13.RSV/LOG-UPT-SBY/VI/2026
+}
+
 // ─── UTILITIES ───────────────────────────────────────────────────────
 export function uid() { return "PLN" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase(); }
 
