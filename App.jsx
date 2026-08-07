@@ -4949,28 +4949,40 @@ export default function PLNWarehouse() {
     try {
       const enam_bulan_lalu = Date.now() - 180*24*60*60*1000;
       const txnRelevant = txns.filter(t=>t.status==="APPROVED" && t.createdAt>=enam_bulan_lalu);
-      // Agregasi qty+harga per katalogId (jumlah semua lokasi/blok untuk katalog yang sama)
-      // supaya chunk RAG-nya bawa angka real-time, bukan cuma deskripsi statis.
-      const stockByKatalog = {};
+      // Agregasi qty+harga per (uptId, katalogId) — chunk katalog kini per-UPT (RAG 3-tier,
+      // supaya akun UPT tidak melihat angka stok UPT lain). Katalog tanpa stok di UPT
+      // manapun dapat 1 chunk global (upt_id null, deskripsi tanpa angka).
+      const stockByUptKatalog = {}; // key `${uptId}::${katalogId}`
       enrichedStocks.forEach(s=>{
         if (!s.katalogId) return;
-        if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty:0, price:s.price||0, locations:[] };
-        stockByKatalog[s.katalogId].qty += s.qty||0;
-        if (s.qty>0) {
-          const lok = lokasiList.find(l=>l.id===s.lokasiId);
-          const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
-          stockByKatalog[s.katalogId].locations.push({ gudang: gdg?.nama||"", blok: lok?.kode||s.lokasi||"", qty: s.qty||0 });
-        }
+        const lok = lokasiList.find(l=>l.id===s.lokasiId);
+        const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
+        const uptId = gdg?.uptId;
+        if (!uptId) return;
+        const key = `${uptId}::${s.katalogId}`;
+        if (!stockByUptKatalog[key]) stockByUptKatalog[key] = { uptId, katalogId: s.katalogId, qty:0, price:s.price||0, locations:[] };
+        stockByUptKatalog[key].qty += s.qty||0;
+        if (s.qty>0) stockByUptKatalog[key].locations.push({ gudang: gdg?.nama||"", blok: lok?.kode||s.lokasi||"", qty: s.qty||0 });
       });
+      const katalogIdsWithStock = new Set(Object.values(stockByUptKatalog).map(v=>v.katalogId));
+      const katalogChunks = [
+        ...Object.values(stockByUptKatalog).map(v=>{
+          const k = katalogList.find(kk=>kk.id===v.katalogId);
+          if (!k) return null;
+          const uptNama = uptList.find(u=>u.id===v.uptId)?.nama || v.uptId;
+          return { id:`katalog_${v.uptId}_${v.katalogId}`, source_type:"katalog", source_id:v.katalogId, upt_id:v.uptId, content:`UPT ${uptNama}: ${buildKatalogRagContent(k, v)}` };
+        }).filter(Boolean),
+        ...katalogList.filter(k=>!katalogIdsWithStock.has(k.id)).map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, upt_id:null, content:buildKatalogRagContent(k, null) })),
+      ];
       // "Buku pintar" hasil kurasi Admin dari pertanyaan nyata yang dijawab buruk oleh bot —
       // diprioritaskan tinggi karena isinya jawaban resmi untuk pertanyaan yang benar-benar
       // pernah ditanyakan, bukan cuma deskripsi umum.
       const { data: faqRows } = await supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true);
 
       const chunks = [
-        ...katalogList.map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, content:buildKatalogRagContent(k, stockByKatalog[k.id]) })),
-        ...txnRelevant.map(t=>({ id:`txn_${t.id}`, source_type:"txn", source_id:t.id, content:buildTxnRagContent(t) })),
-        ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
+        ...katalogChunks,
+        ...txnRelevant.map(t=>({ id:`txn_${t.id}`, source_type:"txn", source_id:t.id, upt_id: t.uptId || users.find(u=>u.id===t.createdBy)?.uptId || null, content:buildTxnRagContent(t) })),
+        ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), upt_id:null, content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
       ];
       if (chunks.length===0) { if (!silent) showToast("Tidak ada data untuk di-index.", "error"); if (!silent) setRagSyncing(false); return; }
       // Skip chunk yang kontennya identik dengan yang sudah tersimpan — hemat kuota Cohere
@@ -5172,15 +5184,13 @@ export default function PLNWarehouse() {
     // hardcoded. Kalau Cohere/knowledge base belum siap, lewati saja (tetap
     // jawab pakai snapshot biasa) — RAG di sini bersifat tambahan, bukan
     // syarat AI Agent bisa jalan.
-    // RAG chunks (rag_chunks) belum ter-tag per-UPT — qty/lokasi di chunk katalog & txn
-    // bisa dari UPT lain, jadi untuk akun UPT-scoped RAG dilewati supaya tidak bocor data
-    // UPT lain. Snapshot di atas sudah discope. Akun global (UIT/Pusat) tetap pakai RAG.
+    // RAG chunks (rag_chunks) sekarang ter-tag per-UPT (upt_id) — match_rag_chunks
+    // menerima p_upts (null=nasional, array=UPT/UIT) jadi RAG jalan untuk semua akun.
     let ragContextText = "Belum ada hasil pencarian (Knowledge Base RAG belum disinkron atau belum terkonfigurasi).";
-    if (!assistantGlobal) ragContextText = `Knowledge Base RAG dilewati untuk akun UPT — jawab hanya dari data ${currentUptNama} pada snapshot di atas.`;
     try {
-      if (assistantGlobal && supabase && import.meta.env.VITE_COHERE_API_KEY) {
+      if (supabase && import.meta.env.VITE_COHERE_API_KEY) {
         const [queryVector] = await cohereEmbed([msg], "search_query");
-        const { data: matches, error } = await supabase.rpc("match_rag_chunks", { query_embedding: queryVector, match_count: 8 });
+        const { data: matches, error } = await supabase.rpc("match_rag_chunks", { query_embedding: queryVector, match_count: 8, p_upts: dataScope });
         if (error) throw error;
         if (matches && matches.length>0) {
           ragContextText = matches.map(m=>`- (relevansi ${(m.similarity*100).toFixed(0)}%) ${m.content}`).join("\n");
