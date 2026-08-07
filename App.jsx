@@ -5557,9 +5557,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // akun UPT → nama UPT. Dulu selalu fallback konstanta UPT ("UPT Surabaya") untuk akun
   // tanpa uptId, jadi nasional/UIT keliru menampilkan "UPT Surabaya".
   const currentUptNama =
-    dataScope === null ? "Semua UPT"
+    dataScope === null ? "PLN Pusat"
     : (currentUser?.uitId && !currentUser?.uptId)
-      ? ((uitList.length ? uitList : []).find(u => u.id === currentUser.uitId)?.nama || "UIT")
+      ? (((uitList.length ? uitList : []).find(u => u.id === currentUser.uitId)?.kode || "UIT").replace(/-/g, " "))
       : ((uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId)?.nama || UPT);
   const heavyEquipmentOverdueCount = heavyEquipmentLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE" &&
     (getHeavyEquipmentLoanOwnerUpt(l)===myUptForHeavyEquipment || getHeavyEquipmentLoanRequesterUpt(l)===myUptForHeavyEquipment)).length;
