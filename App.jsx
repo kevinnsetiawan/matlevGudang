@@ -4972,7 +4972,11 @@ export default function PLNWarehouse() {
           const uptNama = uptList.find(u=>u.id===v.uptId)?.nama || v.uptId;
           return { id:`katalog_${v.uptId}_${v.katalogId}`, source_type:"katalog", source_id:v.katalogId, upt_id:v.uptId, content:`UPT ${uptNama}: ${buildKatalogRagContent(k, v)}` };
         }).filter(Boolean),
-        ...katalogList.filter(k=>!katalogIdsWithStock.has(k.id)).map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, upt_id:null, content:buildKatalogRagContent(k, null) })),
+        // Chunk global "katalog tanpa stok" (upt_id null, tampil ke semua) hanya dibuat
+        // oleh akun NASIONAL (Pusat/SUPERADMIN) / nightly_sync yang membaca stok semua UPT.
+        // Akun scoped hanya melihat stok UPT-nya, jadi "tanpa stok" versinya keliru untuk
+        // katalog yang sebenarnya bersaldo di UPT lain — biarkan global dikelola nasional.
+        ...(dataScope === null ? katalogList.filter(k=>!katalogIdsWithStock.has(k.id)).map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, upt_id:null, content:buildKatalogRagContent(k, null) })) : []),
       ];
       // "Buku pintar" hasil kurasi Admin dari pertanyaan nyata yang dijawab buruk oleh bot —
       // diprioritaskan tinggi karena isinya jawaban resmi untuk pertanyaan yang benar-benar
@@ -5003,8 +5007,15 @@ export default function PLNWarehouse() {
       // Hapus hanya chunk lama milik sinkron browser (katalog/txn/FAQ). Chunk
       // `mutasi` dibuat nightly_sync.mjs dan tidak boleh ikut terhapus di sini.
       const currentIds = new Set(chunks.map(c=>c.id));
-      const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "txn", "faq"]);
-      const toDelete = (existing||[]).filter(r=>!currentIds.has(r.id)).map(r=>r.id);
+      const { data: existing } = await supabase.from("rag_chunks").select("id, upt_id").in("source_type", ["katalog", "txn", "faq"]);
+      // Akun scoped (UPT/UIT) HANYA boleh menghapus chunk orphan milik UPT dalam cakupannya.
+      // Tanpa guard ini, sync Admin UPT-A menghapus chunk UPT-B (tampak "orphan" dari sisi A,
+      // karena client A cuma memuat data UPT-A). Chunk shared (upt_id null, mis. FAQ/global)
+      // & chunk UPT di luar cakupan dibiarkan — itu domain akun nasional / nightly_sync.
+      const toDelete = (existing||[])
+        .filter(r=>!currentIds.has(r.id))
+        .filter(r=> dataScope === null || (r.upt_id && dataScope.includes(r.upt_id)))
+        .map(r=>r.id);
       if (toDelete.length) await supabase.from("rag_chunks").delete().in("id", toDelete);
       setRagLastSync(Date.now());
       if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${toEmbed.length}/${chunks.length} item di-embed ulang (${chunks.length - toEmbed.length} tidak berubah, di-skip), ${katalogList.length} katalog, ${txnRelevant.length} transaksi, ${(faqRows||[]).length} FAQ.`);
