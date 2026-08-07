@@ -125,10 +125,22 @@ export function InspeksiMaterialCadangTab({
     uptList,
     users,
   }), [currentUser, currentUserUptId, uptList, users]);
-  const scopedGudangList = inspectionScope.gudangList;
-  const scopedLokasiList = inspectionScope.lokasiList;
-  const scopedStocks = inspectionScope.stocks;
-  const scopedBatches = inspectionScope.materialInspectionBatches;
+  // Filter tampilan per-UPT untuk viewer multi-UPT (UIT) — inspectionScope sudah membatasi
+  // gudang yang boleh dilihat (UPT sendiri | semua UPT di UIT), dropdown ini cuma
+  // mempersempit tampilan lebih lanjut, tidak mengubah data yang boleh diakses.
+  const baUptFilterOptions = useMemo(() => {
+    const ids = new Set(inspectionScope.gudangList.map(g => g.uptId).filter(Boolean));
+    return ids.size > 1 ? uptList.filter(u => ids.has(u.id)) : [];
+  }, [inspectionScope.gudangList, uptList]);
+  const [baUptFilter, setBaUptFilter] = useState("");
+  const baGudangIds = baUptFilter
+    ? new Set(inspectionScope.gudangList.filter(g => g.uptId === baUptFilter).map(g => g.id))
+    : null;
+  const scopedGudangList = baGudangIds ? inspectionScope.gudangList.filter(g => baGudangIds.has(g.id)) : inspectionScope.gudangList;
+  const scopedLokasiList = baGudangIds ? inspectionScope.lokasiList.filter(l => baGudangIds.has(l.gudangId)) : inspectionScope.lokasiList;
+  const scopedLokasiIds = new Set(scopedLokasiList.map(l => l.id));
+  const scopedStocks = baGudangIds ? inspectionScope.stocks.filter(s => scopedLokasiIds.has(s.lokasiId)) : inspectionScope.stocks;
+  const scopedBatches = baGudangIds ? inspectionScope.materialInspectionBatches.filter(b => baGudangIds.has(b.gudangId)) : inspectionScope.materialInspectionBatches;
 
   const today = todayJakarta();
 
@@ -345,6 +357,15 @@ export function InspeksiMaterialCadangTab({
             { label: "Lengkap", value: `${completeCount}/${items.length}` },
             { label: writer ? "Akses Tulis" : "Akses Baca", value: writer ? "ADMIN/TL" : "VIEWER" },
           ]}
+          controls={baUptFilterOptions.length > 0 ? (
+            <div>
+              <label>Filter UPT</label>
+              <select value={baUptFilter} onChange={e => setBaUptFilter(e.target.value)}>
+                <option value="">Semua UPT</option>
+                {baUptFilterOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
+              </select>
+            </div>
+          ) : null}
         />
       </div>
 

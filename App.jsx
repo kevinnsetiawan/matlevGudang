@@ -377,6 +377,7 @@ export default function PLNWarehouse() {
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
   const [stockUptFilter, setStockUptFilter] = useState(""); // "" = semua; hanya dipakai viewer multi-UPT (UIT/Pusat)
+  const [tugUptFilter, setTugUptFilter] = useState(""); // "" = semua; sama pola stockUptFilter, khusus tab TUG
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(10);
   const [katalogPage, setKatalogPage] = useState(1);
@@ -5193,6 +5194,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     const mu = !stockUptFilter || (gudangList.find(g=>g.id===gid)?.uptId === stockUptFilter);
     return ms && mj && mg && mu;
   });
+  // Opsi filter UPT generik dipakai TUG (identik pola stockUptFilterOptions).
+  const multiUptFilterOptions = stockUptFilterOptions;
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
   const pagedStocks = filteredStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
@@ -5200,7 +5203,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
-  const filteredTxns = scopedTxns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
+  const filteredTxns = scopedTxns.filter(t=> (filterStatus==="ALL" || t.status===filterStatus) &&
+    (!tugUptFilter || (t.uptId || users.find(u=>u.id===t.createdBy)?.uptId) === tugUptFilter)
+  ).sort((a,b)=>b.createdAt-a.createdAt);
   const activeTugTxns = tugSubTab==="TUG15" ? [] : scopedTxns.filter(t=>t.docType===tugSubTab);
   const activeTugSummary = [
     {label:"Total Dokumen",val:activeTugTxns.length},
@@ -5487,6 +5492,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             tugGroup={tugGroup} tugSubTab={tugSubTab} setTugSubTab={setTugSubTab}
             activeTugSummary={activeTugSummary} rolePerms={rolePerms}
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+            tugUptFilter={tugUptFilter} setTugUptFilter={setTugUptFilter} tugUptFilterOptions={multiUptFilterOptions}
             openNewTxn={openNewTxn}
             txns={scopedTxns} filteredTxns={filteredTxns} users={users} enrichedStocks={scopedEnrichedStocks} stocks={stocks}
             katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}

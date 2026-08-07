@@ -48,9 +48,14 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
   // halaman tunggal (permintaan user 2026-07-06). `effectiveUptFilter` jadi SATU sumber kebenaran
   // scoping: non-MSB dikunci ke UPT sendiri (tidak bisa diubah — mereka cuma boleh urus UPT-nya),
   // MSB/Manager UIT tetap bebas pilih "Semua UPT" atau fokus ke 1 UPT tertentu via dropdown.
+  // Viewer multi-UPT (UIT/Pusat/Global, non-MSB) juga boleh mempersempit ke 1 UPT — reuse
+  // mekanisme effectiveUptFilter/myUptSelected yang sudah ada utk MSB, dropdown-nya baru
+  // dirender kalau uptOptions>1 (lihat controls di bawah).
+  const isMultiUptViewer = ["UIT", "PUSAT", "GLOBAL"].includes(roleTier(currentUser?.role));
+  const uptFilterControllable = isMSB || isMultiUptViewer;
   const [viewMode, setViewMode] = useState("armada");
-  const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
-  const effectiveUptFilter = isMSB ? myUptSelected : (myUpt || "");
+  const [myUptSelected, setMyUptSelected] = useState(uptFilterControllable ? "" : (myUpt || ""));
+  const effectiveUptFilter = uptFilterControllable ? myUptSelected : (myUpt || "");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [kondisiFilter, setKondisiFilter] = useState("ALL");
   const [loanCategoryFilter, setLoanCategoryFilter] = useState("ALL");
@@ -252,7 +257,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
         eyebrow="Fleet Operations"
         title="Alat Berat & Peminjaman"
         description="Pantau kesiapan alat, perpindahan antar-UPT, dan keputusan peminjaman dalam satu workspace."
-        scope={isMSB ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
+        scope={uptFilterControllable ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
         metrics={[
           {label:"Total alat",value:scopedEquipment.length},
           {label:"Tersedia",value:scopedAvailable},
@@ -261,7 +266,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
           {label:"Pending approval",value:pendingCount,alert:pendingCount>0},
           {label:"Overdue",value:overdueCount,alert:overdueCount>0},
         ]}
-        controls={isMSB ? (
+        controls={uptFilterControllable && uptOptions.length>1 ? (
           <div>
             <label>Filter UPT</label>
             <select value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
@@ -425,7 +430,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
         {/* Unified loan list: aktif + histori, discope ke UPT yang sedang aktif, newest first */}
         <div>
           <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
-            {isMSB && !myUptSelected ? "Peminjaman & Histori — Semua UPT" : `Peminjaman & Histori — UPT ${effectiveUptFilter||myUpt||"Surabaya"}`}
+            {uptFilterControllable && !myUptSelected ? "Peminjaman & Histori — Semua UPT" : `Peminjaman & Histori — UPT ${effectiveUptFilter||myUpt||"Surabaya"}`}
           </div>
           <div className="equipment-loan-list" style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
             {unifiedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,fontSize:13}}>Belum ada data peminjaman.</div>}
