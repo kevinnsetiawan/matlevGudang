@@ -27,7 +27,7 @@ import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, at
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
 import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
-import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, insertMaturity5SAssessment, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
+import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessments, upsertMaturityAudits } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -55,6 +55,7 @@ import { AttbTab } from "./src/components/AttbTab.jsx";
 import { DataStokTab } from "./src/components/DataStokTab.jsx";
 import { MasterDataTab } from "./src/components/MasterDataTab.jsx";
 import { MaturityDashboardTab } from "./src/components/MaturityDashboardTab.jsx";
+import { useMaturity } from "./src/hooks/useMaturity.jsx";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "./src/data/auditAspects.js";
 import { StockOpnameTab } from "./src/components/StockOpnameTab.jsx";
 import { MigrasiDataTab } from "./src/components/MigrasiDataTab.jsx";
@@ -94,8 +95,8 @@ import * as XLSX from "xlsx";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
+import { useDenahOcr } from "./src/hooks/useDenahOcr.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
@@ -291,12 +292,50 @@ export default function PLNWarehouse() {
   const [opnameList, setOpnameList] = useState(() => readCachedList("pln_opname_v1") ?? []);
   const [stockCountList, setStockCountList] = useState(() => readCachedList("pln_stockcount_v1") ?? []); // riwayat sesi Stock Count (banding SAP vs Aplikasi)
   const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
-  const [maturityAssessments, setMaturityAssessments] = useState(() => readCachedList("pln_maturity_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  const [maturityAudits, setMaturityAudits] = useState(() => readCachedList("pln_maturity_audits_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  // Fallback default hanya berlaku untuk UPT pemilik angkanya (lihat getDefaultMaturityAuditHistory);
-  // profil cache sudah terbaca di atas, jadi UPT user tersedia sejak render pertama.
-  const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory(currentUser?.uptId)); // cache/fallback read-only; DB adalah canonical
-  const [maturity5SAssessments, setMaturity5SAssessments] = useState(() => readCachedList("pln_maturity_5s_assessments_v1") ?? []); // cache fallback read-only; DB adalah canonical
+  // currentUserUptId + domain Maturity dipanggil sedini mungkin (di sini, bukan
+  // di dekat state operasional bawah) karena state Maturity dipakai di render-body
+  // lebih atas (stateRef, dep-array useEffect) — kalau destructure di bawah titik
+  // itu → ReferenceError TDZ (build lolos, app blank). Dep currentUserUptId sudah
+  // tersedia: currentUser/uptList/ultgList di atas; showToast/askConfirmDelete
+  // function-declaration (hoisted). saveMaturity5SAssessment memakainya saat runtime.
+  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
+  const currentUserUptId = currentUser?.uptId
+    || (ultgList.find(u => u.id === currentUser?.ultgId)?.parentUptId)
+    || (uptList.find(u => String(u.nama || "").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
+  const {
+    maturityAssessments, setMaturityAssessments,
+    maturityAudits, setMaturityAudits,
+    maturityAuditHistory, setMaturityAuditHistory,
+    maturity5SAssessments, setMaturity5SAssessments,
+    maturityModal, setMaturityModal,
+    maturityForm, setMaturityForm,
+    maturitySubTab, setMaturitySubTab,
+    canSwitchMaturityUpt,
+    selectedMaturityUpt, setSelectedMaturityUpt,
+    selectedMaturityUptId,
+    maturityAuditModal, setMaturityAuditModal,
+    maturityAuditForm, setMaturityAuditForm,
+    maturityAuditSaving, setMaturityAuditSaving,
+    maturityAuditEvidence, setMaturityAuditEvidence,
+    expandedAspek, setExpandedAspek,
+    activeAspectId, setActiveAspectId,
+    aspectPage, setAspectPage,
+    auditListPage, setAuditListPage,
+    uptIdByNama,
+    guardMaturityWrite,
+    saveMaturityAssessment,
+    saveMaturity5SAssessment,
+    getCurrentMonth5SEvidence,
+    mergeCurrentMonth5SEvidence,
+    calculateItemLevel,
+    createMaturityAudit,
+    openMaturityAudit,
+    calcMaturityScore,
+    calcMaturityLevel,
+    saveMaturityAudit,
+    deleteMaturityAudit,
+    exportMaturityAuditExcel,
+  } = useMaturity({ currentUser, showToast, uptList, currentUserUptId, askConfirmDelete, MATURITY_LEVELS, MATURITY_WORKFLOW_LABEL });
   const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
   const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
   const [attbList, setAttbList] = useState(() => readCachedList("pln_attb_v1") ?? []);
@@ -498,13 +537,9 @@ export default function PLNWarehouse() {
     }, 2500);
     return () => clearTimeout(timer);
   }, [txns, stocks, katalogList, currentUser, loading]);
-  const [ocrSuggestions, setOcrSuggestions] = useState([]); // usulan blok batch dari OCR denah: [{id,kode,xPct,yPct,checked}]
-  const [ocrSuggestGudangId, setOcrSuggestGudangId] = useState(null); // gudang mana yang usulannya sedang tampil
-  const [ocrSuggestSubGudangId, setOcrSuggestSubGudangId] = useState(null); // non-null = usulan berasal dari denah Sub Gudang, bukan denah Gudang keseluruhan
   const [mapConfigSubGudangId, setMapConfigSubGudangId] = useState(null);
   const [pendingMapLokasiSub, setPendingMapLokasiSub] = useState(null);
   const [manualAddModeSub, setManualAddModeSub] = useState(false);
-  const [denahSubLoading, setDenahSubLoading] = useState(false);
   // Denah+Konfigurasi Koordinat level Gudang collapsed by default (dulu selalu terbuka penuh,
   // bikin halaman kepanjangan — keluhan user 2026-07-06). Boolean tunggal cukup karena cuma 1
   // Gudang yang expanded sekaligus (accordion via expandedGudangId).
@@ -1026,6 +1061,19 @@ export default function PLNWarehouse() {
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
   stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview, users, currentUser };
+
+  const {
+    ocrSuggestions, setOcrSuggestions,
+    ocrSuggestGudangId, setOcrSuggestGudangId,
+    ocrSuggestSubGudangId, setOcrSuggestSubGudangId,
+    denahLoading, setDenahLoading,
+    denahSubLoading, setDenahSubLoading,
+    runOcrOnDenah, runOcrOnDenahSub,
+    suggestKodeFromOcr,
+    assignLokasiKoordinat, assignLokasiKoordinatSub,
+    resetLokasiKoordinat, resetLokasiKoordinatSub,
+    dismissOcrSuggestions,
+  } = useDenahOcr({ stateRef, setGudangList, setSubGudangList, lokasiList, setLokasiList, syncGudang, syncSubGudang, syncLokasi, showToast });
 
   // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
   // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
@@ -1869,319 +1917,6 @@ export default function PLNWarehouse() {
     showToast("Lokasi dihapus.");
   }
 
-  // Nama UPT → id UPT (FK upt.id). Master UPT bisa belum termuat, jadi jatuh ke DEFAULT_UPT_LIST.
-  function uptIdByNama(nama) {
-    return (uptList.length ? uptList : DEFAULT_UPT_LIST).find(item => item.nama === nama)?.id || "";
-  }
-
-  // Gate tulis Maturity — cerminan persis policy "Maturity audits update by stage":
-  // pelaku ditentukan oleh status BARIS SAAT INI, bukan status tujuan.
-  //   DRAFT/SELF_ASSESSMENT/REVISION → ADMIN/TL UPT-nya (can_write_maturity_upt)
-  //   REVIEW_UIT                     → ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT (can_review_maturity_uit)
-  //   REVIEW_PUSAT/FINAL             → ADMIN_LOG_PUSAT (can_review_maturity_pusat)
-  // SUPERADMIN lolos di semua jenjang (hasRole), sama seperti helper SQL-nya —
-  // tanpa itu audit yang macet di meja UIT tidak bisa ditolong siapa pun.
-  // Dicek di klien supaya penolakan server tidak muncul sebagai
-  // "server tidak dapat dihubungi".
-  // `status` null = aksi di luar jenjang audit (asesmen/5S/hapus) → tetap ADMIN/TL.
-  function guardMaturityWrite(aksi, status = null) {
-    if (isDemoMode()) { showToast(`Mode demo: ${aksi} tidak disimpan ke server.`, "error"); return false; }
-    if (status === "REVIEW_UIT") {
-      if (hasRole(currentUser, "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT")) return true; // hasRole = SUPERADMIN ikut lolos (lihat can_review_maturity_uit)
-      showToast(`Audit ada di tahap Review UIT — hanya Admin / Asman / Manager Logistik UIT yang boleh ${aksi}.`, "error");
-      return false;
-    }
-    if (status === "REVIEW_PUSAT" || status === "FINAL") {
-      if (hasRole(currentUser, "ADMIN_LOG_PUSAT")) return true;
-      showToast(`Audit ada di tahap Pusat — hanya Admin Logistik Pusat yang boleh ${aksi}.`, "error");
-      return false;
-    }
-    if (!hasRole(currentUser, "ADMIN", "TL")) { showToast(`Hanya Admin Gudang / TL Logistik yang boleh ${aksi}.`, "error"); return false; }
-    return true;
-  }
-
-  // Simpan 1 entri baru riwayat Maturity Level Gudang (khusus Admin, input manual)
-  async function saveMaturityAssessment(form) {
-    if (!guardMaturityWrite("menyimpan Asesmen Maturity")) return false;
-    const entry = { id:`MAT-${uid().slice(-8)}`, level:form.level, catatan:form.catatan||"", tanggalAsesmen:form.tanggalAsesmen||Date.now(), createdBy:currentUser.id, createdAt:Date.now() };
-    const saved = await upsertMaturityAssessment(entry);
-    if (!saved) {
-      showToast("Asesmen Maturity tidak tersimpan karena server tidak dapat dihubungi.", "error");
-      return false;
-    }
-    setMaturityAssessments(current => [entry, ...current.filter(item => item.id !== entry.id)]);
-    logAudit(currentUser, "CREATE", "maturity_assessment", entry.id, { level: entry.level });
-    showToast("✅ Asesmen Maturity Level disimpan!");
-  }
-
-  // ─── Penilaian Maturity — audit berjenjang (UPT → UIT → Pusat) ─────────
-  // Skor per-aspek: dari rasio bukti ter-upload, atau override manual UIT/Pusat.
-  // Form 5S bersifat append-only supaya audit ulang pada periode yang sama
-  // tetap mempunyai jejak tersendiri. State/cache baru diperbarui setelah
-  // INSERT self-host berhasil, bukan ketika pengguna hanya menekan tombol.
-  async function saveMaturity5SAssessment(form) {
-    if (!guardMaturityWrite("mengisi Form 5S")) return null;
-    const uptNama = form.upt || selectedMaturityUpt || "UPT Surabaya";
-    const entry = {
-      ...form,
-      id: `M5S-${uid().slice(-10)}`,
-      upt: uptNama,
-      // Wajib: kolom upt_id jadi NOT NULL + RLS per-UPT di GELOMBANG B.
-      uptId: form.uptId || uptIdByNama(uptNama) || currentUserUptId || currentUser?.uptId || "",
-      createdAt: Date.now(),
-      createdBy: currentUser?.id || null,
-    };
-    const saved = await insertMaturity5SAssessment(entry);
-    if (!saved) {
-      showToast("Checklist 5S belum tersimpan karena server tidak dapat dihubungi.", "error");
-      return null;
-    }
-    setMaturity5SAssessments(current => {
-      const next = [saved, ...current.filter(item => item.id !== saved.id)];
-      CLOUD.set("pln_maturity_5s_assessments_v1", next);
-      return next;
-    });
-    logAudit(currentUser, "CREATE", "maturity_5s_assessment", saved.id, {
-      upt: saved.upt, gudang: saved.gudangNama, tahun: saved.tahun,
-      bulan: saved.bulan, scorePercent: saved.scorePercent,
-    });
-    return saved;
-  }
-
-  function getCurrentMonth5SEvidence(upt) {
-    const nowD = new Date();
-    const latest = maturity5SAssessments
-      .filter(item => (item.upt || "UPT Surabaya") === (upt || selectedMaturityUpt || "UPT Surabaya")
-        && item.tahun === nowD.getFullYear() && item.bulan === nowD.getMonth() + 1)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    if (!latest) return [];
-    const savedAt = latest.createdAt || Date.now();
-    const timestamp = new Date(savedAt).toLocaleString("id-ID");
-    const user = latest.auditor || "Pengguna";
-    const checklistEvidence = {
-      id: "k3_5s_chk",
-      name: `Checklist 5S — ${latest.gudangNama || "Gudang"}, ${latest.bulan}/${latest.tahun} (${Number(latest.scorePercent || 0).toFixed(1)}%)`,
-      url: `#form-5s-history-${latest.id}`,
-      size: 0,
-      auto: true,
-      source: "Form Pengisian 5S",
-      assessment5SId: latest.id,
-      meta: `Diisi oleh: ${user} | Skor: ${Number(latest.scorePercent || 0).toFixed(2)}% (${latest.totalChecked}/${latest.totalItems}) | Disimpan: ${timestamp}`,
-      savedAt,
-    };
-    const photos = (latest.samplePhotos || []).map((photo, index) => ({
-      id: "k3_5s_foto",
-      name: `Foto Sampling 5S ${index + 1} — ${photo.name || "Foto"}`,
-      url: photo.url,
-      size: photo.size || 0,
-      auto: true,
-      source: "Form Pengisian 5S",
-      assessment5SId: latest.id,
-      meta: `Referensi Form 5S: ${latest.id} | Disimpan: ${timestamp}`,
-    }));
-    return [checklistEvidence, ...photos];
-  }
-
-  function mergeCurrentMonth5SEvidence(evidence, upt) {
-    const existing = Object.entries(evidence || {}).reduce((next, [aspectId, files]) => {
-      next[aspectId] = Array.isArray(files) ? [...files] : [];
-      return next;
-    }, {});
-    const current5S = getCurrentMonth5SEvidence(upt);
-    if (!current5S.length) return existing;
-    // Bukti otomatis 5S mewakili rekam periode berjalan yang paling baru;
-    // bukti manual 4.5 tetap utuh. Ini mencegah skor maturity menghitung
-    // beberapa Form 5S sebagai evidence yang berbeda.
-    const nonCurrent5S = (existing["4.5"] || []).filter(file => file?.source !== "Form Pengisian 5S");
-    return { ...existing, "4.5": [...current5S, ...nonCurrent5S] };
-  }
-
-  function calculateItemLevel(uploadedCount, totalRequired) {
-    if (uploadedCount === 0) return 1;
-    if (uploadedCount === totalRequired) return 5;
-    const ratio = uploadedCount / totalRequired;
-    if (ratio < 0.35) return 2;
-    if (ratio < 0.7) return 3;
-    return 4;
-  }
-  function createMaturityAudit() {
-    // Batasi 1 audit baru per bulan kalender per UPT
-    const nowD = new Date();
-    const existingAudit = maturityAudits.find(a => {
-      if ((a.upt || "UPT Surabaya") !== selectedMaturityUpt) return false;
-      const d = new Date(a.createdAt);
-      return d.getMonth() === nowD.getMonth() && d.getFullYear() === nowD.getFullYear();
-    });
-    if (existingAudit) {
-      showToast(`⚠️ UPT ini sudah punya audit bulan ini (dibuat ${fmtDateOnly(existingAudit.createdAt)}). Audit baru cuma bisa dibuat 1x per bulan.`, "error");
-      return;
-    }
-    const scores = {};
-    AUDIT_ASPECTS.forEach(a => { scores[a.id] = { upt:0, uit:0, pusat:0 }; });
-    setMaturityAuditForm({ aspekScores: scores, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
-    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence({}, selectedMaturityUpt));
-    setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
-    setActiveAspectId(null);
-    setAspectPage(1);
-    // ID dibuat saat draft dibuka agar evidence Google Drive dapat memiliki
-    // stable key sebelum tombol Simpan Audit ditekan; record audit tetap hanya
-    // dipersist ketika alur Simpan yang ada dijalankan.
-    setMaturityAuditModal({ id: `MA-${uid().slice(-8)}`, isNew:true, upt: selectedMaturityUpt, createdAt: Date.now() });
-    setMaturitySubTab("pelaksanaan");
-  }
-  function openMaturityAudit(audit) {
-    setMaturityAuditForm({ aspekScores: JSON.parse(JSON.stringify(audit.aspekScores || {})), catatanUPT: audit.catatanUPT || "", catatanUIT: audit.catatanUIT || "", catatanPusat: audit.catatanPusat || "", fileUrl: audit.fileUrl || "", fileNama: audit.fileNama || "" });
-    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence(JSON.parse(JSON.stringify(audit.evidence || {})), audit.upt));
-    setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
-    setActiveAspectId(null);
-    setAspectPage(1);
-    setMaturityAuditModal(audit);
-  }
-  // Skor akhir: getScore pilih pusat>uit>upt(rasio bukti), rata 5 kategori,
-  // A = avg(5 kategori)*0.75 + B = avg(sarana_prasarana,k3,teknologi)*0.25;
-  // level dibucket dari threshold 1.5 / 2.5 / 3.5 / 4.5.
-  function calcMaturityScore(scores = {}, evidence = {}) {
-    const getAspectScore = (a) => {
-      const centerscore = scores[a.id]?.pusat || 0;
-      if (centerscore > 0) return centerscore;
-      const uitscore = scores[a.id]?.uit || 0;
-      if (uitscore > 0) return uitscore;
-      const uptscore = scores[a.id]?.upt || 0;
-      if (uptscore > 0) return uptscore;
-      const uploadedCount = (evidence[a.id] || []).length;
-      return calculateItemLevel(uploadedCount, a.requiredEvidence.length);
-    };
-    const getCatAvg = (catId) => {
-      const catAspects = AUDIT_ASPECTS.filter(a => a.category === catId);
-      if (catAspects.length === 0) return 0;
-      const sum = catAspects.reduce((acc, a) => acc + getAspectScore(a), 0);
-      return sum / catAspects.length;
-    };
-    const c1 = getCatAvg("tata_kelola");
-    const c2 = getCatAvg("tenaga_kerja");
-    const c3 = getCatAvg("sarana_prasarana");
-    const c4 = getCatAvg("k3");
-    const c5 = getCatAvg("teknologi");
-    const itemA = ((c1 + c2 + c3 + c4 + c5) / 5) * 0.75;
-    const itemB = ((c3 + c4 + c5) / 3) * 0.25;
-    const total = itemA + itemB;
-    let level = 1;
-    if (total >= 4.5) level = 5;
-    else if (total >= 3.5) level = 4;
-    else if (total >= 2.5) level = 3;
-    else if (total >= 1.5) level = 2;
-    else level = 1;
-    return { c1, c2, c3, c4, c5, itemA, itemB, total, level };
-  }
-  function calcMaturityLevel(scores, evidence = {}) {
-    return calcMaturityScore(scores, evidence).level;
-  }
-  async function saveMaturityAudit(audit, newStatus) {
-    // Yang menentukan siapa boleh bertindak adalah status LAMA (klausa USING policy);
-    // audit baru belum punya baris di server, jadi diperlakukan sebagai DRAFT.
-    if (!guardMaturityWrite("menyimpan Audit Maturity", audit?.isNew ? "DRAFT" : (audit?.status || "DRAFT"))) return;
-    setMaturityAuditSaving(true);
-    try {
-      // Draft Drive sekarang sudah menerima ID stabil sebelum Simpan. ID saja
-      // bukan berarti record sudah ada di state/UI; bedakan dengan lookup
-      // canonical agar audit baru tetap masuk sebagai CREATE, bukan UPDATE.
-      const isExistingAudit = maturityAudits.some(item => item.id === audit?.id);
-      const { isNew: _isNew, ...auditData } = audit || {};
-      const scores = maturityAuditForm.aspekScores;
-      const scoreResult = calcMaturityScore(scores, maturityAuditEvidence);
-      const level = scoreResult.level;
-      const createdAt = auditData.createdAt || Date.now();
-      const createdDate = new Date(createdAt);
-      const periodKey = auditData.periodKey || `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, "0")}`;
-      const uptName = auditData.upt || selectedMaturityUpt || "UPT Surabaya";
-      const uptId = auditData.uptId || uptIdByNama(uptName) || null;
-      const entry = {
-        ...(isExistingAudit ? auditData : {}),
-        id: auditData.id || `MA-${uid().slice(-8)}`,
-        upt: uptName,
-        uptId,
-        status: newStatus,
-        level,
-        score: Number(scoreResult.total.toFixed(2)),
-        periodKey,
-        aspekScores: scores,
-        evidence: maturityAuditEvidence,
-        catatanUPT: maturityAuditForm.catatanUPT,
-        catatanUIT: maturityAuditForm.catatanUIT,
-        catatanPusat: maturityAuditForm.catatanPusat,
-        fileUrl: maturityAuditForm.fileUrl,
-        fileNama: maturityAuditForm.fileNama,
-        createdAt,
-        createdBy: auditData.createdBy || currentUser.id,
-        updatedAt: Date.now(),
-        updatedBy: currentUser.id,
-        history: [...(auditData.history || []), { action: newStatus, by: currentUser.id, at: Date.now() }],
-      };
-      const saved = await upsertMaturityAudit(entry);
-      if (!saved) {
-        showToast("Audit Maturity tidak tersimpan karena server tidak dapat dihubungi.", "error");
-        return;
-      }
-      setMaturityAudits(current => isExistingAudit ? current.map(a => a.id === entry.id ? entry : a) : [entry, ...current]);
-      logAudit(currentUser, isExistingAudit ? "UPDATE" : "CREATE", "maturity_audit", entry.id, { status: newStatus, level, upt: entry.upt });
-      if (newStatus === "FINAL") {
-        // Trigger DB menerbitkan baris history sendiri saat audit masuk FINAL,
-        // jadi state & cache klien langsung basi — muat ulang dari server.
-        const freshHistory = await loadMaturityAuditHistory();
-        if (freshHistory) {
-          setMaturityAuditHistory(freshHistory);
-          CLOUD.set("pln_maturity_audit_history_v1", freshHistory);
-        }
-      }
-      setMaturityAuditModal(null);
-      showToast(`Audit ${entry.upt} disimpan — ${MATURITY_WORKFLOW_LABEL[newStatus]}${newStatus === "FINAL" ? " (Nilai Final)" : ""}`);
-    } finally { setMaturityAuditSaving(false); }
-  }
-  async function deleteMaturityAudit(id) {
-    if (!guardMaturityWrite("menghapus Audit Maturity")) return;
-    const audit = maturityAudits.find(a => a.id === id);
-    askConfirmDelete({
-      title: "Hapus Riwayat Audit Maturity?",
-      message: <>Apakah Anda yakin ingin menghapus data audit maturity untuk <b>{audit?.upt || "UPT"}</b> (Level {audit?.level || "?"})?</>,
-      warning: "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const deleted = await deleteMaturityAuditRow(id);
-        if (!deleted) {
-          // Bisa gagal koneksi ATAU ditolak server (angka audit memang tidak
-          // boleh dihapus). Apa pun sebabnya, state TIDAK boleh ikut berubah.
-          showToast("Audit Maturity TIDAK dihapus — ditolak server atau server tidak dapat dihubungi. Data di server tetap utuh.", "error");
-          return;
-        }
-        setMaturityAudits(current => current.filter(a => a.id !== id));
-        logAudit(currentUser, "DELETE", "maturity_audit", id, { upt: audit?.upt });
-        showToast("Riwayat audit maturity berhasil dihapus.");
-        if (maturityAuditModal && maturityAuditModal.id === id) setMaturityAuditModal(null);
-      }
-    });
-  }
-  async function exportMaturityAuditExcel(audit) {
-    const XLSX = await import("xlsx");
-    const rows = [["Aspek ID", "Deskripsi", "Skor UPT", "Skor UIT", "Skor Pusat", "Evidence"]];
-    AUDIT_ASPECTS.forEach(a => {
-      const s = audit.aspekScores?.[a.id] || {};
-      const evi = audit.evidence?.[a.id] || [];
-      const uploadedCount = evi.length;
-      const uptScore = calculateItemLevel(uploadedCount, a.requiredEvidence.length);
-      rows.push([a.id, a.title, uptScore, s.uit || 0, s.pusat || 0, evi.map(e => e.name).join("; ") || "—"]);
-    });
-    rows.push([]);
-    rows.push(["Level Akhir", MATURITY_LEVELS[audit.level] || "—"]);
-    rows.push(["Status", MATURITY_WORKFLOW_LABEL[audit.status] || audit.status]);
-    rows.push(["Catatan UPT", audit.catatanUPT || ""]);
-    rows.push(["Catatan UIT", audit.catatanUIT || ""]);
-    rows.push(["Catatan Pusat", audit.catatanPusat || ""]);
-    rows.push(["Lampiran Umum", audit.fileNama || audit.fileUrl || ""]);
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Audit Maturity");
-    XLSX.writeFile(wb, `Audit_Maturity_${audit.id}.xlsx`);
-    showToast("File Excel berhasil didownload!");
-  }
 
   // Catat 1 keputusan approval (disetujui/ditolak) ke riwayat — dipakai oleh
   // semua jenis approval non-TUG (TUG sudah punya jejaknya sendiri di txns).
@@ -2663,31 +2398,7 @@ export default function PLNWarehouse() {
 
   // ── Master Gudang CRUD ──
   const [gudangModal, setGudangModal] = useState(null);
-  const [maturityModal, setMaturityModal] = useState(false);
-  const [maturityForm, setMaturityForm] = useState({ level:3, catatan:"", tanggalAsesmen:Date.now() });
-  // ─── Penilaian Maturity (audit workflow) — UI state ───────────────────
-  const [maturitySubTab, setMaturitySubTab] = useState("dashboard"); // dashboard | pelaksanaan | history | 5s
-  // Peninjau lintas UPT saja. MANAGER dibuang: tiap UPT punya tepat satu MANAGER
-  // dan cakupannya HANYA UPT itu (keputusan user 2026-08-02).
-  const canSwitchMaturityUpt = hasRole(currentUser, "ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT","SUPERADMIN");
-  const [selectedMaturityUpt, setSelectedMaturityUpt] = useState(() => {
-    const match = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId);
-    return match?.nama || "UPT Surabaya";
-  });
-  // Scoping UI Maturity pakai id UPT (FK), bukan kecocokan string nama — nama di
-  // Master UPT bisa berbeda ejaan dengan nama yang tersimpan di baris audit.
-  const selectedMaturityUptId = uptIdByNama(selectedMaturityUpt);
-  const [maturityAuditModal, setMaturityAuditModal] = useState(null); // null | {isNew:true,...} (new) | auditObj (edit/review)
-  const [maturityAuditForm, setMaturityAuditForm] = useState({ aspekScores:{}, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
-  const [maturityAuditSaving, setMaturityAuditSaving] = useState(false);
-  const [maturityAuditEvidence, setMaturityAuditEvidence] = useState({}); // {aspekId: [{url,name,size,itemId,...}]}
-  const [expandedAspek, setExpandedAspek] = useState(null); // kategori aktif di editor
-  const [activeAspectId, setActiveAspectId] = useState(null);
-  const [aspectPage, setAspectPage] = useState(1);
-  const [auditListPage, setAuditListPage] = useState(1); // pagination "Daftar Audit Aktif" (5/hal)
-  useEffect(() => { setAuditListPage(1); }, [selectedMaturityUpt]);
   const [gudangForm, setGudangForm] = useState({});
-  const [denahLoading, setDenahLoading] = useState(false);
   const [mapConfigMode, setMapConfigMode] = useState(false);
   const [mapConfigGudangId, setMapConfigGudangId] = useState(null);
   const [pendingMapLokasi, setPendingMapLokasi] = useState(null);
@@ -3096,57 +2807,12 @@ export default function PLNWarehouse() {
     }
   }
 
-  // Baca teks/label blok yang sudah tergambar di PNG denah (OCR) supaya
-  // sistem bisa mengusulkan kode blok otomatis saat user klik titik di peta.
-  async function runOcrOnDenah(gudangId, imgData) {
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error("Gagal membaca dimensi gambar"));
-        im.src = imgData;
-      });
-      const { data } = await ocrRecognize(imgData, "eng");
-      const words = (data.words || [])
-        .filter(w => w.text && w.text.trim().length > 0)
-        .map(w => ({
-          text: w.text.trim(),
-          xPct: Number((((w.bbox.x0 + w.bbox.x1) / 2) / img.naturalWidth * 100).toFixed(1)),
-          yPct: Number((((w.bbox.y0 + w.bbox.y1) / 2) / img.naturalHeight * 100).toFixed(1)),
-        }));
-      // Pakai stateRef.current.gudangList (selalu terkini), bukan closure `gudangList` yang
-      // sudah usang setelah OCR (proses beberapa detik) — kalau pakai closure lama, hasilnya
-      // menimpa balik denahImageData yang baru diset di uploadDenahGudang sehingga gambar hilang.
-      const prevList2 = stateRef.current.gudangList;
-      const ng2 = prevList2.map(g => g.id === gudangId ? { ...g, denahOcrWords: words } : g);
-      setGudangList(ng2);
-      const ok2 = await syncGudang(ng2);
-      if (!ok2) { setGudangList(prevList2); showToast("Gagal menyimpan hasil OCR ke server. Coba lagi.","error"); return; }
-      CLOUD.set("pln_gudang_v1", ng2);
-
-      // Usulkan blok batch dari semua label yang terbaca (filter noise teks pendek/simbol)
-      const suggestions = words
-        .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
-        .slice(0, 40)
-        .map(w => ({ id: uid(), kode: w.text.toUpperCase().replace(/[^A-Z0-9]/g,""), jenisArea:"Rak Tertutup", luasan:"", xPct: w.xPct, yPct: w.yPct, checked: true }));
-      setOcrSuggestions(suggestions);
-      setOcrSuggestGudangId(gudangId);
-
-      showToast(words.length > 0 ? `🔎 OCR selesai: ${words.length} label terbaca, ${suggestions.length} diusulkan jadi blok.` : "🔎 OCR selesai, tidak ada teks terbaca di denah.");
-    } catch (e) {
-      showToast("OCR gagal membaca label di denah: " + e.message, "error");
-    }
-  }
-
   // Edit/hapus baris usulan blok hasil OCR sebelum dikonfirmasi
   function updateOcrSuggestion(id, patch) {
     setOcrSuggestions(s => s.map(x => x.id===id ? {...x, ...patch} : x));
   }
   function removeOcrSuggestion(id) {
     setOcrSuggestions(s => s.filter(x => x.id!==id));
-  }
-  function dismissOcrSuggestions() {
-    setOcrSuggestions([]); setOcrSuggestGudangId(null); setOcrSuggestSubGudangId(null);
   }
   // Konfirmasi: usulan yang dicentang ditambahkan langsung ke Master Lokasi (tanpa approval —
   // tools ini hanya bisa diakses ADMIN). subGudangId non-null = usulan berasal dari denah Sub
@@ -3191,62 +2857,6 @@ export default function PLNWarehouse() {
     showToast(`✅ ${baru.length} blok ditambahkan!` + dupMsg);
   }
 
-  // Cari label OCR terdekat dari titik klik untuk diusulkan sebagai kode blok.
-  function suggestKodeFromOcr(gudang, xPct, yPct) {
-    const words = gudang?.denahOcrWords || [];
-    if (words.length === 0) return "";
-    let best = null, bestDist = Infinity;
-    words.forEach(w => {
-      const dx = w.xPct - xPct, dy = w.yPct - yPct;
-      const dist = dx*dx + dy*dy;
-      if (dist < bestDist) { bestDist = dist; best = w; }
-    });
-    return best ? best.text.toUpperCase().replace(/[^A-Z0-9]/g,"") : "";
-  }
-
-  // Assign koordinat blok via klik di gambar denah
-  async function assignLokasiKoordinat(lokasiId, xPct, yPct, gudangId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:xPct, mapY:yPct, gudangId} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan koordinat ke server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast(`📍 Koordinat Blok disimpan!`);
-  }
-
-  async function resetLokasiKoordinat(lokasiId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:null, mapY:null, gudangId:null} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal reset koordinat di server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast("Koordinat blok direset.");
-  }
-
-  // Assign koordinat blok via klik di denah Sub Gudang (terpisah dari mapX/mapY denah Gudang keseluruhan)
-  async function assignLokasiKoordinatSub(lokasiId, xPct, yPct, subGudangId, gudangId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:xPct, subMapY:yPct, subGudangId, gudangId} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan koordinat ke server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast(`📍 Koordinat Blok (Sub Gudang) disimpan!`);
-  }
-
-  // Reset hanya koordinat pin di denah Sub Gudang — assignment subGudangId (pengelompokan) tidak ikut dihapus
-  async function resetLokasiKoordinatSub(lokasiId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:null, subMapY:null} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal reset koordinat di server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast("Koordinat blok (Sub Gudang) direset.");
-  }
-
   async function uploadDenahSubGudang(subGudangId, gudangId, file) {
     setDenahSubLoading(true);
     try {
@@ -3285,43 +2895,6 @@ export default function PLNWarehouse() {
       showToast("Gagal upload denah: " + e.message, "error");
     } finally {
       setDenahSubLoading(false);
-    }
-  }
-
-  async function runOcrOnDenahSub(subGudangId, gudangId, imgData) {
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error("Gagal membaca dimensi gambar"));
-        im.src = imgData;
-      });
-      const { data } = await ocrRecognize(imgData, "eng");
-      const words = (data.words || [])
-        .filter(w => w.text && w.text.trim().length > 0)
-        .map(w => ({
-          text: w.text.trim(),
-          xPct: Number((((w.bbox.x0 + w.bbox.x1) / 2) / img.naturalWidth * 100).toFixed(1)),
-          yPct: Number((((w.bbox.y0 + w.bbox.y1) / 2) / img.naturalHeight * 100).toFixed(1)),
-        }));
-      const prevList2 = stateRef.current.subGudangList;
-      const nsg2 = prevList2.map(sg => sg.id === subGudangId ? { ...sg, denahOcrWords: words } : sg);
-      setSubGudangList(nsg2);
-      const ok2 = await syncSubGudang(nsg2);
-      if (!ok2) { setSubGudangList(prevList2); showToast("Gagal menyimpan hasil OCR ke server. Coba lagi.","error"); return; }
-      CLOUD.set("pln_sub_gudang_v1", nsg2);
-
-      const suggestions = words
-        .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
-        .slice(0, 40)
-        .map(w => ({ id: uid(), kode: w.text.toUpperCase().replace(/[^A-Z0-9]/g,""), jenisArea:"Rak Tertutup", luasan:"", xPct: w.xPct, yPct: w.yPct, checked: true }));
-      setOcrSuggestions(suggestions);
-      setOcrSuggestGudangId(gudangId);
-      setOcrSuggestSubGudangId(subGudangId);
-
-      showToast(words.length > 0 ? `🔎 OCR selesai: ${words.length} label terbaca, ${suggestions.length} diusulkan jadi blok.` : "🔎 OCR selesai, tidak ada teks terbaca di denah.");
-    } catch (e) {
-      showToast("OCR gagal membaca label di denah: " + e.message, "error");
     }
   }
 
@@ -5504,10 +5077,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const scopedStockCountList = dataScope === null ? stockCountList : stockCountList.filter(sc => inScopeUpt(users.find(u => u.id === sc.uploadedBy)?.uptId || null, dataScope));
   // UPT adalah pagar pertama; gudang_ids hanya mempersempit scope itu.
   // SUPERADMIN tetap global, sedangkan akun UIT/ULTG mengikuti hierarki unitnya.
-  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
-  const currentUserUptId = currentUser?.uptId
-    || (ultgList.find(u => u.id === currentUser?.ultgId)?.parentUptId)
-    || (uptList.find(u => String(u.nama || "").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
   const gudangAccessLimited = currentUser?.role !== "SUPERADMIN";
   const visibleGudangList = useMemo(() => getVisibleGudangForInspection({
     currentUser,
