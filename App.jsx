@@ -623,13 +623,18 @@ export default function PLNWarehouse() {
       // non-kritis tetap berjalan paralel dan diproses dengan invariant null/
       // tidak-menulis yang ada di bawah.
       const [initialLokasi, initialKatalog, initialStocks] = await Promise.all([masterLoads[5], masterLoads[8], masterLoads[9]]);
-      if (initialLokasi !== null) setLokasiList(initialLokasi?.length ? dedupeById(initialLokasi).list : (clokLocal || DEFAULT_LOKASI));
+      if (initialLokasi !== null) setLokasiList(initialLokasi?.length ? dedupeById(initialLokasi).list : (initialLokasi ? [] : (clokLocal || DEFAULT_LOKASI)));
       if (initialKatalog !== null) setKatalogList(initialKatalog?.some(k => k.name) ? dedupeById(initialKatalog.filter(k => k.name)).list : (ckat || DEFAULT_KATALOG));
       if (initialStocks !== null) setStocks(initialStocks?.length ? dedupeById(initialStocks).list : (cs || DEFAULT_STOCKS));
       setLoading(false);
 
       const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote, cmahRemote, cm5sRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
+      // Seed DEFAULT (gudang/lokasi) hanya boleh oleh viewer NASIONAL (Pusat/SUPERADMIN).
+      // Multi-UPT + RLS: hasil kosong untuk akun scoped berarti "UPT-ku belum punya
+      // gudang/lokasi", BUKAN tabel kosong global — seed di sini akan ditolak RLS (403,
+      // insiden login UPT Gresik 2026-08-07) dan mengisi data Surabaya ke UPT lain.
+      const canSeedMaster = getScopeUptIds(currentUser, cupt) === null;
 
       if (cs && ckat && clok) {
         // Already on new master-data structure.
@@ -692,10 +697,13 @@ export default function PLNWarehouse() {
           const lokFresh = dedupeById(clokRemote).list;
           setLokasiList(lokFresh);
           CLOUD.set("pln_lokasi_v4", lokFresh);
-        } else if (DEFAULT_LOKASI.length > 0) {
+        } else if (canSeedMaster && DEFAULT_LOKASI.length > 0) {
           setLokasiList(DEFAULT_LOKASI);
           await syncMasterTable("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null }));
           CLOUD.set("pln_lokasi_v4", DEFAULT_LOKASI);
+        } else {
+          setLokasiList([]); // akun scoped tanpa lokasi UPT sendiri — jangan seed/tampilkan data UPT lain
+          CLOUD.set("pln_lokasi_v4", []);
         }
       } else {
         // Check for legacy flat-stock data from older version of the app
@@ -792,10 +800,13 @@ export default function PLNWarehouse() {
       } else if (cgdg.length > 0) {
         setGudangList(cgdg);
         CLOUD.set("pln_gudang_v1", cgdg);
-      } else if (DEFAULT_GUDANG.length > 0) {
+      } else if (canSeedMaster && DEFAULT_GUDANG.length > 0) {
         setGudangList(DEFAULT_GUDANG);
         await syncMasterTable("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null }));
         CLOUD.set("pln_gudang_v1", DEFAULT_GUDANG);
+      } else {
+        setGudangList([]); // akun scoped tanpa gudang UPT sendiri — jangan seed data UPT lain
+        CLOUD.set("pln_gudang_v1", []);
       }
       if (csgdg === null) {
         loadFailures.push("Sub Gudang");
