@@ -104,7 +104,7 @@ import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoM
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
-import { getMaterialAkanHabis, buildMonthlySeriesByKatalog } from "./src/lib/analytics.js";
+import { getMaterialAkanHabis, buildMonthlySeriesByKatalog, computeProcurementList } from "./src/lib/analytics.js";
 
 // Turn this on only after the reviewed self-host migration is installed. It
 // makes TUG-8/9 fail closed rather than silently reverting to browser storage.
@@ -5075,6 +5075,18 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // untuk akun UPT/UIT.
   const lowStocks = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
   const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
+  // Ringkasan Rekomendasi Pengadaan untuk kartu Dashboard — rumus sama persis dgn tab
+  // Rekomendasi Pengadaan di Forecast Stok (computeProcurementList, src/lib/analytics.js).
+  const procurementResult = computeProcurementList({
+    katalogList, stocks: scopedEnrichedStocks, txns: scopedTxns, materialCadangHealthData,
+  });
+  const procurementSummary = {
+    totalCount: procurementResult.list.length,
+    totalQty: procurementResult.totalQty,
+    totalValue: procurementResult.totalValue,
+    criticalCount: procurementResult.criticalCount,
+    top: procurementResult.list.slice(0,5),
+  };
   // Guard NaN: satu baris dgn qty/price undefined atau string non-numerik akan
   // meracuni seluruh Σ jadi NaN (fmtRp(NaN) tampil "Rp 0"). Number(...)||0 menetralkan per-baris.
   const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+(Number(s.qty)*Number(s.price)||0),0);
@@ -5292,6 +5304,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             topN={topN} setTopN={setTopN} pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
             heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={scopedAttbList} attbBongkaranPool={attbBongkaranPool}
             materialCadangData={materialCadangData} gudangList={gudangList} petaWilayahDivRef={petaWilayahDivRef}
+            procurementSummary={procurementSummary}
           />
         )}
 
@@ -5594,6 +5607,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             katalogList={katalogList}
             setKatalogList={setKatalogList}
             stocks={scopedStocks}
+            allStocks={stocks}
+            setStocks={setStocks}
+            gudangList={gudangList}
+            lokasiList={lokasiList}
             txns={scopedTxns}
             forecastDetail={forecastDetail}
             setForecastDetail={setForecastDetail}

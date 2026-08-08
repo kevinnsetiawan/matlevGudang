@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { WAREHOUSE } from "../constants.js";
 import { fmtDate } from "../lib/utils.js";
-import { fmtNum, meanStdev, normInv, computeEffectiveMinQty } from "../lib/ragShared.mjs";
+import { fmtNum } from "../lib/ragShared.mjs";
 import { supabase } from "../supabaseClient.js";
 import { Sparkline } from "./Sparkline.jsx";
 import { MaterialCadangTab } from "./MaterialCadangTab.jsx";
-import { buildMonthlyDemandSeries, tsbMonthlyForecast } from "../lib/tsbForecast.js";
+import { computeKatalogRisk, computeProcurementList } from "../lib/analytics.js";
 
 const RISK_FILTERS = [
   {key:"critical",label:"Kritis"},
@@ -15,17 +15,10 @@ const RISK_FILTERS = [
 ];
 const RISK_PRIORITY = {critical:0,attention:1,watch:2,safe:3};
 const RISK_COLORS = {critical:"#b91c1c",attention:"#b45309",watch:"#c2410c",safe:"#15803d"};
-// Asumsi lead time pengadaan untuk material non-Material-Cadang. WARNOTO belum punya data
-// lead time riil per supplier, jadi dipakai konstanta 1 bulan (referensi desain ABC 2022 memakai
-// proxy kelas Availability yang datanya tidak tersedia di sini).
-const DEFAULT_LEAD_TIME_DAYS = 30;
-// Minimal panjang deret bulanan sebelum stok minimum boleh dihitung otomatis dari histori.
-// Di bawah ini deret terlalu pendek untuk menghasilkan stdev yang bermakna, jadi dipakai
-// angka manual "Min Qty Alert" dari Data Stok sebagai fallback.
-const MIN_HISTORY_MONTHS = 3;
-const sortDays = days => days===Infinity ? Number.MAX_SAFE_INTEGER : days;
+// Konstanta lead time & panjang histori minimum dipindah ke src/lib/analytics.js
+// (computeKatalogRisk/computeProcurementList) supaya identik dengan Dashboard.
 
-export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, forecastDetail, setForecastDetail,
+export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, forecastDetail, setForecastDetail,
   forecastDetailResult, setForecastDetailResult, forecastDetailLoading, forecastDrillDown,
   setTab, sendChat,
   materialCadangData, setMaterialCadangData, maraReference, setMaraReference,
@@ -80,40 +73,10 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
     return () => { cancelled = true; };
   }, []);
 
+  // Rumus TSB/ROP dipindah ke computeKatalogRisk (src/lib/analytics.js) supaya bisa dipakai
+  // juga oleh Dashboard (computeProcurementList) tanpa duplikasi.
   function getRisk(katalog) {
-    const stockRows = stocks.filter(stock=>stock.katalogId===katalog.id);
-    const totalQty = stockRows.reduce((sum,stock)=>sum+(stock.qty||0),0);
-    const manualMinQty = stockRows.reduce((max,stock)=>Math.max(max,stock.minQty||0),0);
-    const usageItems = [];
-    txns.filter(txn=>["TUG9","TUG8"].includes(txn.docType)&&txn.status==="APPROVED").forEach(txn=>{
-      (txn.stockItems||[]).forEach(item=>{
-        const stock = stocks.find(row=>row.id===item.stockId);
-        if (stock?.katalogId===katalog.id) usageItems.push({qty:item.qty||0,ts:txn.approvedAt||txn.createdAt});
-      });
-    });
-    // TSB (bukan rata-rata flat) -- material gudang PLN pola pemakaiannya intermiten/lumpy
-    // (berbulan-bulan 0 lalu keluar banyak sekaligus), rata-rata flat gampang bias oleh
-    // panjang jendela observasi. Lihat src/lib/tsbForecast.js untuk penjelasan lengkap.
-    const monthlySeries = buildMonthlyDemandSeries(usageItems);
-    const { forecastPerPeriod } = tsbMonthlyForecast(monthlySeries);
-    const perDay = forecastPerPeriod/30;
-    const estimatedDays = perDay>0 ? Math.round(totalQty/perDay) : Infinity;
-    // Stok minimum: kalau histori pemakaian sudah cukup panjang, hitung sendiri sebagai reorder
-    // point (lead time demand + safety stock) dan abaikan angka manual. Service level flat 95%
-    // -- TIDAK boleh pakai risk.key sebagai input karena minQty inilah yang menentukan risk.key.
-    // Rumusnya di ragShared.mjs supaya identik dengan Dashboard & bot Telegram.
-    const { minQty, minQtySource } = computeEffectiveMinQty({
-      monthlySeries, manualMinQty,
-      leadTimeMonths: DEFAULT_LEAD_TIME_DAYS/30,
-      minHistoryMonths: MIN_HISTORY_MONTHS,
-    });
-    const critical = minQty>0 && totalQty<=minQty;
-    // perDay, minQty & monthlySeries dipakai tab Rekomendasi Pengadaan untuk menghitung usulan qty beli.
-    const base = {days:estimatedDays,perDay,minQty,minQtySource,monthlySeries};
-    if (critical || estimatedDays<=30) return {key:"critical",label:"Kritis",...base};
-    if (estimatedDays<=90) return {key:"attention",label:"Perhatian",...base};
-    if (estimatedDays<=180) return {key:"watch",label:"Waspada",...base};
-    return {key:"safe",label:"Aman",...base};
+    return computeKatalogRisk(katalog, stocks, txns);
   }
 
   const enriched = useMemo(() => katalogList
@@ -145,54 +108,14 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
   const pageClamped = Math.min(page, totalPages);
   const pagedList = visibleList.slice((pageClamped-1)*pageSize, pageClamped*pageSize);
 
-  // Hasil analisis Material Cadang terakhir (read-only) — dipakai sebagai sumber qty paling
-  // prioritas karena perhitungannya (Poisson service-level per kelas ABC) jauh lebih rigorous
-  // daripada ROP/ROQ generik untuk item spare/rare-failure. Pola ambil data = MaterialCadangTab.
-  const materialCadangGapMap = useMemo(() => {
-    const analysisRuns = materialCadangHealthData?.analysisRuns||[];
-    const healthResults = materialCadangHealthData?.healthResults||[];
-    const latestRun = analysisRuns.slice(-1)[0] || null;
-    const map = new Map();
-    if (!latestRun) return map;
-    healthResults
-      .filter(row=>row.runId===latestRun.id && row.treatment==="Material Cadang" && row.katalogId)
-      .forEach(row=>map.set(row.katalogId, row));
-    return map;
-  }, [materialCadangHealthData]);
-
-  const procurementList = useMemo(() => enriched
-    .filter(entry=>entry.risk.key==="critical"||entry.risk.key==="watch")
-    .map(entry=>{
-      const price = entry.stockRows.find(stock=>stock.price>0)?.price || 0;
-      const mcResult = materialCadangGapMap.get(entry.kat.id);
-      const series = entry.risk.monthlySeries||[];
-      // Cabang C (default) — item ini hanya bisa berstatus Kritis/Waspada tanpa histori pemakaian
-      // lewat jalur minQty>0 && totalQty<=minQty (lihat getRisk), jadi minQty selalu tersedia di
-      // sini: restock ke minimum adalah angka nyata, bukan tebakan, walau tanpa buffer statistik.
-      let qty = Math.max(0, entry.risk.minQty-entry.totalQty), method = "minimum_stock", methodLabel = "Restock ke stok minimum (belum ada histori pemakaian)";
-      if (mcResult) {
-        // Cabang A — sudah dianalisis di Material Cadang, pakai gapQty apa adanya.
-        qty = Math.max(0, mcResult.gapQty||0);
-        method = "material_cadang";
-        methodLabel = "Poisson service-level · Material Cadang";
-      } else if (series.length) {
-        // Cabang B — konsumsi reguler: ROP (lead time demand + safety stock) lalu ditambah
-        // satu lot order (ROQ) yang INDEPENDEN dari ROP, supaya tidak jadi repeat-order mini.
-        const { mean: avgMonthlyUsage, stdev: stdevMonthlyUsage } = meanStdev(series);
-        const serviceLevel = entry.risk.key==="critical" ? 0.98 : 0.95;
-        const leadTimeMonths = DEFAULT_LEAD_TIME_DAYS/30;
-        const safetyStock = normInv(serviceLevel)*stdevMonthlyUsage*Math.sqrt(leadTimeMonths);
-        const reorderPoint = avgMonthlyUsage*leadTimeMonths + safetyStock;
-        const orderQty = Math.max(avgMonthlyUsage, entry.risk.minQty);
-        qty = Math.ceil(Math.max(0, reorderPoint-entry.totalQty) + orderQty);
-        method = "rop_roq";
-        methodLabel = `ROP+ROQ · ± ${leadTimeMonths} bln lead time (asumsi) · service level ${Math.round(serviceLevel*100)}%`;
-      }
-      return {...entry, price, qty, method, methodLabel, value:qty*price};
-    })
-    .sort((a,b)=>RISK_PRIORITY[a.risk.key]-RISK_PRIORITY[b.risk.key] || sortDays(a.risk.days)-sortDays(b.risk.days)), [enriched,materialCadangGapMap]);
-  const procurementTotalQty = procurementList.reduce((sum,entry)=>sum+entry.qty,0);
-  const procurementTotalValue = procurementList.reduce((sum,entry)=>sum+entry.value,0);
+  // Daftar usulan pengadaan dipindah ke computeProcurementList (src/lib/analytics.js) supaya
+  // ringkasannya bisa dipakai juga oleh Dashboard — rumus tidak berubah, cuma dipindah.
+  const procurementResult = useMemo(() => computeProcurementList({
+    katalogList, stocks, txns, materialCadangHealthData,
+  }), [katalogList, stocks, txns, materialCadangHealthData]);
+  const procurementList = procurementResult.list;
+  const procurementTotalQty = procurementResult.totalQty;
+  const procurementTotalValue = procurementResult.totalValue;
   const procTotalPages = Math.max(1, Math.ceil(procurementList.length/procPageSize));
   const procPageClamped = Math.min(procPage, procTotalPages);
   const pagedProcurementList = procurementList.slice((procPageClamped-1)*procPageSize, procPageClamped*procPageSize);
@@ -351,7 +274,8 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, txns, fo
           maraReference={maraReference} setMaraReference={setMaraReference}
           catalogMasterRef={catalogMasterRef} setCatalogMasterRef={setCatalogMasterRef}
           katalogList={katalogList} setKatalogList={setKatalogList}
-          stocks={stocks} txns={txns} currentUser={currentUser} sty={sty} C={C}
+          stocks={stocks} allStocks={allStocks} setStocks={setStocks} gudangList={gudangList} lokasiList={lokasiList}
+          txns={txns} currentUser={currentUser} sty={sty} C={C}
           saveToCloud={saveToCloud} showToast={showToast}
         />
       ) : (
