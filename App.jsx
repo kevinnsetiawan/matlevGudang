@@ -5075,7 +5075,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // untuk akun UPT/UIT.
   const lowStocks = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
   const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
-  const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
+  // Guard NaN: satu baris dgn qty/price undefined atau string non-numerik akan
+  // meracuni seluruh Σ jadi NaN (fmtRp(NaN) tampil "Rp 0"). Number(...)||0 menetralkan per-baris.
+  const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+(Number(s.qty)*Number(s.price)||0),0);
   // Filter UPT untuk Data Stok — HANYA viewer multi-UPT: Pusat/SUPERADMIN (dataScope null) lihat
   // semua UPT; UIT (dataScope >1) lihat UPT di UIT-nya. Akun 1 UPT tak dapat dropdown (kosong).
   const stockUptFilterOptions = dataScope === null ? uptList
