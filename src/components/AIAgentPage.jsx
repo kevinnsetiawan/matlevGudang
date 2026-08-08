@@ -35,7 +35,7 @@ function renderAIText(text) {
 export function AIAgentPage({
   chatHistory, setChatHistory, chatInput, setChatInput,
   chatLoading, chatEndRef, sendChat, syncRagChunks, syncWarnotoState,
-  syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, C, sty, uptNama,
+  syncStocksSnapshot, ragSyncing, ragLastSync, currentUser, uptList, C, sty, uptNama,
 }) {
   const [view, setView] = useState("chat");
   const [syncPct, setSyncPct] = useState(null);
@@ -91,7 +91,7 @@ export function AIAgentPage({
         </div>}
         {view==="telegram" && <div className="ai-conversation__config">
           <button className="ai-config-back" onClick={()=>setView("chat")}>← Kembali ke percakapan</button>
-          <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser}/>
+          <TelegramWhitelistPanel sty={sty} C={C} currentUser={currentUser} uptList={uptList}/>
         </div>}
 
         {view==="chat" && (isWelcome ? (

@@ -6,11 +6,11 @@ import { isDemoMode } from "../lib/demo.js";
 // Panel kelola whitelist user Bot Telegram (Admin only) — CRUD langsung ke tabel
 // tg_allowed_users, menggantikan alur manual sebelumnya (form PDF + Supabase Dashboard).
 // Webhook telegram-webhook cek kolom is_active di tabel ini utk tiap pesan masuk.
-export function TelegramWhitelistPanel({ sty, C, currentUser }) {
+export function TelegramWhitelistPanel({ sty, C, currentUser, uptList }) {
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ telegram_user_id:"", telegram_username:"", display_name:"", notes:"" });
+  const [form, setForm] = useState({ telegram_user_id:"", telegram_username:"", display_name:"", notes:"", upt_id:"" });
 
   async function loadUsers() {
     if (!supabase) {
@@ -36,6 +36,7 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
     const uid = form.telegram_user_id.trim();
     if (!/^\d+$/.test(uid)) { alert("User ID Telegram harus berupa angka (didapat dari bot @userinfobot di Telegram, bukan @username)."); return; }
     if (!form.display_name.trim()) { alert("Nama wajib diisi."); return; }
+    if (!form.upt_id) { alert("Scope wajib dipilih (UPT tertentu atau Global)."); return; }
     setSaving(true);
     try {
       const { error } = await supabase.from("tg_allowed_users").insert({
@@ -45,9 +46,10 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
         notes: form.notes.trim() || null,
         added_by: currentUser?.name || "web-admin",
         is_active: true,
+        upt_id: form.upt_id==="__GLOBAL__" ? null : form.upt_id,
       });
       if (error) throw error;
-      setForm({ telegram_user_id:"", telegram_username:"", display_name:"", notes:"" });
+      setForm({ telegram_user_id:"", telegram_username:"", display_name:"", notes:"", upt_id:"" });
       await loadUsers();
     } catch (e) {
       alert(e.code==="23505" ? "User ID ini sudah terdaftar di whitelist." : "Gagal tambah user: " + e.message);
@@ -78,6 +80,14 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
         <div><label style={sty.label}>Username (opsional)</label><input style={sty.input} value={form.telegram_username} onChange={e=>setForm(f=>({...f,telegram_username:e.target.value}))} placeholder="cth: @budi_pln"/></div>
         <div style={{gridColumn:"1/-1"}}><label style={sty.label}>Nama *</label><input style={sty.input} value={form.display_name} onChange={e=>setForm(f=>({...f,display_name:e.target.value}))} placeholder="cth: Budi Santoso"/></div>
         <div style={{gridColumn:"1/-1"}}><label style={sty.label}>Catatan (opsional)</label><input style={sty.input} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="cth: TL Logistik UPT Surabaya"/></div>
+        <div style={{gridColumn:"1/-1"}}>
+          <label style={sty.label}>Scope Akses *</label>
+          <select style={sty.input} value={form.upt_id} onChange={e=>setForm(f=>({...f,upt_id:e.target.value}))}>
+            <option value="">-- Pilih scope --</option>
+            <option value="__GLOBAL__">Global (UIT/Pusat — semua UPT)</option>
+            {(uptList||[]).map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+          </select>
+        </div>
       </div>
       <button style={sty.btn("success","sm")} disabled={saving} onClick={addUser}>{saving?"Menyimpan...":"+ Tambah User"}</button>
 
@@ -88,7 +98,7 @@ export function TelegramWhitelistPanel({ sty, C, currentUser }) {
           <div key={u.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
             <div>
               <div style={{fontSize:12,fontWeight:700}}>{u.display_name} {!u.is_active && <span style={{fontSize:12,color:C.red,fontWeight:700}}>(nonaktif)</span>}</div>
-              <div style={{fontSize:12,color:C.muted}}>ID: {u.telegram_user_id}{u.telegram_username?` • ${u.telegram_username}`:""}{u.notes?` • ${u.notes}`:""}</div>
+              <div style={{fontSize:12,color:C.muted}}>ID: {u.telegram_user_id}{u.telegram_username?` • ${u.telegram_username}`:""} • Scope: {uptList?.find(x=>x.id===u.upt_id)?.nama || "Global"}{u.notes?` • ${u.notes}`:""}</div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
               <button style={sty.btn(u.is_active?"ghost":"success","sm")} onClick={()=>toggleActive(u)}>{u.is_active?"Nonaktifkan":"Aktifkan"}</button>

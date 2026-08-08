@@ -158,10 +158,11 @@ Deno.serve(async (req) => {
     // 1. Cek whitelist
     const { data: allowed } = await supabase
       .from("tg_allowed_users")
-      .select("display_name, is_active")
+      .select("display_name, is_active, upt_id")
       .eq("telegram_user_id", userId)
       .maybeSingle();
 
+    const callerUptId = allowed?.upt_id ?? null;
     const isWhitelisted = !!(allowed?.is_active);
     logEntry.is_whitelisted = isWhitelisted;
     if (allowed?.display_name) logEntry.display_name = allowed.display_name;
@@ -192,7 +193,7 @@ Deno.serve(async (req) => {
     } else {
       // 3. RAG query
       await sendTypingAction(chatId);
-      const { text, chunksUsed } = await generateReply(question, userId);
+      const { text, chunksUsed } = await generateReply(question, userId, callerUptId);
       reply  = text;
       logEntry.rag_chunks_used = chunksUsed;
       intent = "rag_query";
@@ -271,12 +272,13 @@ async function cohereEmbed(texts: string[], inputType: "search_document" | "sear
   return data.embeddings as number[][];
 }
 
-async function buildRagContext(question: string): Promise<{ context: string; chunksUsed: number }> {
+async function buildRagContext(question: string, callerUptId: string | null): Promise<{ context: string; chunksUsed: number }> {
   try {
     const [queryVector] = await cohereEmbed([question], "search_query");
     const { data: matches, error } = await supabase.rpc("match_rag_chunks", {
       query_embedding: queryVector,
       match_count: 12,
+      p_upts: callerUptId ? [callerUptId] : null,
     });
     if (error) throw error;
     if (!matches || matches.length === 0) return { context: "(tidak ditemukan referensi yang relevan untuk pertanyaan ini)", chunksUsed: 0 };
@@ -352,9 +354,13 @@ async function isRateLimited(userId: string): Promise<boolean> {
   }
 }
 
-async function generateReply(question: string, userId: string): Promise<{ text: string; chunksUsed: number }> {
+async function generateReply(question: string, userId: string, callerUptId: string | null): Promise<{ text: string; chunksUsed: number }> {
   const [{ context: ragContext, chunksUsed }, stateContext, conversationHistory] = await Promise.all([
-    buildRagContext(question),
+    buildRagContext(question, callerUptId),
+    // ponytail: warnoto_state context masih nasional utk user scoped — item blob (top20ByValue,
+    // materialKritis, dst.) tidak punya penanda upt_id sama sekali, filter per-UPT butuh
+    // merestruktur buildWarnotoStateSnapshot() di App.jsx (blob nasional). Perlu keputusan
+    // restrukturisasi terpisah, bukan diperbaiki di sini.
     buildWarnotoStateContext(),
     buildConversationHistory(userId),
   ]);
