@@ -49,9 +49,9 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 
 - **Filter per-UPT UI multi-UPT — DILENGKAPI & DI-PUSH (`e3ff9d1`, 2026-08-08).** Viewer UIT/Pusat kini punya dropdown filter per-UPT (pola `stockUptFilter` Data Stok, muncul hanya viewer multi-UPT) di TUG (`tugUptFilter`→`filteredTxns`+sub-tab TUG3/5/15), Alat Berat & ATTB (perluas `effectiveUptFilter` via `roleTier`), BA Inspeksi (`baUptFilter`). Banner Maturity: kotak Level sudah per-UPT (benar); switcher UPT dipaksa ke baris sendiri (`width:100%`) supaya Level tak geser. Maturity `maturity_assessments` memang NASIONAL (tak ada `upt_id`) — audit/5S/evidence-Drive semua per-UPT (dikonfirmasi). Opsi filter dari SCOPE viewer (`getScopeUptIds`), bukan data yang ada (UPT tanpa data tetap bisa dipilih).
 
-- **Kapasitas → Peta Utilisasi — DI-COMMIT & DI-PUSH (`23ed584`, 2026-08-08).** Filter UPT peta (`petaUptFilter` by `gudang.uptId`, opsi dari `getScopeUptIds`, oper `uptList` ke KapasitasGudangTab). Fix stale: PetaGudangTab useEffect kosongkan `selectedGudangId` saat `gudangList` kosong (UPT tanpa gudang tak nyangkut sub-gudang UPT lain). Redesign toolbar: satukan selector jadi 1 panel berlabel drill-down (1.UPT → 2.Gudang → 3.Denah) + checkbox, hapus `capacity-filterbar` orphan. **SISA: verifikasi browser (banding titik Ketintang vs Gudang Semi Terbuka).**
+- **Kapasitas → Peta Utilisasi — DI-COMMIT & DI-PUSH (`23ed584`, 2026-08-08).** Filter UPT peta (`petaUptFilter` by `gudang.uptId`, opsi dari `getScopeUptIds`, oper `uptList` ke KapasitasGudangTab). Fix stale: PetaGudangTab useEffect kosongkan `selectedGudangId` saat `gudangList` kosong (UPT tanpa gudang tak nyangkut sub-gudang UPT lain). Redesign toolbar: satukan selector jadi 1 panel berlabel drill-down (1.UPT → 2.Gudang → 3.Denah) + checkbox, hapus `capacity-filterbar` orphan. **Verifikasi browser OK (2026-08-08).**
 
-- **Cari Foto (Data Stok) filter UPT — DIPERBAIKI & DI-PUSH (`f270f38`, 2026-08-08).** `runPhotoSearch` kini batasi hasil ke katalog yang punya stok dalam scope efektif / `stockUptFilter`. Dulu dua mode (nameplate & bentuk) abaikan scope. Verifikasi browser: login UIT/Pusat, pilih tab UPT tertentu, Cari Foto → hasil hanya katalog UPT itu.
+- **Cari Foto (Data Stok) filter UPT — DIPERBAIKI & DI-PUSH (`f270f38`, 2026-08-08).** `runPhotoSearch` kini batasi hasil ke katalog yang punya stok dalam scope efektif / `stockUptFilter`. Dulu dua mode (nameplate & bentuk) abaikan scope. **Verifikasi browser OK (2026-08-08).**
 
 - **Refactor App.jsx ke custom hooks — target ≤4500 baris (dari 6415). Tranche-1+2 DI-COMMIT (BELUM push, BELUM verifikasi browser tranche-2).** Tranche-1: domain Maturity → `src/hooks/useMaturity.jsx`. Tranche-2: domain OCR/denah+koordinat blok → `src/hooks/useDenahOcr.js`. App.jsx 6415→**5984** (−431). SISA ke ≤4500: **−1484** (~3-4 tranche lagi; domain antri: TUG/approval [terbesar], Capacity, Alat Berat, ATTB). **BLOCKER: akun Vendor A kena MONTHLY SPEND LIMIT** (raise di claude.ai/settings/usage) — tranche lanjut mungkin harus lewat Codex (Vendor B) atau setelah limit dinaikkan. Sebelum PUSH: user WAJIB verifikasi browser tranche-2 (Peta Utilisasi, upload denah Gudang/Sub Gudang, assign/reset koordinat blok). Domain OCR/denah+koordinat blok diekstrak ke `src/hooks/useDenahOcr.js` (state: `ocrSuggestions`, `ocrSuggestGudangId`, `ocrSuggestSubGudangId`, `denahLoading`, `denahSubLoading`; handler: `runOcrOnDenah`, `runOcrOnDenahSub`, `suggestKodeFromOcr`, `assignLokasiKoordinat(Sub)`, `resetLokasiKoordinat(Sub)`, `dismissOcrSuggestions`) — relokasi murni, nol logic berubah. Koreksi thd rencana awal: lib OCR asli adalah `tesseract.js` (`recognize as ocrRecognize`), BUKAN `ocrSpaceOCR`/`rag.js`. Destructure `useDenahOcr()` ditaruh di App.jsx tepat setelah `stateRef.current = {...}` (baris ~1076) — WAJIB setelah `stateRef` didefinisikan (dep) dan sebelum pemakaian render-body pertama (JSX `MasterDataTab`/`OcrSuggestGudangModal`/`GudangAddModal`). `npm run build` LULUS (~16s). App.jsx sekarang 5984 baris. Tranche-1 (Maturity→`useMaturity.jsx`) sebelumnya LULUS verifikasi browser user setelah 1 bug TDZ diperbaiki (destructure kurang tinggi, ketimpa pemakaian `stateRef.current`/dep-array di atasnya) — **aturan mutlak berlaku sejak itu:** sebelum taruh destructure hook baru, grep semua identifier domain di App.jsx, pastikan destructure ADA DI ATAS pemakaian render-body pertama (stateRef assignment, dep-array useEffect/useMemo, JSX); pemakaian di dalam closure/handler aman di mana saja. **SISA:** user verifikasi browser (Peta Utilisasi, upload denah Gudang/Sub Gudang, assign/reset koordinat blok via klik) sebelum lanjut tranche-3 atau commit.
 
@@ -67,9 +67,9 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 
 ## Langkah berikutnya (urut, mengikat)
 
-**Lanjutan multi-UPT UI — SELESAI (`23ed584`, `f270f38`), tinggal verifikasi browser:**
-1. ✅ Peta Utilisasi filter UPT — committed. Sisa verifikasi: login UIT/Pusat → Kapasitas → Peta Utilisasi, dropdown UPT muncul & selector Gudang/sub-gudang menyempit; login 1-UPT dropdown tak muncul.
-2. ✅ Cari Foto Data Stok filter UPT — fixed di `runPhotoSearch` (`allowedKatalog` batasi hasil kedua mode ke scope efektif/`stockUptFilter`). Sisa verifikasi: login UIT/Pusat, pilih tab UPT tertentu, Cari Foto (bentuk & nameplate) → hasil hanya katalog UPT itu.
+**Lanjutan multi-UPT UI — SELESAI & verifikasi browser OK (`23ed584`, `f270f38`, 2026-08-08):**
+1. ✅ Peta Utilisasi filter UPT — committed + verified.
+2. ✅ Cari Foto Data Stok filter UPT — fixed di `runPhotoSearch` (`allowedKatalog`) + verified.
 
 **Rantai apply 4c→4a — URUTAN JANGAN DIBALIK (4a sebelum 4c → sync Data Stok & TUG-15 gagal 401):**
 1. Tunggu deploy Vercel `8f455e1` hijau, lalu verifikasi browser production akun nyata: simpan Data Stok & TUG-15 harus tetap tersimpan. Kalau muncul "Sesi login berakhir", STOP & selidiki.
@@ -85,7 +85,6 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 - Buat 2 akun baru lewat Kelola Akun: `ASMAN_LOG_UIT` (pilih unit UIT) + `ADMIN_LOG_PUSAT` (nasional).
 - Form 5S pasca-GELOMBANG B (`upt_id` NOT NULL): simpan pengisian nyata, refresh, cek muncul di History.
 - Evidence Drive dengan akun Pusat/UIT (jalur nasional `maturity-drive` belum diuji end-to-end).
-- Peta Utilisasi: bandingkan titik Ketintang & Gudang Semi Terbuka.
 - Upload foto pasca-fix `ff7fd49` (Data Stok, Inspeksi Material).
 - UI mobile Dashboard/Alat Berat/Data Stok pasca-deploy.
 
