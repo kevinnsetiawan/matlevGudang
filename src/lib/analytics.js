@@ -6,8 +6,8 @@ import { buildMonthlyDemandSeries, tsbMonthlyForecast } from "./tsbForecast.js";
 
 // Asumsi lead time pengadaan & panjang histori minimum sebelum stok minimum dihitung otomatis
 // — sama seperti konstanta di ForecastStokPage.jsx (lihat komentar di sana untuk alasan).
-const DEFAULT_LEAD_TIME_DAYS = 30;
-const MIN_HISTORY_MONTHS = 3;
+export const DEFAULT_LEAD_TIME_DAYS = 30;
+export const MIN_HISTORY_MONTHS = 3;
 
 // Risiko kehabisan stok satu katalog — dipindah dari getRisk() di ForecastStokPage.jsx supaya
 // bisa dipakai juga oleh Dashboard (computeProcurementList) tanpa duplikasi rumus TSB/ROP.

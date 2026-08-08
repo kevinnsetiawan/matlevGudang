@@ -5,7 +5,7 @@ import { fmtNum } from "../lib/ragShared.mjs";
 import { supabase } from "../supabaseClient.js";
 import { Sparkline } from "./Sparkline.jsx";
 import { MaterialCadangTab } from "./MaterialCadangTab.jsx";
-import { computeKatalogRisk, computeProcurementList } from "../lib/analytics.js";
+import { computeKatalogRisk, computeProcurementList, DEFAULT_LEAD_TIME_DAYS, MIN_HISTORY_MONTHS } from "../lib/analytics.js";
 
 const RISK_FILTERS = [
   {key:"critical",label:"Kritis"},
