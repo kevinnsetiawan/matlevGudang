@@ -71,7 +71,7 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 1. ✅ Peta Utilisasi filter UPT — committed + verified.
 2. ✅ Cari Foto Data Stok filter UPT — fixed di `runPhotoSearch` (`allowedKatalog`) + verified.
 
-**Rantai apply 4c→4a — SELESAI & TERVERIFIKASI di production (2026-08-08).** 4c lalu 4a di-apply via `ssh minipc-gudang-home` (`--single-transaction -v ON_ERROR_STOP=1`), kedua verify script LULUS, sisa policy lama=0. **SISA: verifikasi browser production akun nyata** — simpan Data Stok & TUG-15 harus tetap tersimpan (jangan muncul "Sesi login berakhir"); cek UIT/ADMIN_LOG_PUSAT kini bisa lihat 3 TUG (dulu buta).
+**Rantai apply 4c→4a — SELESAI & TERVERIFIKASI di production (2026-08-08).** 4c lalu 4a di-apply via `ssh minipc-gudang-home` (`--single-transaction -v ON_ERROR_STOP=1`), kedua verify script LULUS, sisa policy lama=0. Verifikasi browser production akun nyata OK (2026-08-08) — simpan Data Stok & TUG-15 tetap tersimpan, UIT/ADMIN_LOG_PUSAT bisa lihat TUG.
 
 **Next: Gelombang 4b — PERUBAHAN SKEMA, butuh proposal user dulu** (`profiles`, `stock_opname`/`stock_count` + kolom `upt_id` + backfill; detail di Status atas).
 
