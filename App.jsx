@@ -858,7 +858,11 @@ export default function PLNWarehouse() {
       // ke Supabase sama sekali — widget akurasi Dashboard "hilang" kalau dibuka dari
       // device/browser lain karena datanya memang cuma ada di localStorage device asal.
       const opnLocal = copn || [];
-      const scLocal = csc || [];
+      // Newest-first by uploadedAt: konsumen (dashboard "Akurasi SAP vs Fisik",
+      // "sesi terakhir") ambil [0] sbg sesi terbaru. Kolom created_at bisa kembar
+      // (mis. dua sesi disync barengan) → jangan diandalkan utk recency.
+      const byRecency = (a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0);
+      const scLocal = [...(csc || [])].sort(byRecency);
       if (copnRemote === null) {
         // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
         setOpnameList(opnLocal);
@@ -875,8 +879,9 @@ export default function PLNWarehouse() {
         setStockCountList(scLocal);
         loadFailures.push("Stock Count");
       } else if (cscRemote.length > 0) {
-        setStockCountList(cscRemote);
-        CLOUD.set("pln_stockcount_v1", cscRemote); // refresh cache dgn data terbaru dari server
+        const scSorted = [...cscRemote].sort(byRecency);
+        setStockCountList(scSorted);
+        CLOUD.set("pln_stockcount_v1", scSorted); // refresh cache dgn data terbaru dari server
       } else {
         setStockCountList(scLocal);
         if (scLocal.length > 0) syncMasterTable("stock_count", scLocal);

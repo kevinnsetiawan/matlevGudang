@@ -108,7 +108,12 @@ export async function syncMasterTable(table, list, extraCols) {
   const rows = dedupedList.map(item => ({
     id: item.id,
     data: item,
-    created_at: item.createdAt ?? Date.now(),
+    // stock_count pakai `uploadedAt` sbg waktu sesi (bukan `createdAt`); tanpa ini setiap
+    // sync massal menimpa created_at=Date.now() ke SEMUA baris → kembar, tie-break recency
+    // jadi acak (bug dashboard akurasi ambil sesi salah).
+    created_at: item.createdAt
+      ?? (table === "stock_count" ? item.uploadedAt : null)
+      ?? Date.now(),
     ...(extraCols ? extraCols(item) : {}),
   }));
   if (rows.length) {
@@ -159,7 +164,12 @@ export async function syncMasterTableRows(table, rows, extraCols) {
   const upsertRows = dedupedRows.map(item => ({
     id: item.id,
     data: item,
-    created_at: item.createdAt ?? Date.now(),
+    // stock_count pakai `uploadedAt` sbg waktu sesi (bukan `createdAt`); tanpa ini setiap
+    // sync massal menimpa created_at=Date.now() ke SEMUA baris → kembar, tie-break recency
+    // jadi acak (bug dashboard akurasi ambil sesi salah).
+    created_at: item.createdAt
+      ?? (table === "stock_count" ? item.uploadedAt : null)
+      ?? Date.now(),
     ...(extraCols ? extraCols(item) : {}),
   }));
   const { error } = await supabase.from(table).upsert(upsertRows, { onConflict: "id" });
