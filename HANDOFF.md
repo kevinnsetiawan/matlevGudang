@@ -63,7 +63,7 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 
 - **Audit GRANT `anon` (2026-08-06, read-only):** role `anon` pegang GRANT tulis pada **33 tabel** public (yang menahan hanya RLS). Yang benar-benar bisa ditulis TANPA LOGIN hari ini: `katalog`, `stock_current`, `tug15_history`, `wa_sync_status`, `warnoto_state`, `tg_agent_logs`. 4a menutup `stock_current`+`tug15_history`, 4c menutup sisanya. Pengetatan GRANT (paling serius `katalog`) = gelombang terpisah, cek dulu apakah bot menulis via anon atau service_role sebelum ketatkan.
 
-- **Gelombang 4b (BELUM mulai) — PERUBAHAN SKEMA, wajib proposal user dulu:** `profiles` (paling sensitif — jangan matikan login, jamin `id=auth.uid()` tetap baca profil sendiri, akun UIT/Pusat `upt_id` NULL tetap terbaca) + `stock_opname`/`stock_count` (butuh kolom `upt_id` baru + backfill dari jsonb `data->>'dibuatOleh'`/`uploadedBy`).
+- **Gelombang 4b SELESAI — ternyata skema sudah ter-apply (diverifikasi production 2026-08-08), TANPA DDL baru.** Audit menemukan kolom+RLS 4b sudah terpasang (kemungkinan ikut saat kerja multi-UPT 3-tier). `profiles`: RLS on, SELECT `can_read_profile(id,upt_id,uit_id)` (cabang `actor.id=p_profile_id` jamin self-read → login aman, 3 akun `upt_id` NULL tetap baca profil sendiri), TAK ada policy tulis → create/edit akun via Edge Function `admin-create-user`/`admin-update-user` (service_role, `App.jsx:1496`), anon SELECT only. `stock_opname`/`stock_count`: `upt_id text NOT NULL` terisi, scoped read+write via `can_access_upt` (USING+CHECK), anon nol GRANT tulis. Spot-check backfill LULUS: ketiga baris (1 opname + 2 count) `upt_id=UPT-SBY` cocok UPT uploader (`d7104036`=ADMIN Fajar Sutomo, UPT-SBY). Catatan desain (dibiarkan, bukan bug): VIEWER/UPT bisa baca profil rekan se-UPT (nama/role/HP) via `can_access_upt` — tak bocor lintas-UPT.
 
 ## Langkah berikutnya (urut, mengikat)
 
@@ -73,7 +73,7 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 
 **Rantai apply 4c→4a — SELESAI & TERVERIFIKASI di production (2026-08-08).** 4c lalu 4a di-apply via `ssh minipc-gudang-home` (`--single-transaction -v ON_ERROR_STOP=1`), kedua verify script LULUS, sisa policy lama=0. Verifikasi browser production akun nyata OK (2026-08-08) — simpan Data Stok & TUG-15 tetap tersimpan, UIT/ADMIN_LOG_PUSAT bisa lihat TUG.
 
-**Next: Gelombang 4b — PERUBAHAN SKEMA, butuh proposal user dulu** (`profiles`, `stock_opname`/`stock_count` + kolom `upt_id` + backfill; detail di Status atas).
+**Gelombang 4b SELESAI (2026-08-08)** — skema ternyata sudah ter-apply, spot-check backfill lulus, tanpa DDL baru (detail di Status atas). Rantai RLS multi-UPT 4a→4b→4c TUNTAS.
 
 **Belum diputuskan (jangan putuskan sendiri):** (1) scan QR publik masih NASIONAL — siapa pun yang scan bisa baca material seluruh UPT; butuh skema token per-QR, bukan sekadar policy. (2) Pengetatan GRANT anon `katalog`/`wa_sync_status`/`warnoto_state`/`tg_agent_logs` barengan cek kredensial bot.
 
