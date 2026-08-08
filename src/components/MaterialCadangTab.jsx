@@ -19,6 +19,11 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   const [applyNotes, setApplyNotes] = useState("");
   const [detailItem, setDetailItem] = useState(null);
   const [aiInsightLoading, setAiInsightLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [applyAllConfirm, setApplyAllConfirm] = useState(false);
+  const [approveAllConfirm, setApproveAllConfirm] = useState(false);
+  const pageSize = 25;
 
   const canEdit = hasRole(currentUser, "ADMIN","TL");
   const canApprove = hasRole(currentUser, "ASMAN");
@@ -107,7 +112,14 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
         unmatched: parsed.filter(r=>r.status==="UNMATCHED").length,
         invalid: parsed.filter(r=>r.status==="INVALID").length,
       };
-      setImportPreview({ rows: parsed, stats, fileName: file.name });
+      const fileUpt = (file.name.match(/UPT-[A-Z]{3}/i)?.[0] || "").toUpperCase();
+      const broadScope = hasRole(currentUser, "ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT");
+      const userUpt = String(currentUser?.uptId||"").toUpperCase();
+      const uptWarning = (fileUpt && userUpt && fileUpt !== userUpt && !broadScope)
+        ? `File ini untuk ${fileUpt}, tetapi Anda login sebagai ${userUpt}. Pastikan data yang diupload benar.`
+        : null;
+      setImportPreview({ rows: parsed, stats, fileName: file.name, uptWarning });
+      if (uptWarning) showToast(uptWarning, "error");
     } catch(err) {
       showToast("Gagal baca file: " + err.message, "error");
     }
@@ -157,7 +169,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangHealthData(updatedHealth);
     await saveToCloud({ materialCadangData: updated, materialCadangHealthData: updatedHealth });
     setAnalisisResult(healthRows);
-    setSubTab("health");
+    setSubTab("hasil");
     showToast("Health Index Material Cadang berhasil dihitung.", "success");
 
     // Backup ke Supabase (audit trail) — append-only, tidak mengubah angka
@@ -249,6 +261,66 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     syncMaterialCadangRows("material_cadang_apply_audit", [auditEntry], mapApplyAuditRow);
     setApplyConfirm(null); setApplyNotes("");
     showToast("Pengajuan apply minQty dikirim ke Asman.", "success");
+  }
+
+  async function handleApplyAllPending() {
+    const pendingKatalogIds = new Set(pendingApply.map(h => h.katalogId));
+    const candidates = displayResults.filter(r =>
+      r.treatment === "Material Cadang" && r.gapQty > 0 && !pendingKatalogIds.has(r.katalogId)
+    );
+    if (!candidates.length) { showToast("Tidak ada material yang bisa diajukan.", "error"); setApplyAllConfirm(false); return; }
+    const now = Date.now();
+    const entries = candidates.map((item, idx) => ({
+      id: "MCAPPLY-" + (now + idx),
+      katalogId: item.katalogId,
+      namaBarang: item.katalogName || item.namaMaterial,
+      noKatalog: item.noKat,
+      recommendedQty: item.recommendedQty,
+      abcClass: item.abcClass,
+      policy: item.policy,
+      runId: item.runId,
+      healthIndex: item.healthIndex,
+      healthStatus: item.healthStatus,
+      status: "PENDING_ASMAN",
+      requestedBy: currentUser.id,
+      requestedAt: now,
+      notes: "",
+    }));
+    const updated = { ...mcData, applyHistory: [...mcData.applyHistory, ...entries] };
+    const auditEntries = entries.map(entry => ({ ...entry, auditId:`${entry.id}-REQ`, action:"REQUEST_APPLY_MIN_QTY", actor:currentUser.id, actedAt:Date.now() }));
+    const updatedHealth = { ...mcHealth, applyAudit: [...(mcHealth.applyAudit||[]), ...auditEntries] };
+    setMaterialCadangData(updated);
+    setMaterialCadangHealthData(updatedHealth);
+    await saveToCloud({ materialCadangData: updated, materialCadangHealthData: updatedHealth });
+    syncMaterialCadangRows("material_cadang_apply_audit", auditEntries, mapApplyAuditRow);
+    setApplyAllConfirm(false);
+    showToast(`${entries.length} material diajukan untuk approval Asman.`, "success");
+  }
+
+  async function handleApproveAllPending() {
+    if (!pendingApply.length) { setApproveAllConfirm(false); return; }
+    const now = Date.now();
+    const recommendedByKatalog = {};
+    pendingApply.forEach(h => { recommendedByKatalog[h.katalogId] = h.recommendedQty; });
+    const updatedKatalog = katalogList.map(k =>
+      k.id in recommendedByKatalog ? { ...k, minQty: recommendedByKatalog[k.id], minQtyUpdatedAt: now, minQtyUpdatedBy: currentUser.id } : k
+    );
+    const pendingIds = new Set(pendingApply.map(h => h.id));
+    const updatedMC = {
+      ...mcData,
+      applyHistory: mcData.applyHistory.map(h =>
+        pendingIds.has(h.id) ? { ...h, status: "APPROVED", approvedBy: currentUser.id, approvedAt: now } : h
+      ),
+    };
+    const auditEntries = pendingApply.map(entry => ({ ...entry, auditId:`${entry.id}-APPROVE-${now}`, action:"APPROVE_APPLY_MIN_QTY", actor:currentUser.id, actedAt:now, appliedMinQty:entry.recommendedQty }));
+    const updatedHealth = { ...mcHealth, applyAudit: [...(mcHealth.applyAudit||[]), ...auditEntries] };
+    setKatalogList(updatedKatalog);
+    setMaterialCadangData(updatedMC);
+    setMaterialCadangHealthData(updatedHealth);
+    await saveToCloud({ katalogList: updatedKatalog, materialCadangData: updatedMC, materialCadangHealthData: updatedHealth });
+    syncMaterialCadangRows("material_cadang_apply_audit", auditEntries, mapApplyAuditRow);
+    setApproveAllConfirm(false);
+    showToast(`${pendingApply.length} pengajuan disetujui.`, "success");
   }
 
   async function handleApproveApply(applyId) {
@@ -345,11 +417,10 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   const aiByNoKatalog = {};
   latestMaterialInsights.forEach(m => { if (m.noKatalog) aiByNoKatalog[normalizeKatalog(m.noKatalog)] = m; });
   const TABS = [
-    {id:"health",label:"Health Index"},
-    {id:"ai",label:"AI Insight"},
     {id:"dashboard",label:"📊 Dashboard"},
+    {id:"hasil",label:"📋 Analisis"},
+    {id:"ai",label:"AI Insight"},
     {id:"import",label:"📥 Import & Hitung"},
-    {id:"hasil",label:"📋 Hasil Analisis"},
     {id:"apply",label:"✅ Apply Min Qty",badge:pendingApply.length},
   ];
 
@@ -415,7 +486,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                     <thead>
                       <tr style={{background:"#f9fafb"}}>
-                        {["No Katalog","Nama","Kelas","Policy","Stok","Ideal","Gap","Status","Nilai Gap"].map(h=>(
+                        {["No Katalog","Nama","Merk","Kelas","Policy","Stok","Ideal","Gap","Status","Nilai Gap"].map(h=>(
                           <th key={h} style={{padding:"7px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`}}>{h}</th>
                         ))}
                       </tr>
@@ -435,6 +506,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                             <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
                               <td style={{padding:"6px 8px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
                               <td style={{padding:"6px 8px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
+                              <td style={{padding:"6px 8px",fontSize:12,color:C.muted,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.merk||"-"}</td>
                               <td style={{padding:"6px 8px"}}><span style={{background:r.abcClass==="A1"?"#fef2f2":r.abcClass==="A2"?"#fff7ed":r.abcClass==="B1"?"#eff6ff":"#f9fafb",color:r.abcClass==="A1"?C.red:r.abcClass==="A2"?"#ea580c":C.accent,padding:"2px 6px",borderRadius:4,fontWeight:700,fontSize:12}}>{r.abcClass}</span></td>
                               <td style={{padding:"6px 8px",fontSize:12,color:C.muted}}>{r.policy}</td>
                               <td style={{padding:"6px 8px",fontWeight:700}}>{r.currentQty}</td>
@@ -452,49 +524,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                   <button style={sty.btn("ghost","sm")} onClick={()=>setSubTab("hasil")}>Lihat semua hasil →</button>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* HEALTH INDEX */}
-      {subTab==="health" && (
-        <div>
-          {displayResults.length === 0 ? (
-            <div style={{...sty.card,textAlign:"center",padding:30,color:C.muted}}>Belum ada Health Index. Upload dan hitung data Material Cadang terlebih dahulu.</div>
-          ) : (
-            <div style={{...sty.card,padding:0,overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1100}}>
-                <thead style={{background:C.sidebar,color:"white"}}>
-                  <tr>
-                    {["No Katalog","Nama Material","Health Index","Status","Confidence","Kelas","Policy","Stok","Ideal","Gap","Nilai Gap","AI Recommendation"].map(h=>(
-                      <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...displayResults].sort((a,b)=>(a.healthIndex||100)-(b.healthIndex||100)).map((r,i)=>{
-                    const ai = aiByNoKatalog[normalizeKatalog(r.noKat)];
-                    const rec = ai?.recommendation || r.aiRecommendation || "Monitor Saja";
-                    return (
-                      <tr key={i} style={{borderBottom:`1px solid ${C.border}`,cursor:"pointer"}} onClick={()=>setDetailItem(r)}>
-                        <td style={{padding:"6px 10px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
-                        <td style={{padding:"6px 10px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
-                        <td style={{padding:"6px 10px",fontWeight:900,color:r.healthColor}}>{r.healthIndex}</td>
-                        <td style={{padding:"6px 10px"}}><span style={{padding:"2px 8px",borderRadius:999,background:r.healthBg,color:r.healthColor,fontWeight:800,fontSize:12}}>{r.healthStatus}</span></td>
-                        <td style={{padding:"6px 10px",fontWeight:700,color:(r.dataConfidence||0)<70?C.red:C.green}}>{r.dataConfidence}%</td>
-                        <td style={{padding:"6px 10px",fontWeight:700}}>{r.abcClass}</td>
-                        <td style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.policy}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700}}>{r.currentQty}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700}}>{r.recommendedQty}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700,color:r.gapQty>0?C.red:C.green}}>{r.gapQty>0?"-"+r.gapQty:0}</td>
-                        <td style={{padding:"6px 10px",color:r.gapQty>0?"#7c3aed":C.muted}}>{r.gapQty>0?"Rp "+fmtNum(r.gapQty*(r.harga||0)):"-"}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700,color:rec==="Prioritaskan Pengadaan"?C.red:rec==="Ajukan Apply Min Qty"?"#f59e0b":C.muted}}>{rec}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
           )}
         </div>
@@ -588,7 +617,22 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                   {importing?"⏳ Memproses...":"📂 Upload File CSV/XLSX"}
                   <input type="file" accept=".csv,.xlsx" style={{display:"none"}} onChange={handleImportFile} disabled={importing}/>
                 </label>
-                <a href={`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,`} download="TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx" style={{display:"none"}}></a>
+                <button type="button" style={sty.btn("ghost")} onClick={()=>{
+                  const ref=(maraReference&&maraReference.length)?maraReference[0]:null;
+                  const kat=(katalogList&&katalogList.length)?katalogList[0]:null;
+                  const sampleKat=ref?ref.katalog:(kat?kat.katalog:"3.02.01.99.001");
+                  const sampleNama=ref?(ref.prefix||ref.description||""):(kat?kat.name:"CT 150kV");
+                  const aoa=[
+                    ["TEMPLATE IMPORT MATERIAL CADANG — WARNOTO"],
+                    [],
+                    ["No Katalog","Nama Material","Equipment Cluster","Populasi Cluster","Failure 5 Tahun","Penggantian 5 Tahun","Emergency Replacement 5 Tahun","Lead Time Hari","Time To Failure Hari","Breakdown","Harga Satuan","Kriteria","Tanggal Penggantian","UPT","GI/GIS","Bay","Merk","Tipe","No. Seri","PHASA","Teg. (kV)","Tahun Buat","Tanggal Operasi"],
+                    [sampleKat,sampleNama,"Current Transformer",120,8,5,1,180,3650,"TIDAK",45000000,"Kritis","2024-05-10","UPT Surabaya","GI Ketintang","Bay Trafo 1","ABB","IMB 145","SN-2019-00123","R",150,2018,"2019-03-01"]
+                  ];
+                  const ws=XLSX.utils.aoa_to_sheet(aoa);
+                  const wb=XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb,ws,"Import Material Cadang");
+                  XLSX.writeFile(wb,"TEMPLATE_IMPORT_MATERIAL_CADANG.xlsx");
+                }}>📄 Download Template</button>
               </div>
             )}
           </div>
@@ -596,6 +640,11 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
           {importPreview && (
             <div style={{...sty.card,marginBottom:16}}>
               <div style={{fontWeight:700,marginBottom:10}}>Preview: {importPreview.fileName}</div>
+              {importPreview.uptWarning && (
+                <div style={{background:"#fef2f2",border:`1px solid ${C.red}`,color:C.red,fontWeight:700,fontSize:13,padding:"8px 12px",borderRadius:8,marginBottom:12}}>
+                  ⚠️ {importPreview.uptWarning}
+                </div>
+              )}
               <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}}>
                 {[
                   {label:"Total Baris",val:importPreview.stats.total,color:C.accent},
@@ -614,7 +663,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                   <thead style={{position:"sticky",top:0,background:C.sidebar,color:"white"}}>
                     <tr>
-                      {["No Katalog","Nama Material","Cluster","Populasi","Failure","Penggantian","Lead Time","Status","Warning"].map(h=>(
+                      {["No Katalog","Nama Material","Merk","Cluster","Populasi","Failure","Penggantian","Lead Time","Status","Warning"].map(h=>(
                         <th key={h} style={{padding:"7px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
                       ))}
                     </tr>
@@ -624,6 +673,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                       <tr key={i} style={{background:r.status==="INVALID"?"#fef2f2":r.status==="UNMATCHED"?"#fefce8":"white",borderBottom:`1px solid ${C.border}`}}>
                         <td style={{padding:"5px 8px",fontWeight:700,color:"#0098da"}}>{r.noKat||"-"}</td>
                         <td style={{padding:"5px 8px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{r.namaMaterial||"-"}</td>
+                        <td style={{padding:"5px 8px",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{r.merk||"-"}</td>
                         <td style={{padding:"5px 8px"}}>{r.cluster||"-"}</td>
                         <td style={{padding:"5px 8px",textAlign:"right"}}>{r.populasi||0}</td>
                         <td style={{padding:"5px 8px",textAlign:"right"}}>{r.failure5y||0}</td>
@@ -638,60 +688,93 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                   </tbody>
                 </table>
               </div>
-              {canEdit && importPreview.stats.match + importPreview.stats.warning > 0 && (
-                <button style={sty.btn("primary")} onClick={handleHitung}>🔢 Hitung Rekomendasi Material Cadang</button>
-              )}
               {importPreview.stats.match + importPreview.stats.warning === 0 && (
-                <div style={{color:C.red,fontWeight:700,fontSize:13}}>⚠️ Tidak ada baris yang bisa dihitung (semua UNMATCHED/INVALID). Periksa No Katalog di file.</div>
+                <div style={{color:C.red,fontWeight:700,fontSize:13,marginBottom:10}}>⚠️ Tidak ada baris yang bisa dihitung (semua UNMATCHED/INVALID). Periksa No Katalog di file.</div>
               )}
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                {canEdit && importPreview.stats.match + importPreview.stats.warning > 0 && (
+                  <button style={sty.btn("primary")} onClick={handleHitung}>🔢 Hitung Rekomendasi Material Cadang</button>
+                )}
+                <button style={sty.btn("ghost")} onClick={()=>setImportPreview(null)}>Batal</button>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* HASIL ANALISIS */}
+      {/* ANALISIS (Health Index + Hasil digabung) */}
       {subTab==="hasil" && (
         <div>
           {displayResults.length === 0 ? (
             <div style={{...sty.card,textAlign:"center",padding:30,color:C.muted}}>Belum ada hasil analisis. Upload dan hitung di tab "Import & Hitung".</div>
           ) : (
-            <div style={{...sty.card,padding:0,overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}}>
-                <thead style={{background:C.sidebar,color:"white"}}>
-                  <tr>
-                    {["No Katalog","Nama Material","Cluster","Kelas","Policy","Stok Saat Ini","Ideal","Gap","Status","Nilai Gap","Aksi"].map(h=>(
-                      <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayResults.map((r,i)=>{
-                    const status = r.treatment!=="Material Cadang"?"Persediaan/Rutin":r.currentQty===0&&r.recommendedQty>0?"Kosong/Kritis":r.currentQty<r.recommendedQty?"Kurang":"Aman";
-                    const statusColor = status==="Kosong/Kritis"?C.red:status==="Kurang"?"#f59e0b":status==="Aman"?C.green:C.muted;
-                    const hasPending = mcData.applyHistory.find(h=>h.katalogId===r.katalogId&&h.status==="PENDING_ASMAN");
-                    return (
-                      <tr key={i} style={{borderBottom:`1px solid ${C.border}`,cursor:"pointer"}} onClick={()=>setDetailItem(r)}>
-                        <td style={{padding:"6px 10px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
-                        <td style={{padding:"6px 10px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
-                        <td style={{padding:"6px 10px",fontSize:12}}>{r.cluster}</td>
-                        <td style={{padding:"6px 10px"}}><span style={{background:r.abcClass==="A1"?"#fef2f2":r.abcClass==="A2"?"#fff7ed":r.abcClass==="B1"?"#eff6ff":"#f9fafb",color:r.abcClass==="A1"?C.red:r.abcClass==="A2"?"#ea580c":C.accent,padding:"2px 6px",borderRadius:4,fontWeight:700,fontSize:12}}>{r.abcClass}</span></td>
-                        <td style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.policy}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700}}>{r.currentQty}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700}}>{r.recommendedQty}</td>
-                        <td style={{padding:"6px 10px",fontWeight:700,color:r.gapQty>0?C.red:C.green}}>{r.gapQty>0?"-"+r.gapQty:0}</td>
-                        <td style={{padding:"6px 10px"}}><span style={{color:statusColor,fontWeight:700,fontSize:12}}>{status}</span></td>
-                        <td style={{padding:"6px 10px",color:"#7c3aed"}}>{r.gapQty>0?"Rp "+fmtNum(r.gapQty*(r.harga||0)):"-"}</td>
-                        <td style={{padding:"6px 10px"}} onClick={e=>e.stopPropagation()}>
-                          {canEdit && r.treatment==="Material Cadang" && r.recommendedQty>0 && !hasPending && (
-                            <button style={{...sty.btn("primary","sm"),fontSize:12}} onClick={()=>setApplyConfirm(r)}>Apply Min Qty</button>
-                          )}
-                          {hasPending && <span style={{fontSize:12,color:"#f59e0b",fontWeight:700}}>⏳ Pending</span>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {["ALL","Critical","High Risk","Watch","Healthy"].map(f=>(
+                    <button key={f} style={{...sty.btn(statusFilter===f?"primary":"ghost","sm"),fontSize:12}}
+                      onClick={()=>{ setStatusFilter(f); setPage(0); }}>{f==="ALL"?"Semua":f}</button>
+                  ))}
+                </div>
+                {canEdit && (
+                  <button style={sty.btn("primary","sm")} onClick={()=>setApplyAllConfirm(true)}>✅ Apply Min Qty Semua</button>
+                )}
+              </div>
+              {(() => {
+                const filtered = [...displayResults]
+                  .filter(r => statusFilter==="ALL" || r.healthStatus===statusFilter)
+                  .sort((a,b)=>(a.healthIndex||100)-(b.healthIndex||100));
+                const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
+                const paged = filtered.slice(page*pageSize, (page+1)*pageSize);
+                return (
+                  <div style={{...sty.card,padding:0,overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:1200}}>
+                      <thead style={{background:C.sidebar,color:"white"}}>
+                        <tr>
+                          {["No Katalog","Nama Material","Merk","Health Index","Status","Confidence","Kelas","Policy","Stok","Ideal","Gap","Nilai Gap","AI Recommendation","Aksi"].map(h=>(
+                            <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paged.map((r,i)=>{
+                          const ai = aiByNoKatalog[normalizeKatalog(r.noKat)];
+                          const rec = ai?.recommendation || r.aiRecommendation || "Monitor Saja";
+                          const hasPending = mcData.applyHistory.find(h=>h.katalogId===r.katalogId&&h.status==="PENDING_ASMAN");
+                          return (
+                            <tr key={i} style={{borderBottom:`1px solid ${C.border}`,cursor:"pointer"}} onClick={()=>setDetailItem(r)}>
+                              <td style={{padding:"6px 10px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
+                              <td style={{padding:"6px 10px",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
+                              <td style={{padding:"6px 10px",fontSize:12,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.merk||"-"}</td>
+                              <td style={{padding:"6px 10px",fontWeight:900,color:r.healthColor}}>{r.healthIndex}</td>
+                              <td style={{padding:"6px 10px"}}><span style={{padding:"2px 8px",borderRadius:999,background:r.healthBg,color:r.healthColor,fontWeight:800,fontSize:12}}>{r.healthStatus}</span></td>
+                              <td style={{padding:"6px 10px",fontWeight:700,color:(r.dataConfidence||0)<70?C.red:C.green}}>{r.dataConfidence}%</td>
+                              <td style={{padding:"6px 10px",fontWeight:700}}>{r.abcClass}</td>
+                              <td style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.policy}</td>
+                              <td style={{padding:"6px 10px",fontWeight:700}}>{r.currentQty}</td>
+                              <td style={{padding:"6px 10px",fontWeight:700}}>{r.recommendedQty}</td>
+                              <td style={{padding:"6px 10px",fontWeight:700,color:r.gapQty>0?C.red:C.green}}>{r.gapQty>0?"-"+r.gapQty:0}</td>
+                              <td style={{padding:"6px 10px",color:r.gapQty>0?"#7c3aed":C.muted}}>{r.gapQty>0?"Rp "+fmtNum(r.gapQty*(r.harga||0)):"-"}</td>
+                              <td style={{padding:"6px 10px",fontWeight:700,color:rec==="Prioritaskan Pengadaan"?C.red:rec==="Ajukan Apply Min Qty"?"#f59e0b":C.muted}}>{rec}</td>
+                              <td style={{padding:"6px 10px"}} onClick={e=>e.stopPropagation()}>
+                                {canEdit && r.treatment==="Material Cadang" && r.recommendedQty>0 && !hasPending && (
+                                  <button style={{...sty.btn("primary","sm"),fontSize:12}} onClick={()=>setApplyConfirm(r)}>Apply Min Qty</button>
+                                )}
+                                {hasPending && <span style={{fontSize:12,color:"#f59e0b",fontWeight:700}}>⏳ Pending</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderTop:`1px solid ${C.border}`}}>
+                      <button style={sty.btn("ghost","sm")} disabled={page===0} onClick={()=>setPage(p=>Math.max(0,p-1))}>‹ Sebelumnya</button>
+                      <span style={{fontSize:12,color:C.muted}}>Hal {page+1}/{totalPages}</span>
+                      <button style={sty.btn("ghost","sm")} disabled={page>=totalPages-1} onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))}>Berikutnya ›</button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -705,7 +788,12 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
           ) : null}
           {pendingApply.length > 0 && (
             <div style={{...sty.card}}>
-              <div style={{fontWeight:700,marginBottom:12}}>⏳ Menunggu Approval Asman ({pendingApply.length})</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                <div style={{fontWeight:700}}>⏳ Menunggu Approval Asman ({pendingApply.length})</div>
+                {canApprove && (
+                  <button style={sty.btn("primary","sm")} onClick={()=>setApproveAllConfirm(true)}>✅ Setujui Semua</button>
+                )}
+              </div>
               {pendingApply.map(h=>(
                 <div key={h.id} style={{padding:12,borderRadius:8,border:`1px solid ${C.border}`,marginBottom:10}}>
                   <div style={{fontWeight:700}}>{h.namaBarang} — No. Katalog: {h.noKatalog}</div>
@@ -716,22 +804,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
                     <div className="approval-actions approval-actions--compact" style={{marginTop:10}}>
                       <button className="approval-btn--approve" onClick={()=>handleApproveApply(h.id)}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setuju & Apply Min Qty</button>
                       <button className="approval-btn--reject" onClick={()=>handleRejectApply(h.id, "Ditolak Asman")}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button>
-                    </div>
-                  )}
-                  {false && canApprove && (
-                    <div className="approval-actions approval-actions--compact" style={{marginTop:10}}>
-                      <button className="approval-btn--approve" onClick={async ()=>{
-                        const updated = {...mcData, applyHistory: mcData.applyHistory.map(x=>x.id===h.id?{...x,status:"APPROVED_APPLIED",decidedBy:currentUser.id,decidedAt:Date.now()}:x)};
-                        setMaterialCadangData(updated);
-                        await saveToCloud({materialCadangData:updated});
-                        showToast("Apply minQty disetujui.", "success");
-                      }}><span className="approval-btn__ic" aria-hidden="true">✓</span>Setuju</button>
-                      <button className="approval-btn--reject" onClick={async ()=>{
-                        const updated = {...mcData, applyHistory: mcData.applyHistory.map(x=>x.id===h.id?{...x,status:"REJECTED",decidedBy:currentUser.id,decidedAt:Date.now()}:x)};
-                        setMaterialCadangData(updated);
-                        await saveToCloud({materialCadangData:updated});
-                        showToast("Pengajuan ditolak.", "success");
-                      }}><span className="approval-btn__ic" aria-hidden="true">✕</span>Tolak</button>
                     </div>
                   )}
                 </div>
@@ -825,6 +897,33 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
             <div style={{display:"flex",gap:8}}>
               <button style={sty.btn("primary")} onClick={()=>handleAjukanApply(applyConfirm)}>📤 Kirim Pengajuan</button>
               <button style={sty.btn("ghost")} onClick={()=>setApplyConfirm(null)}>Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal konfirmasi apply semua */}
+      {applyAllConfirm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setApplyAllConfirm(false)}>
+          <div style={{...sty.card,maxWidth:420,width:"100%"}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{fontWeight:800,marginBottom:12}}>Ajukan Apply Min Qty Semua?</h3>
+            <p style={{fontSize:13,marginBottom:12,color:C.muted}}>Semua material Material Cadang dengan gap qty &gt; 0 yang belum diajukan akan dikirim ke Asman sekaligus.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button style={sty.btn("primary")} onClick={handleApplyAllPending}>📤 Ajukan Semua</button>
+              <button style={sty.btn("ghost")} onClick={()=>setApplyAllConfirm(false)}>Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal konfirmasi setujui semua */}
+      {approveAllConfirm && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setApproveAllConfirm(false)}>
+          <div style={{...sty.card,maxWidth:420,width:"100%"}} onClick={e=>e.stopPropagation()}>
+            <h3 style={{fontWeight:800,marginBottom:12}}>Setujui Semua Pengajuan?</h3>
+            <p style={{fontSize:13,marginBottom:12,color:C.muted}}>{pendingApply.length} pengajuan akan disetujui dan Min Qty di Master Katalog diperbarui sekaligus.</p>
+            <div style={{display:"flex",gap:8}}>
+              <button style={sty.btn("primary")} onClick={handleApproveAllPending}>✅ Setujui Semua</button>
+              <button style={sty.btn("ghost")} onClick={()=>setApproveAllConfirm(false)}>Batal</button>
             </div>
           </div>
         </div>

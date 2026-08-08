@@ -38,6 +38,7 @@ export function parseMaterialCadangRows(rows, katalogList) {
     ttf: ["Time To Failure Hari","TIME TO FAILURE HARI"],
     breakdown: ["Breakdown","BREAKDOWN"],
     harga: ["Harga Satuan","HARGA SATUAN"],
+    merk: ["Merk","MERK","merk"],
   };
   function findCol(row, keys) {
     for (const k of keys) { if (row[k] !== undefined) return row[k]; }
@@ -47,6 +48,7 @@ export function parseMaterialCadangRows(rows, katalogList) {
     const noKat = normalizeKatalog(findCol(row, COL.noKatalog));
     const namaMaterial = String(findCol(row, COL.namaMaterial)||"").trim();
     const cluster = String(findCol(row, COL.equipmentCluster)||"").trim();
+    const merk = String(findCol(row, COL.merk)||"").trim();
     // Semua field numerik pakai parseIndoNumber (standarisasi titik/koma, lihat definisinya) —
     // sebelumnya beda-beda tempat pakai regex ad-hoc yang tidak konsisten (bug dilaporkan user
     // 2026-07-07: qty "103,5" bisa kebaca "1.035" kalau titik-desimal diperlakukan sebagai ribuan).
@@ -60,10 +62,10 @@ export function parseMaterialCadangRows(rows, katalogList) {
     const breakdown = ["YA","Y","YES","TRUE","1"].includes(breakdownRaw);
     const hargaInput = parseIndoNumber(findCol(row, COL.harga));
 
-    if (!noKat) return { _idx:idx, status:"INVALID", error:"No Katalog kosong", noKat:"", namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (populasi <= 0) return { _idx:idx, status:"INVALID", error:"Populasi harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (leadTime <= 0) return { _idx:idx, status:"INVALID", error:"Lead Time harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (ttf <= 0) return { _idx:idx, status:"INVALID", error:"Time To Failure harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (!noKat) return { _idx:idx, status:"INVALID", error:"No Katalog kosong", noKat:"", namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (populasi <= 0) return { _idx:idx, status:"INVALID", error:"Populasi harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (leadTime <= 0) return { _idx:idx, status:"INVALID", error:"Lead Time harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (ttf <= 0) return { _idx:idx, status:"INVALID", error:"Time To Failure harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
 
     const katalogMatch = katalogList.find(k => normalizeKatalog(k.katalog) === noKat);
     let status = "UNMATCHED";
@@ -75,15 +77,16 @@ export function parseMaterialCadangRows(rows, katalogList) {
         warnings.push(`Nama beda: file="${namaMaterial}", sistem="${katalogMatch.name}"`);
       }
     }
-    return { _idx:idx, status, noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput, katalogId: katalogMatch?.id, katalogName: katalogMatch?.name, katalogSatuan: katalogMatch?.satuan, katalogHarga: katalogMatch ? (hargaInput || 0) : 0, warnings };
+    return { _idx:idx, status, noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput, katalogId: katalogMatch?.id, katalogName: katalogMatch?.name, katalogSatuan: katalogMatch?.satuan, katalogHarga: katalogMatch ? (hargaInput || 0) : 0, warnings };
   });
 
-  // Dedup: gabung baris dengan No Katalog + Equipment Cluster yang sama
+  // Dedup: gabung baris dengan No Katalog + Equipment Cluster + Merk yang sama
+  // (Merk beda = material berbeda meski No Katalog sama, jadi TIDAK di-merge — permintaan user 2026-08-09)
   const merged = [];
   const seen = {};
   for (const r of parsed) {
     if (r.status === "INVALID") { merged.push(r); continue; }
-    const key = `${r.noKat}||${r.cluster}`;
+    const key = `${r.noKat}||${r.cluster}||${r.merk||""}`;
     if (seen[key] !== undefined) {
       const ex = merged[seen[key]];
       ex.populasi = Math.max(ex.populasi, r.populasi);
