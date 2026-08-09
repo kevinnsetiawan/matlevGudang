@@ -1267,7 +1267,7 @@ export default function PLNWarehouse() {
     // failedLabels di bawah) — ditemukan bug nyata 2026-07-21: syncMasterTable() bisa
     // return false (network error/RLS/dll) tapi hasilnya tidak pernah dicek, jadi toast
     // "berhasil" tetap muncul meski data sebenarnya gagal tersimpan ke Supabase.
-    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null });
+    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null, upt_id: item.uptId || null });
     const syncTasks = [];
     if (overrides.katalogList !== undefined) {
       // Kalau caller kasih hint baris katalog yang berubah → sync ringan (cuma baris itu),

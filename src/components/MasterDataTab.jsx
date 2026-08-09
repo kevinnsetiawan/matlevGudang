@@ -776,16 +776,14 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                 stocks={stocks}
                 katalogList={katalogList}
                 lokasiList={lokasiList}
+                uptList={uptList}
+                gudangList={gudangList}
+                subGudangList={subGudangList}
                 txns={txns}
                 migratedTug15History={migratedTug15History}
                 setMigratedTug15History={setMigratedTug15History}
                 migrasiPendingReview={migrasiPendingReview}
                 setMigrasiPendingReview={setMigrasiPendingReview}
-                maraReference={maraReference}
-                setMaraReference={setMaraReference}
-                maraUploadLoading={maraUploadLoading}
-                maraUploadProgress={maraUploadProgress}
-                uploadMaraToDB={uploadMaraToDB}
                 currentUser={currentUser}
                 sty={sty} C={C}
                 saveToCloud={saveToCloud}
@@ -802,8 +800,8 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
               <AuditLogPage sty={sty} C={C}/>
             )}
 
-            {/* ── SUB-TAB: MATRIX IZIN (ADMIN only) ── */}
-            {stockSubTab==="perms" && hasRole(currentUser, "ADMIN") && (
+            {/* ── SUB-TAB: MATRIX IZIN (SUPERADMIN only) ── */}
+            {stockSubTab==="perms" && currentUser?.role === "SUPERADMIN" && (
               <PermMatrixPage sty={sty} C={C} currentUser={currentUser} rolePerms={rolePerms} reloadRolePerms={reloadRolePerms} showToast={showToast}/>
             )}
           </div>
