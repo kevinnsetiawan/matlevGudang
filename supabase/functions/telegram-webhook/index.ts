@@ -14,6 +14,7 @@
 //   5. curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://tadxodrzoquugnsyejld.supabase.co/functions/v1/telegram-webhook"
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { topStockByQty, stokKritis, cariMaterial, totalInventori, proyeksiStokHabis } from "./telegramToolsPure.mjs";
 
 const TELEGRAM_BOT_TOKEN     = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const GROQ_API_KEY           = Deno.env.get("GROQ_API_KEY") ?? "";
@@ -354,6 +355,158 @@ async function isRateLimited(userId: string): Promise<boolean> {
   }
 }
 
+// ── Tool-use (Tier 2) ────────────────────────────────────────────────────────
+//
+// LLM boleh minta tool_calls (function-calling Groq) buat query stok/ranking/proyeksi
+// deterministik alih-alih mengarang angka dari ragContext/stateContext (dump teks). Kode di
+// sini query DB nyata (scoped per-UPT) lalu balikin JSON kecil; agregasi murninya ada di
+// telegramToolsPure.mjs (dites Node, tests/unit/telegramTools.test.mjs).
+
+type TgStockRow = { katalogId: string | null; qty: number; price: number; name: string; unit: string; minQty: number; katalog: string; lokasi: string };
+type TgToolCtx = { stocks: TgStockRow[]; keluarRows: Array<{ katalog_id: string; qty: number; tanggal: string }> };
+
+// Query stocks/lokasi/gudang + tug15_history (KELUAR, 365 hari) dan scope per UPT lewat resolusi
+// lokasi->gudang — PERSIS pola uptIdFromLokasi di scripts/nightly_sync.mjs. callerUptId null
+// (nasional) = tidak difilter. Tabel katalog TIDAK diquery: jsonb `data` di stocks sudah bawa
+// name/katalog/unit sendiri (sama seperti ctx.stocks di pakwarTools.js), cukup buat 5 tool ini.
+async function buildToolCtx(callerUptId: string | null): Promise<TgToolCtx> {
+  const [{ data: stockRows }, { data: lokasiRows }, { data: gudangRows }, { data: keluarRows }] = await Promise.all([
+    supabase.from("stocks").select("katalog_id, lokasi_id, data"),
+    supabase.from("lokasi").select("id, data"),
+    supabase.from("gudang").select("id, data"),
+    supabase.from("tug15_history")
+      .select("katalog_id, lokasi_id, qty, tanggal")
+      .eq("jenis_transaksi", "KELUAR")
+      .gte("tanggal", new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
+      .limit(20000),
+  ]);
+
+  const gudangById: Record<string, { uptId: string | null }> = {};
+  (gudangRows || []).forEach((r: Record<string, unknown>) => { gudangById[r.id as string] = { uptId: (r.data as Record<string, unknown>)?.uptId as string ?? null }; });
+  const lokasiById: Record<string, { gudangId: string }> = {};
+  (lokasiRows || []).forEach((r: Record<string, unknown>) => { lokasiById[r.id as string] = { gudangId: ((r.data as Record<string, unknown>)?.gudangId as string) || "" }; });
+  const uptIdFromLokasi = (lokasiId: string | null): string | null => {
+    const lok = lokasiId ? lokasiById[lokasiId] : null;
+    const gdg = lok?.gudangId ? gudangById[lok.gudangId] : null;
+    return gdg?.uptId || null;
+  };
+
+  let stocks: TgStockRow[] = (stockRows || []).map((r: Record<string, unknown>) => {
+    const d = (r.data as Record<string, unknown>) || {};
+    const lokasiId = (r.lokasi_id as string) || (d.lokasiId as string) || null;
+    return {
+      katalogId: (r.katalog_id as string) || (d.katalogId as string) || null,
+      qty: Number(d.qty) || 0,
+      price: Number(d.price) || 0,
+      name: (d.name as string) || "",
+      unit: (d.unit as string) || "",
+      minQty: Number(d.minQty) || 0,
+      katalog: (d.katalog as string) || "",
+      lokasi: (d.lokasi as string) || "",
+      // deno-lint-ignore no-explicit-any
+      __uptId: uptIdFromLokasi(lokasiId) as any,
+    };
+  });
+  let keluar = (keluarRows || []).map((r: Record<string, unknown>) => ({ ...r, __uptId: uptIdFromLokasi(r.lokasi_id as string) })) as Array<Record<string, unknown>>;
+
+  if (callerUptId) {
+    // deno-lint-ignore no-explicit-any
+    stocks = stocks.filter((s: any) => s.__uptId === callerUptId);
+    keluar = keluar.filter((r) => r.__uptId === callerUptId);
+  }
+  return { stocks, keluarRows: keluar as Array<{ katalog_id: string; qty: number; tanggal: string }> };
+}
+
+const telegramTools = [
+  {
+    name: "top_stock_by_qty",
+    description: "Ranking material dengan stok (qty) terbanyak, dikelompokkan per satuan (beda satuan tidak bisa dibandingkan langsung). Pakai untuk pertanyaan 'stok paling banyak/terbanyak'.",
+    parameters: { type: "object", properties: { n: { type: "integer", description: "Jumlah item per satuan, default 10" } } },
+    run: (args: Record<string, unknown>, ctx: TgToolCtx) => ({ groups: topStockByQty(ctx.stocks, (args?.n as number) || 10) }),
+  },
+  {
+    name: "stok_kritis",
+    description: "Daftar material yang stoknya sudah di bawah atau sama dengan batas minimum (kritis/reorder). Pakai untuk pertanyaan soal material kritis/hampir habis/di bawah minimum.",
+    parameters: { type: "object", properties: {} },
+    run: (_args: Record<string, unknown>, ctx: TgToolCtx) => { const items = stokKritis(ctx.stocks); return { count: items.length, items }; },
+  },
+  {
+    name: "proyeksi_stok_habis",
+    description: "Proyeksi material yang akan habis berdasarkan rata-rata pemakaian bulanan (histori transaksi keluar), diurutkan dari paling mendesak. Pakai untuk pertanyaan soal forecast/proyeksi/kapan habis.",
+    parameters: { type: "object", properties: { n: { type: "integer", description: "Jumlah item, default 10" } } },
+    run: (args: Record<string, unknown>, ctx: TgToolCtx) => ({ items: proyeksiStokHabis(ctx.stocks, ctx.keluarRows, (args?.n as number) || 10) }),
+  },
+  {
+    name: "cari_material",
+    description: "Cari material spesifik berdasarkan nama atau kode katalog, balikin qty+lokasi per titik simpan. Pakai saat user menyebut nama/kode material tertentu.",
+    parameters: { type: "object", properties: { query: { type: "string", description: "Kata kunci nama atau kode katalog material" } }, required: ["query"] },
+    run: (args: Record<string, unknown>, ctx: TgToolCtx) => ({ items: cariMaterial(ctx.stocks, args?.query as string) }),
+  },
+  {
+    name: "total_inventori",
+    description: "Ringkasan total inventori: jumlah item katalog, total nilai Rp, dan total qty per satuan. Pakai untuk pertanyaan umum soal kondisi gudang secara keseluruhan.",
+    parameters: { type: "object", properties: {} },
+    run: (_args: Record<string, unknown>, ctx: TgToolCtx) => totalInventori(ctx.stocks),
+  },
+];
+
+const telegramToolSchemas = telegramTools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
+
+function runTelegramTool(call: Record<string, unknown>, ctx: TgToolCtx): string {
+  const fn = call?.function as Record<string, unknown>;
+  const tool = telegramTools.find((t) => t.name === fn?.name);
+  if (!tool) return JSON.stringify({ error: `Tool tidak dikenal: ${fn?.name}` });
+  try {
+    const args = fn.arguments ? JSON.parse(fn.arguments as string) : {};
+    return JSON.stringify(tool.run(args, ctx));
+  } catch (e) {
+    return JSON.stringify({ error: (e as Error).message });
+  }
+}
+
+// Loop tool-calling (cap 3 putaran, sama seperti sendChat App.jsx). Ctx (query DB) dibangun
+// lazy — hanya sekali di-query di request ini kalau Groq memang minta tool_calls, supaya
+// pertanyaan yang tidak butuh data stok (mis. sapaan) tidak menambah round-trip DB percuma.
+async function runToolLoop(systemPrompt: string, question: string, callerUptId: string | null): Promise<string> {
+  let toolCtx: TgToolCtx | null = null;
+  const getCtx = async () => { if (!toolCtx) toolCtx = await buildToolCtx(callerUptId); return toolCtx; };
+
+  const messages: Array<Record<string, unknown>> = [
+    { role: "system", content: `${systemPrompt}\n\nUntuk pertanyaan soal stok/qty/ranking/kritis/proyeksi/pencarian material spesifik, WAJIB pakai tool yang tersedia — jangan mengarang angka dari referensi di atas.` },
+    { role: "user", content: question },
+  ];
+
+  for (let iter = 0; iter < 3; iter++) {
+    const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        max_tokens: 900,
+        messages,
+        tools: telegramToolSchemas,
+        tool_choice: "auto",
+      }),
+    });
+    if (!resp.ok) throw new Error(`Groq gagal (${resp.status}): ${await resp.text()}`);
+    const data = await resp.json();
+    const choiceMsg = data.choices?.[0]?.message;
+    if (!choiceMsg) throw new Error("Groq tidak mengirimkan jawaban (tool-loop).");
+    const toolCalls = choiceMsg.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (toolCalls && toolCalls.length > 0) {
+      messages.push(choiceMsg);
+      const ctx = await getCtx();
+      for (const call of toolCalls) {
+        messages.push({ role: "tool", tool_call_id: call.id, content: runTelegramTool(call, ctx) });
+      }
+      continue;
+    }
+    if (choiceMsg.content) return String(choiceMsg.content).trim();
+    break;
+  }
+  throw new Error("Tool-loop tidak menghasilkan jawaban final dalam 3 putaran.");
+}
+
 async function generateReply(question: string, userId: string, callerUptId: string | null): Promise<{ text: string; chunksUsed: number }> {
   const [{ context: ragContext, chunksUsed }, stateContext, conversationHistory] = await Promise.all([
     buildRagContext(question, callerUptId),
@@ -401,6 +554,18 @@ Data kondisi gudang terkini (qty, satuan, harga satuan, nilai Rupiah, material k
 ${stateContext}
 
 Kalau ditanya jumlah/qty/harga/nilai material, cek dulu "Data kondisi gudang terkini" di atas — itu angka real-time. Kalau ditanya lokasi/di gudang mana/di blok mana suatu material, atau status SAP/Non-SAP-nya, cek juga referensi katalog (biasanya bawa field "Lokasi fisik" dan "Status").`;
+
+  // Tier 2: coba tool-loop dulu (query DB nyata, scoped UPT, tak bisa halusinasi angka). Kalau
+  // gagal APAPUN sebabnya (tool error, Groq tak balikin jawaban, exception lain) — JATUH ke
+  // jalur single-shot lama di bawah (systemPrompt+ragContext+stateContext saja, tanpa tools).
+  // Ini jaring pengaman wajib: tak ada Deno lokal & deploy gated, worst case harus tetap perilaku
+  // bot hari ini, bukan crash/retry storm Telegram.
+  try {
+    const text = await runToolLoop(systemPrompt, question, callerUptId);
+    return { text, chunksUsed };
+  } catch (e) {
+    console.error("Tool-loop gagal, fallback ke single-shot:", (e as Error).message);
+  }
 
   const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
