@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
 import * as Sentry from "@sentry/react";
-import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, ROMAN, JENIS_BARANG, STATUS_RETUR_TO_JENIS } from "./src/constants.js";
+import { COMPANY, UIT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, ROMAN, JENIS_BARANG, STATUS_RETUR_TO_JENIS } from "./src/constants.js";
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
 import { CLOUD } from "./src/lib/cloud.js";
 import { leanStocksForCache, resolveStockPhotoUrl } from "./src/lib/stockCache.js";
@@ -5166,7 +5166,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div style={{width:76,height:76,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:22,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
           <div style={{fontSize:34,fontWeight:900,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
           <div style={{fontSize:12,color:"rgba(255,255,255,0.75)",fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"14px 0 6px"}}>{COMPANY}</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.5}}>{UPT} · {WAREHOUSE}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.5}}>Sistem Manajemen Gudang</div>
         </div>
         {/* KANAN — form login */}
         <div style={{flex:1,padding:isMobile?32:40,minWidth:0,background:"#fff"}}>
@@ -5174,7 +5174,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{textAlign:"center",marginBottom:24}}>
               <div style={{width:72,height:72,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",boxShadow:"0 8px 24px rgba(0,0,0,0.10)",border:`1px solid ${C_LIGHT.border}`,padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
               <div style={{fontSize:26,fontWeight:900,color:C_LIGHT.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
-              <div style={{fontSize:12,color:C_LIGHT.muted,marginTop:6}}>{UPT} · {WAREHOUSE}</div>
+              <div style={{fontSize:12,color:C_LIGHT.muted,marginTop:6}}>Sistem Manajemen Gudang</div>
             </div>
           )}
           <div style={{fontSize:20,fontWeight:800,color:C_LIGHT.text,marginBottom:4}}>Selamat Datang</div>
