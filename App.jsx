@@ -2779,6 +2779,11 @@ export default function PLNWarehouse() {
     });
     const topPakai = Object.entries(usageSummary).sort((a,b)=>b[1].total-a[1].total).slice(0,10);
 
+    // Proyeksi / stok akan habis (top 10 paling mendesak)
+    const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 10);
+    const forecastSoonText = forecastSoon.length===0 ? "Tidak ada proyeksi (belum cukup histori pemakaian)." : forecastSoon
+      .map(f=>`- ${f.nama} [${f.katalog||"-"}]: stok ${fmtNum(f.totalQty)} ${f.satuan}, rata-rata ${fmtNum(f.avgPerBulan)}/bln, estimasi habis ~${fmtNum(f.estimasiHari)} hari${f.isKritis?" (KRITIS)":""}`).join('\n');
+
     // ── RAG: cari chunk (katalog/transaksi) yang paling relevan secara makna
     // dengan pertanyaan user — pelengkap snapshot di atas yang cuma top-N
     // hardcoded. Kalau Cohere/knowledge base belum siap, lewati saja (tetap
@@ -2842,6 +2847,9 @@ ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok
 PEMAKAIAN 3 BULAN TERAKHIR (top 10):
 ${topPakai.map(([nama,d])=>`- ${nama}: ${d.total} unit (${d.count}x transaksi)`).join('\n')}
 
+PROYEKSI / STOK AKAN HABIS (top 10 paling mendesak):
+${forecastSoonText}
+
 ${formatStockStatsText(scopedEnrichedStocks)}
 
 TUG PENDING APPROVAL (${pending.length} transaksi):
@@ -2883,8 +2891,10 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         return `${localNotice}\n\nBerikut material yang cocok dengan yang Anda tanyakan:\n${materialText}\n\nSebutkan saja bila ada material lain yang mau dicek.`;
       }
       if (/forecast|proyeksi|prediksi|bulan|pemakaian/.test(normalized)) {
-        const usageText = topPakai.length===0 ? "Belum ada transaksi pemakaian yang cukup." : topPakai.map(([name,data])=>`- **${name}** — ${fmtNum(data.total)} unit dalam ${data.count} transaksi`).join("\n");
-        return `${localNotice}\n\nIni pemakaian material tertinggi dalam 3 bulan terakhir:\n${usageText}\n\nKalau perlu proyeksi lebih rinci, silakan buka menu Forecast Stok.`;
+        const forecastList = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 8);
+        const forecastText = forecastList.length===0 ? "Belum ada proyeksi (belum cukup histori pemakaian)." : forecastList
+          .map(f=>`- **${f.nama}** [${f.katalog||"-"}] — stok ${fmtNum(f.totalQty)} ${f.satuan}, rata-rata ${fmtNum(f.avgPerBulan)}/bln, estimasi habis ~${fmtNum(f.estimasiHari)} hari${f.isKritis?" (KRITIS)":""}`).join("\n");
+        return `${localNotice}\n\nIni material yang paling mendesak berdasarkan proyeksi pemakaian:\n${forecastText}\n\nSebutkan saja bila mau lihat material lain.`;
       }
       return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(scopedEnrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
     }

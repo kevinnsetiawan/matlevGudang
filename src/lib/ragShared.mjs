@@ -113,6 +113,20 @@ export function splitChunksForEmbed(allChunks, existingContentById) {
   return allChunks.filter((c) => existingContentById.get(c.id) !== c.content);
 }
 
+// Isi 1 chunk RAG "forecast": proyeksi bulan-ke-habis + reorder point, dipakai nightly_sync.mjs.
+// Rumus bulan-ke-habis = qty / rata-rata pemakaian bulanan (meanStdev dari monthlySeries) —
+// SATU sumber, jangan dihitung ulang di tempat lain.
+export function buildForecastRagContent({ nama, satuan, qty, monthlySeries = [], effectiveMinQty = 0 }) {
+  const mean = monthlySeries.length ? meanStdev(monthlySeries).mean : 0;
+  const rop = ` Titik pesan ulang (reorder point): ${fmtNum(effectiveMinQty)} ${satuan}.`;
+  if (mean <= 0) {
+    return `Proyeksi kebutuhan ${nama}: stok saat ini ${fmtNum(qty)} ${satuan}, belum ada histori pemakaian, proyeksi belum tersedia.${rop}`;
+  }
+  const bulanHabis = qty / mean;
+  const status = qty <= effectiveMinQty ? "PERLU PENGADAAN SEGERA" : bulanHabis < 2 ? "pantau" : "aman";
+  return `Proyeksi kebutuhan ${nama}: stok saat ini ${fmtNum(qty)} ${satuan}, rata-rata pemakaian ${fmtNum(mean)}/bulan, perkiraan habis dalam ~${fmtNum(Math.round(bulanHabis))} bulan.${rop} Status: ${status}.`;
+}
+
 // Isi 1 chunk RAG "katalog": nama, kode, kategori, status SAP, qty + harga Rupiah, lokasi fisik.
 export function buildKatalogRagContent(k, stockInfo) {
   const sap = getSAPLabel(k.katalog);

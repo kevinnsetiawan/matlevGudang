@@ -34,7 +34,7 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed, expandMonthlySeriesFromMap } from "../src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap } from "../src/lib/ragShared.mjs";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -208,10 +208,27 @@ async function main() {
     content: `UPT ${uptNamaById[d.uptId] || d.uptId}: Ringkasan mutasi 6 bulan terakhir untuk ${namaByKatalogId[d.katalogId] || d.katalogId}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
   }));
 
-  const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks];
-  console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi)`);
+  // Chunk "forecast": proyeksi bulan-ke-habis per (uptId, katalogId) yang punya stok. minQty
+  // manual diambil dari agregat maksimum antar-lokasi (sama seperti getKritisAgg di atas).
+  const manualMinQtyByKatalogId = {};
+  stocks.forEach((s) => {
+    if (!s.katalogId) return;
+    manualMinQtyByKatalogId[s.katalogId] = Math.max(manualMinQtyByKatalogId[s.katalogId] || 0, s.minQty || 0);
+  });
+  const forecastChunks = Object.values(stockByUptKatalog).map((v) => {
+    const k = katalogById[v.katalogId];
+    if (!k) return null;
+    const uptNama = uptNamaById[v.uptId] || v.uptId;
+    const monthlySeries = monthlySeriesByKatalogId[v.katalogId] || [];
+    const { minQty: effectiveMinQty } = computeEffectiveMinQty({ monthlySeries, manualMinQty: manualMinQtyByKatalogId[v.katalogId] || 0 });
+    const content = `UPT ${uptNama}: ${buildForecastRagContent({ nama: k.name, satuan: k.satuan, qty: v.qty, monthlySeries, effectiveMinQty })}`;
+    return { id: `forecast_${v.uptId}_${v.katalogId}`, source_type: "forecast", source_id: v.katalogId, upt_id: v.uptId, content };
+  }).filter(Boolean);
 
-  const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "faq", "mutasi"]);
+  const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks, ...forecastChunks];
+  console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi, ${forecastChunks.length} forecast)`);
+
+  const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "faq", "mutasi", "forecast"]);
   const existingContentById = new Map((existingChunks || []).map((r) => [r.id, r.content]));
   const toEmbed = splitChunksForEmbed(allChunks, existingContentById);
   console.log(`Chunk berubah/baru: ${toEmbed.length}, tidak berubah (skip): ${allChunks.length - toEmbed.length}`);
@@ -226,10 +243,10 @@ async function main() {
     console.log(`  embed batch ${i}-${i + batch.length} OK`);
   }
 
-  // Hapus chunk katalog/faq/mutasi lama yang sumbernya sudah tidak ada — TIDAK menyentuh
-  // source_type='txn' (domain sinkron client-side App.jsx).
+  // Hapus chunk katalog/faq/mutasi/forecast lama yang sumbernya sudah tidak ada — TIDAK
+  // menyentuh source_type='txn' (domain sinkron client-side App.jsx).
   const currentIds = new Set(allChunks.map((c) => c.id));
-  const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "faq", "mutasi"]);
+  const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "faq", "mutasi", "forecast"]);
   const toDelete = (existing || []).filter((r) => !currentIds.has(r.id)).map((r) => r.id);
   if (toDelete.length) {
     await supabase.from("rag_chunks").delete().in("id", toDelete);
