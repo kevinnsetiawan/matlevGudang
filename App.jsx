@@ -59,6 +59,7 @@ import { useMaturity } from "./src/hooks/useMaturity.jsx";
 import { useTugApprovals } from "./src/hooks/useTugApprovals.js";
 import { useTugTransactions } from "./src/hooks/useTugTransactions.js";
 import { useStockOpname } from "./src/hooks/useStockOpname.js";
+import { useApprovalHub } from "./src/hooks/useApprovalHub.js";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "./src/data/auditAspects.js";
 import { StockOpnameTab } from "./src/components/StockOpnameTab.jsx";
 import { MigrasiDataTab } from "./src/components/MigrasiDataTab.jsx";
@@ -296,7 +297,7 @@ export default function PLNWarehouse() {
   const [importLokasiOpen, setImportLokasiOpen] = useState(false); // modal Import Excel Master Lokasi
   const [rencanaKedatanganList, setRencanaKedatanganList] = useState([]);
   // opnameList/stockCountList dipindah ke useStockOpname (2026-08-10).
-  const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
+  // approvalHistoryList + state pagination approval dipindah ke useApprovalHub (2026-08-10).
   // currentUserUptId + domain Maturity dipanggil sedini mungkin (di sini, bukan
   // di dekat state operasional bawah) karena state Maturity dipakai di render-body
   // lebih atas (stateRef, dep-array useEffect) — kalau destructure di bawah titik
@@ -390,23 +391,6 @@ export default function PLNWarehouse() {
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   // Filter jenis approval (TUG/Alat Berat/Stok/dst) + pagination tiap section —
-  // sebelumnya semua jenis approval digabung jadi 1 list panjang tanpa pemisah,
-  // susah dibaca kalau lagi banyak. 1 pageSize dropdown dipakai bareng semua
-  // section, tapi tiap section punya cursor halaman sendiri-sendiri.
-  const [approvalTypeFilter, setApprovalTypeFilter] = useState("ALL");
-  const [approvalPageSize, setApprovalPageSize] = useState(10);
-  const [approvalStokPage, setApprovalStokPage] = useState(1);
-  const [approvalStokGudangPage, setApprovalStokGudangPage] = useState(1);
-  const [approvalEditStokPage, setApprovalEditStokPage] = useState(1);
-  const [approvalHapusStokPage, setApprovalHapusStokPage] = useState(1);
-  const [approvalAlatBeratPage, setApprovalAlatBeratPage] = useState(1);
-  const [approvalOpnamePage, setApprovalOpnamePage] = useState(1);
-  const [approvalStockCountPage, setApprovalStockCountPage] = useState(1);
-  const [approvalHistoryPage, setApprovalHistoryPage] = useState(1);
-  useEffect(() => {
-    setApprovalStokPage(1); setApprovalStokGudangPage(1); setApprovalEditStokPage(1);
-    setApprovalHapusStokPage(1); setApprovalAlatBeratPage(1); setApprovalOpnamePage(1); setApprovalHistoryPage(1);
-  }, [approvalTypeFilter, approvalPageSize]);
   function renderApprovalPager(page, setPage, totalItems) {
     if (totalItems <= approvalPageSize) return null;
     const totalPages = Math.max(1, Math.ceil(totalItems/approvalPageSize));
@@ -1061,6 +1045,20 @@ export default function PLNWarehouse() {
     ultgModal, setUltgModal, ultgForm, setUltgForm,
     openAddULTG, openEditULTG, saveULTG, deleteULTG,
   } = useMasterDataCrud({ currentUser, showToast, stateRef, askConfirmDelete, katalogList, setKatalogList, stocks, satpamList, setSatpamList, timMutuList, setTimMutuList, uitList, setUitList, uptList, setUptList, ultgList, setUltgList });
+  const {
+    approvalHistoryList, setApprovalHistoryList,
+    approvalTypeFilter, setApprovalTypeFilter,
+    approvalPageSize, setApprovalPageSize,
+    approvalStokPage, setApprovalStokPage,
+    approvalStokGudangPage, setApprovalStokGudangPage,
+    approvalEditStokPage, setApprovalEditStokPage,
+    approvalHapusStokPage, setApprovalHapusStokPage,
+    approvalAlatBeratPage, setApprovalAlatBeratPage,
+    approvalOpnamePage, setApprovalOpnamePage,
+    approvalStockCountPage, setApprovalStockCountPage,
+    approvalHistoryPage, setApprovalHistoryPage,
+    approveLokasiChange, rejectLokasiChange,
+  } = useApprovalHub({ currentUser, showToast, stateRef, logApprovalHistory, lokasiList, setLokasiList });
   stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview, users, currentUser };
 
   const {
@@ -1101,6 +1099,9 @@ export default function PLNWarehouse() {
   // useWarehouseConfig dipanggil sebelum useDenahOcr ada (perlu syncGudang/syncSubGudang/syncLokasi
   // lebih dulu) — isi baru bisa dilewat lewat mutasi stateRef.current, bukan sbg argumen hook.
   stateRef.current.runOcrOnDenah = runOcrOnDenah;
+  // useApprovalHub dipanggil sebelum syncLokasi ada (sama alasan) — approveLokasiChange/
+  // rejectLokasiChange baca lewat stateRef.current.syncLokasi.
+  stateRef.current.syncLokasi = syncLokasi;
   stateRef.current.runOcrOnDenahSub = runOcrOnDenahSub;
   stateRef.current.ocrSuggestions = ocrSuggestions;
   stateRef.current.setOcrSuggestions = setOcrSuggestions;
@@ -1775,45 +1776,7 @@ export default function PLNWarehouse() {
     logAudit(currentUser, entry.decision==="REJECTED"?"REJECT":"APPROVE", entry.docType || entry.type || "approval", entry.refId ?? null, entry);
   }
 
-  // Approve/reject pengajuan perubahan blok lokasi (khusus role TL)
-  async function approveLokasiChange(id) {
-    const item = lokasiList.find(l=>l.id===id);
-    if (!item) return;
-    let nl;
-    if (item.pendingAction === "DELETE") {
-      nl = lokasiList.filter(l=>l.id!==id);
-    } else if (item.pendingAction === "EDIT") {
-      nl = lokasiList.map(l=>l.id===id ? {...l, ...item.pendingData, status:"APPROVED", pendingAction:null, pendingData:null, approvedBy:currentUser.id, approvedAt:Date.now()} : l);
-    } else {
-      nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, approvedBy:currentUser.id, approvedAt:Date.now()} : l);
-    }
-    const prevList = lokasiList;
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, approval Blok Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
-    await logApprovalHistory({type:"LOKASI", decision:"APPROVED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
-    showToast("✅ Perubahan Blok Lokasi disetujui.");
-  }
-  async function rejectLokasiChange(id) {
-    const item = lokasiList.find(l=>l.id===id);
-    if (!item) return;
-    let nl;
-    if (item.pendingAction === "ADD") {
-      nl = lokasiList.filter(l=>l.id!==id);
-    } else {
-      nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, pendingData:null} : l);
-    }
-    const prevList = lokasiList;
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, penolakan Blok Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
-    await logApprovalHistory({type:"LOKASI", decision:"REJECTED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
-    showToast("❌ Perubahan Blok Lokasi ditolak.");
-  }
+  // approveLokasiChange/rejectLokasiChange dipindah ke useApprovalHub (2026-08-10).
 
   // Approve/reject pengajuan pemindahan gudang Data Stok — 1 per 1, bukan bulk.
   async function approveStockMove(id) {
