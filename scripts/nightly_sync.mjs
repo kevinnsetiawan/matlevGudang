@@ -34,7 +34,8 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap } from "../src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap, meanStdev } from "../src/lib/ragShared.mjs";
+import { getTopStockByQty, getTopStokTerbanyak } from "../src/lib/analytics.js";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -264,6 +265,28 @@ async function main() {
   const top20 = [...enriched].sort((a, b) => b.nilai - a.nilai).slice(0, 20);
   // agregat per katalog + stok minimum otomatis dari histori — konsisten dgn dashboard App.jsx
   const kritis = getKritisAgg(enriched, monthlySeriesByKatalogId);
+
+  // topByQtyPerSatuan: top material by qty, DIKELOMPOKKAN per satuan (reuse getTopStockByQty
+  // dari analytics.js — sama persis dgn yang dipakai sendChat App.jsx Tier 1) — supaya Telegram
+  // single-shot bisa jawab "stok terbanyak" akurat tanpa tool call.
+  const topByQtyPerSatuan = getTopStockByQty(enriched, katalogList, 10)
+    .map((g) => ({ satuan: g.satuan, items: g.items.map((i) => ({ nama: i.nama, katalog: i.katalog, qty: i.totalQty })) }));
+
+  // proyeksiStokHabis: top 8 material paling mendesak habis — qty agregat per katalog (reuse
+  // getTopStokTerbanyak) x rata-rata pemakaian/bulan (meanStdev atas monthlySeriesByKatalogId,
+  // sudah dihitung di atas dari tug15_history KELUAR 180 hari).
+  const proyeksiStokHabis = getTopStokTerbanyak(enriched, katalogList, Infinity)
+    .map((g) => {
+      const series = monthlySeriesByKatalogId[g.katalogId] || [];
+      const avgPerBulan = series.length > 0 ? meanStdev(series).mean : 0;
+      if (avgPerBulan <= 0) return null;
+      const estimasiHari = Math.round((g.totalQty / avgPerBulan) * 30);
+      return { nama: g.nama, katalog: g.katalog, qty: g.totalQty, satuan: g.satuan, avgPerBulan: Math.round(avgPerBulan), estimasiHari };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.estimasiHari - b.estimasiHari)
+    .slice(0, 8);
+
   const state_data = {
     generatedAt: new Date().toISOString(),
     generatedBy: "nightly_sync.mjs (cron)",
@@ -271,6 +294,8 @@ async function main() {
     totalNilaiRp: Math.round(enriched.reduce((a, s) => a + s.nilai, 0)),
     top20ByValue: top20.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, hargaSatuan: s.price, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.katalog), ...withLokasi(s) })),
     materialKritis: kritis.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, minQty: s.minQty, ...withLokasi(s) })),
+    topByQtyPerSatuan,
+    proyeksiStokHabis,
   };
   await supabase.from("warnoto_state").insert({ state_data, version: "v1-nightly" });
 

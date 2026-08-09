@@ -112,7 +112,6 @@ import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransa
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
 import { getMaterialAkanHabis, buildMonthlySeriesByKatalog, computeProcurementList, getTopStockByQty, getTotalPerSatuan } from "./src/lib/analytics.js";
-import { pakwarToolSchemas, runPakwarTool } from "./src/lib/pakwarTools.js";
 
 // Turn this on only after the reviewed self-host migration is installed. It
 // makes TUG-8/9 fail closed rather than silently reverting to browser storage.
@@ -2835,10 +2834,8 @@ ATURAN JAWABAN:
   (per satuan) — sebutkan per satuan, JANGAN membandingkan qty antar satuan yang
   berbeda. Untuk "termahal/nilai terbesar" pakai daftar by nilai.
 - Untuk pertanyaan spesifik soal stok/qty/ranking/kritis/proyeksi/lokasi material,
-  WAJIB panggil tool yang sesuai (top_stock_by_qty, top_stock_by_value, stok_kritis,
-  proyeksi_stok_habis, cari_material, total_inventori) dan jawab berdasarkan hasil
-  tool tersebut — JANGAN mengarang atau menghitung sendiri angka dari snapshot di
-  bawah. Snapshot hanya konteks umum/cadangan.
+  WAJIB jawab berdasarkan data SNAPSHOT DATA SISTEM di bawah (TOP MATERIAL BY QTY,
+  MATERIAL KRITIS, PROYEKSI/STOK AKAN HABIS, dst) — JANGAN mengarang angka.
 - Kalau data tidak cukup untuk menjawab, katakan data apa yang belum tersedia,
   lalu ajukan SATU pertanyaan klarifikasi.
 - Tutup dengan langkah lanjut atau pertanyaan singkat bila relevan. Sesekali saja
@@ -2935,7 +2932,6 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
     try {
       const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
       if (!groqKey) throw new Error("Konfigurasi layanan AI belum tersedia.");
-      const toolCtx = { stocks: scopedEnrichedStocks, katalogList, txns: scopedTxns, uptNama: currentUptNama };
       const messages = [
         {role:"system",content:systemPrompt},
         ...chatHistory.filter(m=>m.role!=="ai"||chatHistory.indexOf(m)>0).slice(-8).map(m=>({
@@ -2945,38 +2941,21 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         {role:"user",content:msg}
       ];
 
-      // Loop tool-calling: LLM boleh minta tool_calls beberapa putaran (cap 3) sebelum
-      // kasih jawaban final. Tiap putaran: kirim messages+tools ke Groq, kalau ada
-      // tool_calls jalankan lewat runPakwarTool (deterministik, reuse analytics.js/
-      // ragShared.mjs) lalu balikin hasilnya sebagai pesan role:"tool", ulangi.
-      let reply = null;
-      for (let iter = 0; iter < 3; iter++) {
-        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
-          method:"POST",
-          headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
-          body:JSON.stringify({
-            model:"llama-3.3-70b-versatile",
-            max_tokens:1500,
-            messages,
-            tools: pakwarToolSchemas,
-            tool_choice: "auto",
-          })
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
-        const choiceMsg = data.choices?.[0]?.message;
-        if (!choiceMsg) throw new Error("Layanan AI tidak mengirimkan jawaban.");
-        const toolCalls = choiceMsg.tool_calls;
-        if (toolCalls && toolCalls.length > 0) {
-          messages.push(choiceMsg);
-          toolCalls.forEach(call => {
-            messages.push({ role: "tool", tool_call_id: call.id, content: runPakwarTool(call, toolCtx) });
-          });
-          continue;
-        }
-        reply = choiceMsg.content;
-        break;
-      }
+      // Single-call ke Groq (bukan tool-loop): tool-use bikin 3-4 panggilan/pertanyaan
+      // yang menjebol limit free tier 12k token/menit. Akurasi tetap dijaga lewat
+      // snapshot data yang diperkaya di systemPrompt di atas (top qty, proyeksi, dst).
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
+        body:JSON.stringify({
+          model:"llama-3.3-70b-versatile",
+          max_tokens:1500,
+          messages,
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
+      const reply = data.choices?.[0]?.message?.content;
       if (!reply) throw new Error("Layanan AI tidak mengirimkan jawaban.");
       setChatHistory(h=>[...h,{role:"ai",text:reply}]);
     } catch (error) {
