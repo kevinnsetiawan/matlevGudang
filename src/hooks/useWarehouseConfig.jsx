@@ -133,7 +133,6 @@ export function useWarehouseConfig({
   // ── Master Gudang CRUD ──
   const [gudangModal, setGudangModal] = useState(null);
   const [gudangForm, setGudangForm] = useState({});
-  const [mapConfigMode, setMapConfigMode] = useState(false);
   const [mapConfigGudangId, setMapConfigGudangId] = useState(null);
   const [pendingMapLokasi, setPendingMapLokasi] = useState(null);
   const [expandedGudangId, setExpandedGudangId] = useState(null); // accordion: hanya 1 gudang terbuka sekaligus di Master Gudang
@@ -637,7 +636,7 @@ export function useWarehouseConfig({
     showGudangDenahTools, setShowGudangDenahTools, expandedSubGudangToolsIds, setExpandedSubGudangToolsIds,
     selectedSubGudangId, setSelectedSubGudangId,
     openEditLokasi, isKodeDuplicateInSubGudang, syncLokasi, saveLokasi, requestDeleteLokasi, confirmDeleteLokasi,
-    gudangModal, setGudangModal, gudangForm, setGudangForm, mapConfigMode, setMapConfigMode,
+    gudangModal, setGudangModal, gudangForm, setGudangForm,
     mapConfigGudangId, setMapConfigGudangId, pendingMapLokasi, setPendingMapLokasi, expandedGudangId, setExpandedGudangId,
     gudangWizardStep, setGudangWizardStep, wizardBlokDraft, setWizardBlokDraft, manualAddMode, setManualAddMode,
     capacityReviewImportId, setCapacityReviewImportId, capacityReviewCandidates, setCapacityReviewCandidates,
