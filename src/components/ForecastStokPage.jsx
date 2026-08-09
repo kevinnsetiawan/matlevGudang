@@ -25,8 +25,10 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
   materialCadangHealthData, setMaterialCadangHealthData,
   materialCadangAiInsights, setMaterialCadangAiInsights,
   catalogMasterRef, setCatalogMasterRef, saveToCloud, showToast, currentUser,
+  uptList, uptScopeOptions, users,
   C, sty }) {
   const [forecastView, setForecastView] = useState("forecast");
+  const [uptLens, setUptLens] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState("priority");
@@ -73,22 +75,38 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
     return () => { cancelled = true; };
   }, []);
 
+  // Lensa UPT/UIT: turunkan uptId tiap baris stok dari lokasiId→gudangId→uptId (pola sama
+  // dengan App.jsx runPhotoSearch). Dropdown lensa hanya tampil bila showLens (scope ≥2 UPT).
+  function uptOf(stock) {
+    const gid = lokasiList.find(l=>l.id===stock.lokasiId)?.gudangId || stock.gudangId || null;
+    return gid ? (gudangList.find(g=>g.id===gid)?.uptId || null) : null;
+  }
+  const distinctScopedUpts = useMemo(() => Array.from(new Set(stocks.map(uptOf).filter(Boolean))), [stocks, gudangList, lokasiList]);
+  // Sumber lensa = scope permission user (uptScopeOptions dari App.jsx), BUKAN UPT yang
+  // kebetulan punya stok — akun UIT dengan cuma 1 UPT berdata tetap harus lihat dropdown.
+  const scopeUptIds = (uptScopeOptions && uptScopeOptions.length) ? uptScopeOptions.map(u=>u.id) : distinctScopedUpts;
+  const showLens = (uptScopeOptions?.length || 0) >= 2;
+  const viewStocks = uptLens==="ALL" ? stocks : stocks.filter(stock=>uptOf(stock)===uptLens);
+  // txns tak punya uptId reliabel untuk difilter langsung — cukup filter stocks; risk/procurement
+  // tetap benar karena enriched sudah menyempitkan daftar katalog lewat viewStocks.
+  const viewTxns = txns;
+
   // Rumus TSB/ROP dipindah ke computeKatalogRisk (src/lib/analytics.js) supaya bisa dipakai
   // juga oleh Dashboard (computeProcurementList) tanpa duplikasi.
   function getRisk(katalog) {
-    return computeKatalogRisk(katalog, stocks, txns);
+    return computeKatalogRisk(katalog, viewStocks, viewTxns);
   }
 
   const enriched = useMemo(() => katalogList
-    .filter(katalog=>stocks.some(stock=>stock.katalogId===katalog.id))
+    .filter(katalog=>viewStocks.some(stock=>stock.katalogId===katalog.id))
     .map(kat=>{
-      const stockRows = stocks.filter(stock=>stock.katalogId===kat.id);
+      const stockRows = viewStocks.filter(stock=>stock.katalogId===kat.id);
       const totalQty = stockRows.reduce((sum,stock)=>sum+(stock.qty||0),0);
       const risk = getRisk(kat);
       const ml = mlForecasts[kat.id];
       const divergent = ml?.estimasiHari!=null && risk.days!==Infinity && Math.abs(ml.estimasiHari-risk.days)/Math.max(risk.days,1)>0.4;
       return {kat,stockRows,totalQty,risk,ml,divergent};
-    }), [katalogList,stocks,txns,mlForecasts]);
+    }), [katalogList,viewStocks,viewTxns,mlForecasts]);
 
   const counts = RISK_FILTERS.reduce((result,item)=>({...result,[item.key]:enriched.filter(entry=>entry.risk.key===item.key).length}),{});
   const mlReadyCount = enriched.filter(entry=>entry.ml).length;
@@ -111,14 +129,70 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
   // Daftar usulan pengadaan dipindah ke computeProcurementList (src/lib/analytics.js) supaya
   // ringkasannya bisa dipakai juga oleh Dashboard — rumus tidak berubah, cuma dipindah.
   const procurementResult = useMemo(() => computeProcurementList({
-    katalogList, stocks, txns, materialCadangHealthData,
-  }), [katalogList, stocks, txns, materialCadangHealthData]);
+    katalogList, stocks: viewStocks, txns: viewTxns, materialCadangHealthData,
+  }), [katalogList, viewStocks, viewTxns, materialCadangHealthData]);
   const procurementList = procurementResult.list;
   const procurementTotalQty = procurementResult.totalQty;
   const procurementTotalValue = procurementResult.totalValue;
   const procTotalPages = Math.max(1, Math.ceil(procurementList.length/procPageSize));
   const procPageClamped = Math.min(procPage, procTotalPages);
   const pagedProcurementList = procurementList.slice((procPageClamped-1)*procPageSize, procPageClamped*procPageSize);
+
+  // Kesehatan Material Cadang untuk cockpit: run terbaru PER UPT di scope (agregat ALL =
+  // gabungan run terbaru tiap UPT; lensa single-UPT = run terbaru UPT itu saja). Mirror
+  // reduce summary & sort top-priority dari MaterialCadangTab.jsx (L100-114, L647-671).
+  const cockpitHealth = useMemo(() => {
+    const runs = materialCadangHealthData?.analysisRuns || [];
+    const healthResults = materialCadangHealthData?.healthResults || [];
+    // Run lama tanpa uptId: infer UPT dari pembuatnya (baca-waktu saja, tidak menulis balik ke data).
+    const runUptId = (r) => r.uptId || (users||[]).find(u=>u.id===r.createdBy)?.uptId || null;
+    let scopedRuns = [];
+    if (uptLens !== "ALL") {
+      const forThisUpt = runs.filter(r=>runUptId(r)===uptLens);
+      if (forThisUpt.length) scopedRuns = [forThisUpt.reduce((a,b)=>a.createdAt>b.createdAt?a:b)];
+    } else {
+      const latestByUpt = {};
+      runs.forEach(r => {
+        const rUpt = runUptId(r);
+        if (!rUpt || !scopeUptIds.includes(rUpt)) return;
+        if (!latestByUpt[rUpt] || r.createdAt > latestByUpt[rUpt].createdAt) latestByUpt[rUpt] = r;
+      });
+      scopedRuns = Object.values(latestByUpt);
+    }
+    const runIds = new Set(scopedRuns.map(r=>r.id));
+    const results = healthResults.filter(r=>runIds.has(r.runId));
+    const summary = results.reduce((acc, r) => {
+      acc.total++;
+      if (r.healthStatus) acc.healthCounts[r.healthStatus] = (acc.healthCounts[r.healthStatus]||0) + 1;
+      acc.healthSum += r.healthIndex || 0;
+      acc.confidenceSum += r.dataConfidence || 0;
+      if (r.treatment !== "Material Cadang") { acc.persediaan++; return acc; }
+      if (r.currentQty >= r.recommendedQty && r.recommendedQty > 0) acc.aman++;
+      else if (r.currentQty > 0 && r.currentQty < r.recommendedQty) acc.kurang++;
+      else if (r.recommendedQty > 0 && r.currentQty === 0) acc.kosong++;
+      acc.gapQty += r.gapQty;
+      acc.gapNilai += r.gapQty * (r.harga || 0);
+      return acc;
+    }, { total:0, aman:0, kurang:0, kosong:0, persediaan:0, gapQty:0, gapNilai:0, healthSum:0, confidenceSum:0, healthCounts:{} });
+    summary.avgHealth = summary.total ? Math.round(summary.healthSum / summary.total) : 0;
+    summary.avgConfidence = summary.total ? Math.round(summary.confidenceSum / summary.total) : 0;
+    const topPriority = [...results]
+      .filter(r=>r.treatment==="Material Cadang")
+      .sort((a,b)=> a.abcClass!==b.abcClass ? a.abcClass.localeCompare(b.abcClass) : b.gapQty-a.gapQty)
+      .slice(0,10);
+    return { summary, topPriority, hasData: results.length>0 };
+  }, [materialCadangHealthData, uptLens, scopeUptIds]);
+
+  // Strip banding per-UPT (pita 3, hanya lensa Agregat + scope ≥2 UPT) — usulan pengadaan
+  // dihitung ulang per UPT dari computeProcurementList (rumus tidak berubah, cuma input).
+  const perUptStrip = useMemo(() => {
+    if (uptLens!=="ALL" || !showLens) return [];
+    return uptScopeOptions.map(u => {
+      const uptStocks = stocks.filter(stock=>uptOf(stock)===u.id);
+      const result = computeProcurementList({ katalogList, stocks: uptStocks, txns, materialCadangHealthData });
+      return { uptId: u.id, nama: u.nama || u.id, qty: result.totalQty, value: result.totalValue };
+    });
+  }, [uptLens, showLens, uptScopeOptions, stocks, katalogList, txns, materialCadangHealthData]);
 
   function copyProcurementList() {
     const text = procurementList
@@ -201,69 +275,156 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
 
   return (
     <div className="workspace-page forecast-page">
-      <section className="forecast-overview kpi-banner">
-        <div className="forecast-overview__copy"><span>Proyeksi persediaan · {WAREHOUSE}</span><strong>Fokus pada material yang paling cepat membutuhkan tindakan</strong><small>Heuristik tersedia untuk seluruh material; prediksi ML muncul saat histori transaksi mencukupi.</small></div>
-        <div className="forecast-overview__metrics">
-          <button disabled={forecastView!=="forecast"} className={forecastView==="forecast"&&statusFilter==="critical"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="critical"?"ALL":"critical")}><span>Kritis</span><strong>{counts.critical}</strong></button>
-          <button disabled={forecastView!=="forecast"} className={forecastView==="forecast"&&statusFilter==="attention"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="attention"?"ALL":"attention")}><span>Perhatian</span><strong>{counts.attention}</strong></button>
-          <div><span>ML tersedia</span><strong>{mlReadyCount}</strong></div>
-          <div><span>Total material</span><strong>{enriched.length}</strong></div>
-        </div>
-      </section>
+      {forecastView==="forecast" && (
+        <section className="forecast-overview kpi-banner">
+          <div className="forecast-overview__copy"><span>Proyeksi persediaan · {WAREHOUSE}</span><strong>Fokus pada material yang paling cepat membutuhkan tindakan</strong><small>Heuristik tersedia untuk seluruh material; prediksi ML muncul saat histori transaksi mencukupi.</small></div>
+          <div className="forecast-overview__metrics">
+            <button className={statusFilter==="critical"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="critical"?"ALL":"critical")}><span>Kritis</span><strong>{counts.critical}</strong></button>
+            <button className={statusFilter==="attention"?"is-active":""} onClick={()=>setStatusFilter(statusFilter==="attention"?"ALL":"attention")}><span>Perhatian</span><strong>{counts.attention}</strong></button>
+            <div><span>ML tersedia</span><strong>{mlReadyCount}</strong></div>
+            <div><span>Total material</span><strong>{enriched.length}</strong></div>
+          </div>
+        </section>
+      )}
 
       <div className="forecast-view-switch" role="tablist" aria-label="Tampilan forecast">
         <button className={forecastView==="forecast"?"is-active":""} onClick={()=>setForecastView("forecast")} role="tab" aria-selected={forecastView==="forecast"}>Forecast Stok</button>
-        <button className={forecastView==="procurement"?"is-active":""} onClick={()=>setForecastView("procurement")} role="tab" aria-selected={forecastView==="procurement"}>Rekomendasi Pengadaan</button>
         <button className={forecastView==="material_cadang"?"is-active":""} onClick={()=>setForecastView("material_cadang")} role="tab" aria-selected={forecastView==="material_cadang"}>Material Cadang</button>
+        <button className={forecastView==="procurement"?"is-active":""} onClick={()=>setForecastView("procurement")} role="tab" aria-selected={forecastView==="procurement"}>Rekomendasi Pengadaan</button>
       </div>
 
       {forecastView==="procurement" ? (
         <>
-          <div className="forecast-procurement-head">
+          <section className="forecast-overview kpi-banner forecast-cockpit-head">
+            <div className="forecast-overview__copy">
+              <span>Cockpit pengadaan</span>
+              <strong>Rekomendasi Pengadaan</strong>
+              <small>Gabungan kesehatan Material Cadang dan usulan beli — read-only, aksi tetap di tab Material Cadang.</small>
+              {showLens && (
+                <select className="forecast-cockpit-lens" value={uptLens} onChange={e=>setUptLens(e.target.value)}>
+                  <option value="ALL">Agregat (semua UPT)</option>
+                  {uptScopeOptions.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+                </select>
+              )}
+            </div>
             <div className="forecast-overview__metrics">
+              <div><span>Spare Kritis</span><strong>{cockpitHealth.summary.healthCounts.Critical||0}</strong></div>
+              <div><span>Spare Kurang</span><strong>{cockpitHealth.summary.kurang}</strong></div>
+              <div><span>Spare Kosong</span><strong>{cockpitHealth.summary.kosong}</strong></div>
               <div><span>Butuh tindakan</span><strong>{procurementList.length}</strong></div>
               <div><span>Total usulan qty</span><strong>{fmtNum(procurementTotalQty)}</strong></div>
               <div><span>Estimasi nilai</span><strong>{procurementTotalValue>0?`Rp ${procurementTotalValue.toLocaleString("id-ID")}`:"-"}</strong></div>
             </div>
-            <button disabled={procurementList.length===0} onClick={copyProcurementList}>Salin daftar</button>
-          </div>
+          </section>
 
-          <details className="forecast-methodology"><summary>Bagaimana usulan qty dihitung?</summary><p>Material yang sudah dianalisis di tab Material Cadang memakai angka gap dari perhitungan Poisson service-level per kelas ABC. Sisanya memakai ROP+ROQ: titik pesan ulang (pemakaian rata-rata selama lead time {DEFAULT_LEAD_TIME_DAYS} hari + safety stock Z×σ×√lead time, service level 98% untuk Kritis dan 95% untuk Waspada), ditambah satu lot pesan sebesar pemakaian rata-rata satu bulan atau stok minimum — mana yang lebih besar — agar tidak terjadi pembelian mini berulang. Material tanpa histori pemakaian (belum pernah keluar dari gudang) diusulkan sebesar selisih ke stok minimum saja, tanpa buffer statistik — gunakan tombol "Lihat detail" untuk verifikasi manual atau analisis lewat tab Material Cadang kalau nilainya signifikan. Stok minimum sendiri dihitung otomatis dari histori pemakaian (reorder point, service level 95%) bila datanya sudah ≥{MIN_HISTORY_MONTHS} bulan, dan baru memakai angka manual "Min Qty Alert" dari Data Stok kalau histori belum cukup. Hanya material berstatus Kritis dan Waspada yang ditampilkan.</p></details>
+          {showLens && uptLens==="ALL" && perUptStrip.length>0 && (
+            <div className="forecast-cockpit-strip">
+              {perUptStrip.map(item=>(
+                <button key={item.uptId} onClick={()=>setUptLens(item.uptId)}>
+                  <span>{item.nama}</span>
+                  <strong>Gap {fmtNum(item.qty)}</strong>
+                  <span>{item.value>0?`Rp ${item.value.toLocaleString("id-ID")}`:"-"}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
-          <div className="forecast-table-card mobile-card-table forecast-card-table">
-            <table className="forecast-table">
-              <thead><tr><th>Material</th><th>Status</th><th>Stok saat ini</th><th>Estimasi habis</th><th>Usulan qty beli</th><th>Estimasi nilai</th><th>Aksi</th></tr></thead>
-              <tbody>
-                {pagedProcurementList.map(entry=><tr key={entry.kat.id} className="mobile-card-table__row" style={{"--risk-accent":RISK_COLORS[entry.risk.key]}}>
-                  <td className="mobile-card-table__title"><strong>{entry.kat.name}</strong><span>{entry.kat.katalog} · {entry.kat.satuan}</span></td>
-                  <td data-label="Status"><span className={`forecast-risk is-${entry.risk.key}`}>{entry.risk.label}</span></td>
-                  <td data-label="Stok"><strong>{fmtNum(entry.totalQty)}</strong><span>min {fmtNum(entry.risk.minQty)} {entry.kat.satuan}{entry.risk.minQtySource==="computed"?" · dihitung dari histori":""}</span></td>
-                  <td data-label="Estimasi habis"><strong>{formatDays(entry.risk.days)}</strong><span>berdasarkan transaksi</span></td>
-                  <td data-label="Usulan qty">{entry.qty>0
-                    ? <><strong>{fmtNum(entry.qty)}</strong><span>{entry.kat.satuan}</span><span>{entry.methodLabel}</span></>
-                    : <><strong>Sudah di stok minimum</strong><span>{entry.method==="material_cadang"?"stok sudah memenuhi rekomendasi Material Cadang":"tidak perlu beli sekarang — belum ada histori pemakaian untuk hitung buffer"}</span></>}</td>
-                  <td data-label="Estimasi nilai"><strong>{entry.qty>0&&entry.price>0?`Rp ${entry.value.toLocaleString("id-ID")}`:"-"}</strong><span>{entry.price>0?`@ Rp ${entry.price.toLocaleString("id-ID")}`:"harga belum ada"}</span></td>
-                  <td data-label="Aksi"><div className="forecast-row-actions"><button onClick={()=>openDetail(entry)}>Lihat detail</button><button onClick={()=>continueInChat(`Buatkan rekomendasi pengadaan untuk material: ${entry.kat.name} [${entry.kat.katalog}] — stok saat ini ${fmtNum(entry.totalQty)} ${entry.kat.satuan}, usulan beli ${entry.qty>0?`${fmtNum(entry.qty)} ${entry.kat.satuan}`:"belum bisa dihitung otomatis"}`)}>Pak War</button></div></td>
-                </tr>)}
-              </tbody>
-            </table>
-            {procurementList.length > 0 && (
-              <div className="forecast-pagination">
-                <div className="forecast-pagination__size">
-                  Tampilkan
-                  <select value={procPageSize} onChange={e=>setProcPageSize(Number(e.target.value))}>
-                    {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
-                  </select>
-                  item per halaman — {procurementList.length} total
+          <div className="forecast-cockpit-columns">
+            <div style={sty.card}>
+              <div className="forecast-cockpit-col-title"><strong>Material Cadang — Kesehatan Spare</strong></div>
+              {!cockpitHealth.hasData ? (
+                <div style={{textAlign:"center",padding:"28px 10px",color:C.muted}}>
+                  <div style={{fontSize:13,marginBottom:12}}>Belum ada analisis Material Cadang untuk cakupan ini.</div>
+                  <button style={sty.btn("ghost")} onClick={()=>setForecastView("material_cadang")}>Buka tab Material Cadang →</button>
                 </div>
-                <div className="forecast-pagination__nav">
-                  <button disabled={procPageClamped<=1} onClick={()=>setProcPage(p=>Math.max(1,p-1))}>← Sebelumnya</button>
-                  <span>Halaman {procPageClamped} / {procTotalPages}</span>
-                  <button disabled={procPageClamped>=procTotalPages} onClick={()=>setProcPage(p=>Math.min(procTotalPages,p+1))}>Berikutnya →</button>
-                </div>
+              ) : (
+                <>
+                  <div className="forecast-overview__metrics" style={{marginBottom:12}}>
+                    <div><span>Critical</span><strong>{cockpitHealth.summary.healthCounts.Critical||0}</strong></div>
+                    <div><span>High Risk</span><strong>{cockpitHealth.summary.healthCounts["High Risk"]||0}</strong></div>
+                    <div><span>Watch</span><strong>{cockpitHealth.summary.healthCounts.Watch||0}</strong></div>
+                    <div><span>Healthy</span><strong>{cockpitHealth.summary.healthCounts.Healthy||0}</strong></div>
+                    <div><span>Avg Health</span><strong>{cockpitHealth.summary.avgHealth}/100</strong></div>
+                    <div><span>Data Confidence</span><strong>{cockpitHealth.summary.avgConfidence}%</strong></div>
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead>
+                        <tr style={{background:"#f9fafb"}}>
+                          {["No Katalog","Nama","Merk","Kelas","Policy","Stok","Ideal","Gap","Status","Nilai Gap"].map(h=>(
+                            <th key={h} style={{padding:"7px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cockpitHealth.topPriority.map((r,i)=>{
+                          const status = r.currentQty===0?"Kosong/Kritis":r.currentQty<r.recommendedQty?"Kurang":"Aman";
+                          const statusColor = r.currentQty===0?C.red:r.currentQty<r.recommendedQty?"#f59e0b":C.green;
+                          return (
+                            <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
+                              <td style={{padding:"6px 8px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
+                              <td style={{padding:"6px 8px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
+                              <td style={{padding:"6px 8px",fontSize:12,color:C.muted,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.merk||"-"}</td>
+                              <td style={{padding:"6px 8px"}}><span style={{background:r.abcClass==="A1"?"#fef2f2":r.abcClass==="A2"?"#fff7ed":r.abcClass==="B1"?"#eff6ff":"#f9fafb",color:r.abcClass==="A1"?C.red:r.abcClass==="A2"?"#ea580c":C.accent,padding:"2px 6px",borderRadius:4,fontWeight:700,fontSize:12}}>{r.abcClass}</span></td>
+                              <td style={{padding:"6px 8px",fontSize:12,color:C.muted}}>{r.policy}</td>
+                              <td style={{padding:"6px 8px",fontWeight:700}}>{r.currentQty}</td>
+                              <td style={{padding:"6px 8px",fontWeight:700}}>{r.recommendedQty}</td>
+                              <td style={{padding:"6px 8px",fontWeight:700,color:r.gapQty>0?C.red:C.green}}>{r.gapQty>0?"-"+r.gapQty:0}</td>
+                              <td style={{padding:"6px 8px"}}><span style={{color:statusColor,fontWeight:700,fontSize:12}}>{status}</span></td>
+                              <td style={{padding:"6px 8px",color:r.gapQty>0?"#7c3aed":C.muted}}>{r.gapQty>0?"Rp "+fmtNum(r.gapQty*(r.harga||0)):"-"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{marginTop:10,textAlign:"right"}}>
+                    <button style={sty.btn("ghost","sm")} onClick={()=>setForecastView("material_cadang")}>Kelola di Material Cadang →</button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div>
+              <div className="forecast-cockpit-col-title"><strong>Forecast & Usulan Beli</strong><button className="forecast-cockpit-copy-btn" disabled={procurementList.length===0} onClick={copyProcurementList}>Salin daftar</button></div>
+              <details className="forecast-methodology"><summary>Bagaimana usulan qty dihitung?</summary><p>Material yang sudah dianalisis di tab Material Cadang memakai angka gap dari perhitungan Poisson service-level per kelas ABC. Sisanya memakai ROP+ROQ: titik pesan ulang (pemakaian rata-rata selama lead time {DEFAULT_LEAD_TIME_DAYS} hari + safety stock Z×σ×√lead time, service level 98% untuk Kritis dan 95% untuk Waspada), ditambah satu lot pesan sebesar pemakaian rata-rata satu bulan atau stok minimum — mana yang lebih besar — agar tidak terjadi pembelian mini berulang. Material tanpa histori pemakaian (belum pernah keluar dari gudang) diusulkan sebesar selisih ke stok minimum saja, tanpa buffer statistik — gunakan tombol "Lihat detail" untuk verifikasi manual atau analisis lewat tab Material Cadang kalau nilainya signifikan. Stok minimum sendiri dihitung otomatis dari histori pemakaian (reorder point, service level 95%) bila datanya sudah ≥{MIN_HISTORY_MONTHS} bulan, dan baru memakai angka manual "Min Qty Alert" dari Data Stok kalau histori belum cukup. Hanya material berstatus Kritis dan Waspada yang ditampilkan.</p></details>
+
+              <div className="forecast-table-card mobile-card-table forecast-card-table">
+                <table className="forecast-table">
+                  <thead><tr><th>Material</th><th>Status</th><th>Stok saat ini</th><th>Estimasi habis</th><th>Usulan qty beli</th><th>Estimasi nilai</th><th>Aksi</th></tr></thead>
+                  <tbody>
+                    {pagedProcurementList.map(entry=><tr key={entry.kat.id} className="mobile-card-table__row" style={{"--risk-accent":RISK_COLORS[entry.risk.key]}}>
+                      <td className="mobile-card-table__title"><strong>{entry.kat.name}</strong><span>{entry.kat.katalog} · {entry.kat.satuan}</span></td>
+                      <td data-label="Status"><span className={`forecast-risk is-${entry.risk.key}`}>{entry.risk.label}</span></td>
+                      <td data-label="Stok"><strong>{fmtNum(entry.totalQty)}</strong><span>min {fmtNum(entry.risk.minQty)} {entry.kat.satuan}{entry.risk.minQtySource==="computed"?" · dihitung dari histori":""}</span></td>
+                      <td data-label="Estimasi habis"><strong>{formatDays(entry.risk.days)}</strong><span>berdasarkan transaksi</span></td>
+                      <td data-label="Usulan qty">{entry.qty>0
+                        ? <><strong>{fmtNum(entry.qty)}</strong><span>{entry.kat.satuan}</span><span>{entry.methodLabel}</span></>
+                        : <><strong>Sudah di stok minimum</strong><span>{entry.method==="material_cadang"?"stok sudah memenuhi rekomendasi Material Cadang":"tidak perlu beli sekarang — belum ada histori pemakaian untuk hitung buffer"}</span></>}</td>
+                      <td data-label="Estimasi nilai"><strong>{entry.qty>0&&entry.price>0?`Rp ${entry.value.toLocaleString("id-ID")}`:"-"}</strong><span>{entry.price>0?`@ Rp ${entry.price.toLocaleString("id-ID")}`:"harga belum ada"}</span></td>
+                      <td data-label="Aksi"><div className="forecast-row-actions"><button onClick={()=>openDetail(entry)}>Lihat detail</button><button onClick={()=>continueInChat(`Buatkan rekomendasi pengadaan untuk material: ${entry.kat.name} [${entry.kat.katalog}] — stok saat ini ${fmtNum(entry.totalQty)} ${entry.kat.satuan}, usulan beli ${entry.qty>0?`${fmtNum(entry.qty)} ${entry.kat.satuan}`:"belum bisa dihitung otomatis"}`)}>Pak War</button></div></td>
+                    </tr>)}
+                  </tbody>
+                </table>
+                {procurementList.length > 0 && (
+                  <div className="forecast-pagination">
+                    <div className="forecast-pagination__size">
+                      Tampilkan
+                      <select value={procPageSize} onChange={e=>setProcPageSize(Number(e.target.value))}>
+                        {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
+                      </select>
+                      item per halaman — {procurementList.length} total
+                    </div>
+                    <div className="forecast-pagination__nav">
+                      <button disabled={procPageClamped<=1} onClick={()=>setProcPage(p=>Math.max(1,p-1))}>← Sebelumnya</button>
+                      <span>Halaman {procPageClamped} / {procTotalPages}</span>
+                      <button disabled={procPageClamped>=procTotalPages} onClick={()=>setProcPage(p=>Math.min(procTotalPages,p+1))}>Berikutnya →</button>
+                    </div>
+                  </div>
+                )}
+                {procurementList.length===0 && <div className="forecast-empty"><strong>Tidak ada material kritis/waspada saat ini</strong><span>Kondisi stok aman, belum ada usulan pengadaan.</span></div>}
               </div>
-            )}
-            {procurementList.length===0 && <div className="forecast-empty"><strong>Tidak ada material kritis/waspada saat ini</strong><span>Kondisi stok aman, belum ada usulan pengadaan.</span></div>}
+            </div>
           </div>
         </>
       ) : forecastView==="material_cadang" ? (
@@ -276,7 +437,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
           katalogList={katalogList} setKatalogList={setKatalogList}
           stocks={stocks} allStocks={allStocks} setStocks={setStocks} gudangList={gudangList} lokasiList={lokasiList}
           txns={txns} currentUser={currentUser} sty={sty} C={C}
-          saveToCloud={saveToCloud} showToast={showToast}
+          saveToCloud={saveToCloud} showToast={showToast} users={users}
         />
       ) : (
         <>

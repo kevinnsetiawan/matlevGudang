@@ -9,8 +9,8 @@ import { CLOUD } from "../lib/cloud.js";
 import { parseMaterialCadangRows, hitungMaterialCadang, enrichMaterialCadangHealthResults, generateMaterialCadangAiInsights, mapApplyAuditRow } from "../lib/materialCadang.js";
 import * as XLSX from "xlsx";
 
-export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, materialCadangHealthData, setMaterialCadangHealthData, materialCadangAiInsights, setMaterialCadangAiInsights, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, currentUser, sty, C, saveToCloud, showToast }) {
-  const [subTab, setSubTab] = useState("dashboard");
+export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, materialCadangHealthData, setMaterialCadangHealthData, materialCadangAiInsights, setMaterialCadangAiInsights, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, currentUser, sty, C, saveToCloud, showToast, users }) {
+  const [subTab, setSubTab] = useState("hasil");
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null); // { rows, stats, fileName }
   const [analisisResult, setAnalisisResult] = useState(null); // hasil hitung terbaru
@@ -67,7 +67,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   // null | "PENDING" | "APPROVED" — dipakai gate tombol Apply per baris (#3) supaya
   // material yang sudah diajukan/di-apply tetap tampil di tabel tapi tombolnya nonaktif.
   function appliedStatusOf(katalogId) {
-    const h = mcData.applyHistory.find(h => h.katalogId === katalogId && (h.status === "PENDING_ASMAN" || h.status === "APPROVED"));
+    const h = mcData.applyHistory.find(h => h.katalogId === katalogId && (h.status === "PENDING_ASMAN" || h.status === "APPROVED") && inMcScope(h));
     return h ? (h.status === "PENDING_ASMAN" ? "PENDING" : "APPROVED") : null;
   }
 
@@ -79,9 +79,18 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   const mcHealth = { imports: materialCadangHealthData?.imports||[], analysisRuns: materialCadangHealthData?.analysisRuns||[], healthResults: materialCadangHealthData?.healthResults||[], applyAudit: materialCadangHealthData?.applyAudit||[] };
   const mcAi = { runs: materialCadangAiInsights?.runs||[], materialInsights: materialCadangAiInsights?.materialInsights||[] };
 
+  // Scope Material Cadang per UPT: UPT/Asman lihat uptId sendiri; role broad (UIT/Pusat) lihat semua.
+  // Record lama tanpa uptId: infer UPT dari pembuatnya (baca-waktu saja, tidak menulis balik ke data).
+  const broadScope = hasRole(currentUser, "ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT");
+  const myUpt = currentUser?.uptId || null;
+  const recUptId = (rec) => rec?.uptId
+    || (users||[]).find(u => u.id === (rec?.createdBy || rec?.requestedBy || rec?.importedBy || rec?.uploadedBy))?.uptId
+    || null;
+  const inMcScope = (rec) => broadScope || (recUptId(rec) ? recUptId(rec) === myUpt : false);
+
   // Analisis terakhir dari data tersimpan
-  const latestAnalysis = mcData.analyses.slice(-1)[0] || null;
-  const latestHealthRun = mcHealth.analysisRuns.slice(-1)[0] || null;
+  const latestAnalysis = mcData.analyses.filter(inMcScope).slice(-1)[0] || null;
+  const latestHealthRun = mcHealth.analysisRuns.filter(inMcScope).slice(-1)[0] || null;
   const latestHealthResults = latestHealthRun
     ? mcHealth.healthResults.filter(r => r.runId === latestHealthRun.id)
     : [];
@@ -90,25 +99,8 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     ? mcAi.runs.find(r => r.runId === latestHealthRun.id)
     : null;
 
-  // Summary dari hasil analisis
-  const summary = latestResults.reduce((acc, r) => {
-    acc.total++;
-    if (r.healthStatus) acc.healthCounts[r.healthStatus] = (acc.healthCounts[r.healthStatus]||0) + 1;
-    acc.healthSum += r.healthIndex || 0;
-    acc.confidenceSum += r.dataConfidence || 0;
-    if (r.treatment !== "Material Cadang") { acc.persediaan++; return acc; }
-    if (r.currentQty >= r.recommendedQty && r.recommendedQty > 0) acc.aman++;
-    else if (r.currentQty > 0 && r.currentQty < r.recommendedQty) acc.kurang++;
-    else if (r.recommendedQty > 0 && r.currentQty === 0) acc.kosong++;
-    acc.gapQty += r.gapQty;
-    acc.gapNilai += r.gapQty * (r.harga || 0);
-    return acc;
-  }, { total:0, aman:0, kurang:0, kosong:0, persediaan:0, gapQty:0, gapNilai:0, healthSum:0, confidenceSum:0, healthCounts:{} });
-  summary.avgHealth = summary.total ? Math.round(summary.healthSum / summary.total) : 0;
-  summary.avgConfidence = summary.total ? Math.round(summary.confidenceSum / summary.total) : 0;
-
   // Pending apply (menunggu Asman)
-  const pendingApply = mcData.applyHistory.filter(h => h.status === "PENDING_ASMAN");
+  const pendingApply = mcData.applyHistory.filter(h => h.status === "PENDING_ASMAN" && inMcScope(h));
 
   async function handleImportFile(e) {
     const file = e.target.files?.[0];
@@ -180,6 +172,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       importFileName: importPreview.fileName,
       createdBy: currentUser.id,
       createdAt: Date.now(),
+      uptId: currentUser?.uptId || null,
       results,
       params: { periodYears:5, slMandatory:0.99, slOptimum:0.95, slEconomic:0.90 },
     };
@@ -188,6 +181,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       fileName: importPreview.fileName,
       importedBy: currentUser.id,
       importedAt: Date.now(),
+      uptId: currentUser?.uptId || null,
       stats: importPreview.stats,
     };
     const healthRun = {
@@ -197,6 +191,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       importFileName: importPreview.fileName,
       createdBy: currentUser.id,
       createdAt: Date.now(),
+      uptId: currentUser?.uptId || null,
       modelAi: "llama-3.3-70b-versatile",
       params: newAnalysis.params,
     };
@@ -290,6 +285,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       status: "PENDING_ASMAN",
       requestedBy: currentUser.id,
       requestedAt: Date.now(),
+      uptId: currentUser?.uptId || null,
       notes: applyNotes.trim(),
     };
     const updated = { ...mcData, applyHistory: [...mcData.applyHistory, entry] };
@@ -327,6 +323,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       status: "PENDING_ASMAN",
       requestedBy: currentUser.id,
       requestedAt: now,
+      uptId: currentUser?.uptId || null,
       notes: "",
     }));
     const updated = { ...mcData, applyHistory: [...mcData.applyHistory, ...entries] };
@@ -427,7 +424,8 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       id: "MCAPPLY-" + now, katalogId: item.katalogId, namaBarang: item.katalogName || item.namaMaterial,
       noKatalog: item.noKat, recommendedQty: item.recommendedQty, abcClass: item.abcClass, policy: item.policy,
       runId: item.runId, healthIndex: item.healthIndex, healthStatus: item.healthStatus,
-      status: "APPROVED", requestedBy: currentUser.id, requestedAt: now, approvedBy: currentUser.id, approvedAt: now, notes: "",
+      status: "APPROVED", requestedBy: currentUser.id, requestedAt: now, approvedBy: currentUser.id, approvedAt: now,
+      uptId: currentUser?.uptId || null, notes: "",
     };
     const updatedKatalog = katalogList.map(k => k.id === item.katalogId ? { ...k, minQty: item.recommendedQty, minQtyUpdatedAt: now, minQtyUpdatedBy: currentUser.id } : k);
     const updatedMC = { ...mcData, applyHistory: [...mcData.applyHistory, entry] };
@@ -457,7 +455,8 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       id: "MCAPPLY-" + (now + idx), katalogId: item.katalogId, namaBarang: item.katalogName || item.namaMaterial,
       noKatalog: item.noKat, recommendedQty: item.recommendedQty, abcClass: item.abcClass, policy: item.policy,
       runId: item.runId, healthIndex: item.healthIndex, healthStatus: item.healthStatus,
-      status: "APPROVED", requestedBy: currentUser.id, requestedAt: now, approvedBy: currentUser.id, approvedAt: now, notes: "",
+      status: "APPROVED", requestedBy: currentUser.id, requestedAt: now, approvedBy: currentUser.id, approvedAt: now,
+      uptId: currentUser?.uptId || null, notes: "",
     }));
     const recommendedByKatalog = {};
     entries.forEach(e => { recommendedByKatalog[e.katalogId] = e.recommendedQty; });
@@ -556,7 +555,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   const aiByNoKatalog = {};
   latestMaterialInsights.forEach(m => { if (m.noKatalog) aiByNoKatalog[normalizeKatalog(m.noKatalog)] = m; });
   const TABS = [
-    {id:"dashboard",label:"📊 Dashboard"},
     {id:"hasil",label:"📋 Analisis"},
     {id:"ai",label:"AI Insight"},
     {id:"import",label:"📥 Import & Hitung"},
@@ -576,97 +574,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
           </button>
         ))}
       </div>
-
-      {/* DASHBOARD */}
-      {subTab==="dashboard" && (
-        <div>
-          {latestResults.length === 0 ? (
-            <div style={{...sty.card,textAlign:"center",padding:40,color:C.muted}}>
-              <div style={{fontSize:40,marginBottom:12}}>🔩</div>
-              <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Material Cadang belum dianalisis</div>
-              <div style={{fontSize:13,marginBottom:20}}>Upload data populasi/failure terlebih dahulu di tab "Import & Hitung"</div>
-              {canEdit && <button style={sty.btn("primary")} onClick={()=>setSubTab("import")}>📥 Upload Data Populasi/Failure</button>}
-            </div>
-          ) : (
-            <div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:16}}>
-                {[
-                  {label:"Total Dianalisis",val:summary.total,color:C.accent},
-                  {label:"Aman ✅",val:summary.aman,color:C.green},
-                  {label:"Kurang ⚠️",val:summary.kurang,color:"#f59e0b"},
-                  {label:"Kosong/Kritis 🔴",val:summary.kosong,color:C.red},
-                  {label:"Gap Qty",val:summary.gapQty,color:"#7c3aed"},
-                  {label:"Estimasi Nilai Gap",val:"Rp "+fmtNum(summary.gapNilai),color:"#dc2626",small:true},
-                ].map(kpi=>(
-                  <div key={kpi.label} style={{...sty.card,borderTop:`3px solid ${kpi.color}`,padding:14}}>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:4}}>{kpi.label}</div>
-                    <div style={{fontSize:kpi.small?14:22,fontWeight:800,color:kpi.color}}>{kpi.val}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:16}}>
-                {[
-                  {label:"Critical",val:summary.healthCounts.Critical||0,color:"#dc2626"},
-                  {label:"High Risk",val:summary.healthCounts["High Risk"]||0,color:"#ea580c"},
-                  {label:"Watch",val:summary.healthCounts.Watch||0,color:"#f59e0b"},
-                  {label:"Healthy",val:summary.healthCounts.Healthy||0,color:"#16a34a"},
-                  {label:"Avg Health",val:summary.avgHealth+"/100",color:C.accent},
-                  {label:"Data Confidence",val:summary.avgConfidence+"%",color:"#0f766e"},
-                ].map(kpi=>(
-                  <div key={kpi.label} style={{...sty.card,borderLeft:`4px solid ${kpi.color}`,padding:12}}>
-                    <div style={{fontSize:12,color:C.muted,marginBottom:4,fontWeight:700}}>{kpi.label}</div>
-                    <div style={{fontSize:20,fontWeight:900,color:kpi.color}}>{kpi.val}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{...sty.card,marginBottom:16}}>
-                <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>🏆 Prioritas Tindakan (Top 10)</div>
-                <div style={{overflowX:"auto"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                    <thead>
-                      <tr style={{background:"#f9fafb"}}>
-                        {["No Katalog","Nama","Merk","Kelas","Policy","Stok","Ideal","Gap","Status","Nilai Gap"].map(h=>(
-                          <th key={h} style={{padding:"7px 8px",textAlign:"left",fontWeight:700,whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`}}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...displayResults]
-                        .filter(r=>r.treatment==="Material Cadang")
-                        .sort((a,b)=>{
-                          if (a.abcClass!==b.abcClass) return a.abcClass.localeCompare(b.abcClass);
-                          return b.gapQty - a.gapQty;
-                        })
-                        .slice(0,10)
-                        .map((r,i)=>{
-                          const status = r.currentQty===0?"Kosong/Kritis":r.currentQty<r.recommendedQty?"Kurang":"Aman";
-                          const statusColor = r.currentQty===0?C.red:r.currentQty<r.recommendedQty?"#f59e0b":C.green;
-                          return (
-                            <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
-                              <td style={{padding:"6px 8px",color:"#0098da",fontWeight:700}}>{r.noKat}</td>
-                              <td style={{padding:"6px 8px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.katalogName||r.namaMaterial}</td>
-                              <td style={{padding:"6px 8px",fontSize:12,color:C.muted,maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.merk||"-"}</td>
-                              <td style={{padding:"6px 8px"}}><span style={{background:r.abcClass==="A1"?"#fef2f2":r.abcClass==="A2"?"#fff7ed":r.abcClass==="B1"?"#eff6ff":"#f9fafb",color:r.abcClass==="A1"?C.red:r.abcClass==="A2"?"#ea580c":C.accent,padding:"2px 6px",borderRadius:4,fontWeight:700,fontSize:12}}>{r.abcClass}</span></td>
-                              <td style={{padding:"6px 8px",fontSize:12,color:C.muted}}>{r.policy}</td>
-                              <td style={{padding:"6px 8px",fontWeight:700}}>{r.currentQty}</td>
-                              <td style={{padding:"6px 8px",fontWeight:700}}>{r.recommendedQty}</td>
-                              <td style={{padding:"6px 8px",fontWeight:700,color:r.gapQty>0?C.red:C.green}}>{r.gapQty>0?"-"+r.gapQty:0}</td>
-                              <td style={{padding:"6px 8px"}}><span style={{color:statusColor,fontWeight:700,fontSize:12}}>{status}</span></td>
-                              <td style={{padding:"6px 8px",color:r.gapQty>0?"#7c3aed":C.muted}}>{r.gapQty>0?"Rp "+fmtNum(r.gapQty*(r.harga||0)):"-"}</td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-                <div style={{marginTop:10,textAlign:"right"}}>
-                  <button style={sty.btn("ghost","sm")} onClick={()=>setSubTab("hasil")}>Lihat semua hasil →</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* AI INSIGHT */}
       {subTab==="ai" && (
@@ -889,7 +796,10 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
       {subTab==="hasil" && (
         <div>
           {displayResults.length === 0 ? (
-            <div style={{...sty.card,textAlign:"center",padding:30,color:C.muted}}>Belum ada hasil analisis. Upload dan hitung di tab "Import & Hitung".</div>
+            <div style={{...sty.card,textAlign:"center",padding:30,color:C.muted}}>
+              <div style={{marginBottom:12}}>Belum ada hasil analisis. Upload dan hitung di tab "Import & Hitung".</div>
+              {canEdit && <button style={sty.btn("primary")} onClick={()=>setSubTab("import")}>📥 Buka Import & Hitung</button>}
+            </div>
           ) : (
             <div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:12}}>
@@ -999,7 +909,7 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
           )}
           {(() => {
             const history = [...mcData.applyHistory]
-              .filter(h => h.status !== "PENDING_ASMAN")
+              .filter(h => h.status !== "PENDING_ASMAN" && inMcScope(h))
               .sort((a,b)=>(b.decidedAt||b.requestedAt||0)-(a.decidedAt||a.requestedAt||0));
             return (
               <div style={{...sty.card,marginTop:12}}>
