@@ -158,6 +158,32 @@ export function getTopStokTerbanyak(stocks, katalogList, n) {
   return arr.slice(0, n);
 }
 
+// Top stok terbanyak, DIKELOMPOKKAN PER SATUAN (beda satuan tak bisa dibanding qty
+// mentah — reuse agregasi qty per katalog dari getTopStokTerbanyak, cuma dipecah per
+// satuan lalu urut per grup). Dipakai chat "Pak War" (App.jsx) supaya "stok paling
+// banyak" tidak comot dari ranking by-nilai (lihat HANDOFF Tier 1).
+export function getTopStockByQty(stocks, katalogList, n = 20) {
+  const bySatuan = {};
+  getTopStokTerbanyak(stocks, katalogList, Infinity).forEach(item => {
+    const satuan = item.satuan || "-";
+    if (!bySatuan[satuan]) bySatuan[satuan] = [];
+    bySatuan[satuan].push(item);
+  });
+  return Object.entries(bySatuan)
+    .map(([satuan, items]) => ({ satuan, items: items.slice(0, n) }))
+    .sort((a, b) => b.items.reduce((s, i) => s + i.totalQty, 0) - a.items.reduce((s, i) => s + i.totalQty, 0));
+}
+
+// Total qty per satuan lintas semua stok — dipakai bareng getTopStockByQty.
+export function getTotalPerSatuan(stocks) {
+  const totals = {};
+  (stocks || []).forEach(s => {
+    const satuan = s.satuan || s.unit || "-";
+    totals[satuan] = (totals[satuan] || 0) + (s.qty || 0);
+  });
+  return totals;
+}
+
 export function getMaterialAkanHabis(stocks, katalogList, txns, n) {
   // Aggregate qty per katalog
   const grouped = {};

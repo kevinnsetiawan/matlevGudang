@@ -111,7 +111,8 @@ import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoM
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
-import { getMaterialAkanHabis, buildMonthlySeriesByKatalog, computeProcurementList } from "./src/lib/analytics.js";
+import { getMaterialAkanHabis, buildMonthlySeriesByKatalog, computeProcurementList, getTopStockByQty, getTotalPerSatuan } from "./src/lib/analytics.js";
+import { pakwarToolSchemas, runPakwarTool } from "./src/lib/pakwarTools.js";
 
 // Turn this on only after the reviewed self-host migration is installed. It
 // makes TUG-8/9 fail closed rather than silently reverting to browser storage.
@@ -2742,6 +2743,10 @@ export default function PLNWarehouse() {
       .sort((a,b)=>(b.qty*b.price)-(a.qty*a.price))
       .slice(0,20);
 
+    // Top material by qty, per satuan (beda satuan tak bisa dibanding) — utk "stok paling banyak"
+    const topByQtyPerSatuan = getTopStockByQty(scopedEnrichedStocks, katalogList, 15);
+    const totalPerSatuan = getTotalPerSatuan(scopedEnrichedStocks);
+
     // Stok kritis
     const kritis = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
 
@@ -2823,6 +2828,14 @@ ATURAN JAWABAN:
   dengan format persis:
   - **Nama Material** [kode katalog] — stok X unit · Lokasi: Y
   Selalu cantumkan lokasi bila tersedia di data; kalau tidak ada tulis "Lokasi: -".
+- Untuk pertanyaan "stok terbanyak/paling banyak" pakai daftar TOP MATERIAL BY QTY
+  (per satuan) — sebutkan per satuan, JANGAN membandingkan qty antar satuan yang
+  berbeda. Untuk "termahal/nilai terbesar" pakai daftar by nilai.
+- Untuk pertanyaan spesifik soal stok/qty/ranking/kritis/proyeksi/lokasi material,
+  WAJIB panggil tool yang sesuai (top_stock_by_qty, top_stock_by_value, stok_kritis,
+  proyeksi_stok_habis, cari_material, total_inventori) dan jawab berdasarkan hasil
+  tool tersebut — JANGAN mengarang atau menghitung sendiri angka dari snapshot di
+  bawah. Snapshot hanya konteks umum/cadangan.
 
 Sumber: Data WARNOTO per ${now.toLocaleDateString("id-ID")}
 
@@ -2840,6 +2853,12 @@ INVENTORI (${scopedEnrichedStocks.length} item total):
 Nilai total: Rp ${fmtNum(Math.round(scopedEnrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
 Top 20 material by nilai:
 ${top20.map(s=>`- ${s.name} [${s.katalog}]: ${fmtNum(s.qty)} ${s.unit} | Rp ${fmtNum(Math.round(s.qty*s.price))} | lokasi: ${s.lokasi||"-"}`).join('\n')}
+
+TOP MATERIAL BY QTY (per satuan — JANGAN bandingkan qty antar satuan berbeda):
+${topByQtyPerSatuan.map(g=>`Satuan ${g.satuan}:\n${g.items.map(i=>`- ${i.nama} [${i.katalog}]: ${fmtNum(i.totalQty)} ${g.satuan}`).join('\n')}`).join('\n')}
+
+TOTAL QTY PER SATUAN:
+${Object.entries(totalPerSatuan).map(([satuan,qty])=>`- ${satuan}: ${fmtNum(qty)}`).join('\n')}
 
 MATERIAL KRITIS (stok ≤ minimum):
 ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok ${s.qty} ${s.unit}, min ${s.minQty}`).join('\n')}
@@ -2886,6 +2905,11 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
           : kritis.slice(0,12).map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · minimum ${fmtNum(stock.minQty)}`).join("\n");
         return `${localNotice}\n\nIni daftar material yang stoknya sudah menyentuh batas minimum:\n${criticalText}\n\nSaya siap bantu kalau perlu data lain.`;
       }
+      if (/paling banyak|terbanyak|stok terbesar|qty terbanyak/.test(normalized)) {
+        const qtyText = topByQtyPerSatuan.length===0 ? "Belum ada data stok." : topByQtyPerSatuan
+          .map(g=>`Satuan ${g.satuan}:\n${g.items.slice(0,10).map(i=>`- **${i.nama}** [${i.katalog||"-"}] — ${fmtNum(i.totalQty)} ${g.satuan}`).join("\n")}`).join("\n\n");
+        return `${localNotice}\n\nIni material dengan stok terbanyak (dikelompokkan per satuan, tidak bisa dibandingkan lintas satuan):\n\n${qtyText}\n\nSebutkan saja bila mau lihat satuan lain.`;
+      }
       if (matchedStocks.length>0) {
         const materialText = matchedStocks.map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · Lokasi: ${stock.lokasi||"-"}`).join("\n");
         return `${localNotice}\n\nBerikut material yang cocok dengan yang Anda tanyakan:\n${materialText}\n\nSebutkan saja bila ada material lain yang mau dicek.`;
@@ -2902,25 +2926,48 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
     try {
       const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
       if (!groqKey) throw new Error("Konfigurasi layanan AI belum tersedia.");
-      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
-        body:JSON.stringify({
-          model:"llama-3.3-70b-versatile",
-          max_tokens:1500,
-          messages:[
-            {role:"system",content:systemPrompt},
-            ...chatHistory.filter(m=>m.role!=="ai"||chatHistory.indexOf(m)>0).slice(-8).map(m=>({
-              role:m.role==="user"?"user":"assistant",
-              content:m.text
-            })),
-            {role:"user",content:msg}
-          ]
-        })
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
-      const reply = data.choices?.[0]?.message?.content;
+      const toolCtx = { stocks: scopedEnrichedStocks, katalogList, txns: scopedTxns, uptNama: currentUptNama };
+      const messages = [
+        {role:"system",content:systemPrompt},
+        ...chatHistory.filter(m=>m.role!=="ai"||chatHistory.indexOf(m)>0).slice(-8).map(m=>({
+          role:m.role==="user"?"user":"assistant",
+          content:m.text
+        })),
+        {role:"user",content:msg}
+      ];
+
+      // Loop tool-calling: LLM boleh minta tool_calls beberapa putaran (cap 3) sebelum
+      // kasih jawaban final. Tiap putaran: kirim messages+tools ke Groq, kalau ada
+      // tool_calls jalankan lewat runPakwarTool (deterministik, reuse analytics.js/
+      // ragShared.mjs) lalu balikin hasilnya sebagai pesan role:"tool", ulangi.
+      let reply = null;
+      for (let iter = 0; iter < 3; iter++) {
+        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
+          method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
+          body:JSON.stringify({
+            model:"llama-3.3-70b-versatile",
+            max_tokens:1500,
+            messages,
+            tools: pakwarToolSchemas,
+            tool_choice: "auto",
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error?.message || `Layanan AI merespons HTTP ${resp.status}.`);
+        const choiceMsg = data.choices?.[0]?.message;
+        if (!choiceMsg) throw new Error("Layanan AI tidak mengirimkan jawaban.");
+        const toolCalls = choiceMsg.tool_calls;
+        if (toolCalls && toolCalls.length > 0) {
+          messages.push(choiceMsg);
+          toolCalls.forEach(call => {
+            messages.push({ role: "tool", tool_call_id: call.id, content: runPakwarTool(call, toolCtx) });
+          });
+          continue;
+        }
+        reply = choiceMsg.content;
+        break;
+      }
       if (!reply) throw new Error("Layanan AI tidak mengirimkan jawaban.");
       setChatHistory(h=>[...h,{role:"ai",text:reply}]);
     } catch (error) {
