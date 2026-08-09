@@ -3,6 +3,7 @@ import { WAREHOUSE } from "../constants.js";
 import { fmtDate } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { supabase } from "../supabaseClient.js";
+import * as XLSX from "xlsx";
 import { Sparkline } from "./Sparkline.jsx";
 import { MaterialCadangTab } from "./MaterialCadangTab.jsx";
 import { computeKatalogRisk, computeProcurementList, DEFAULT_LEAD_TIME_DAYS, MIN_HISTORY_MONTHS } from "../lib/analytics.js";
@@ -39,9 +40,11 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
   // saling mereset posisi halaman tab satunya.
   const [procPage, setProcPage] = useState(1);
   const [procPageSize, setProcPageSize] = useState(20);
+  const [procSearch, setProcSearch] = useState("");
+  const [procStatusFilter, setProcStatusFilter] = useState("ALL");
 
   useEffect(() => { setPage(1); }, [statusFilter, search, sortMode, pageSize]);
-  useEffect(() => { setProcPage(1); }, [procPageSize]);
+  useEffect(() => { setProcPage(1); }, [procPageSize, procSearch, procStatusFilter]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -134,9 +137,10 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
   const procurementList = procurementResult.list;
   const procurementTotalQty = procurementResult.totalQty;
   const procurementTotalValue = procurementResult.totalValue;
-  const procTotalPages = Math.max(1, Math.ceil(procurementList.length/procPageSize));
+  const filteredProcList = useMemo(()=> procurementList.filter(e => (procStatusFilter==="ALL" || e.risk.key===procStatusFilter) && (!procSearch.trim() || (e.kat.name+" "+e.kat.katalog).toLowerCase().includes(procSearch.trim().toLowerCase()))), [procurementList, procSearch, procStatusFilter]);
+  const procTotalPages = Math.max(1, Math.ceil(filteredProcList.length/procPageSize));
   const procPageClamped = Math.min(procPage, procTotalPages);
-  const pagedProcurementList = procurementList.slice((procPageClamped-1)*procPageSize, procPageClamped*procPageSize);
+  const pagedProcurementList = filteredProcList.slice((procPageClamped-1)*procPageSize, procPageClamped*procPageSize);
 
   // Kesehatan Material Cadang untuk cockpit: run terbaru PER UPT di scope (agregat ALL =
   // gabungan run terbaru tiap UPT; lensa single-UPT = run terbaru UPT itu saja). Mirror
@@ -194,19 +198,23 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
     });
   }, [uptLens, showLens, uptScopeOptions, stocks, katalogList, txns, materialCadangHealthData]);
 
-  function copyProcurementList() {
-    const text = procurementList
-      .map(entry=>`${entry.kat.name} [${entry.kat.katalog}] — ${entry.qty>0?`${fmtNum(entry.qty)} ${entry.kat.satuan}`:"sudah di stok minimum"}`)
-      .join("\n");
-    navigator.clipboard.writeText(text)
-      .then(()=>showToast?.(`Daftar ${procurementList.length} material disalin ke clipboard.`))
-      .catch(()=>showToast?.("Gagal menyalin ke clipboard.","error"));
-  }
-
   function formatDays(days) {
     if (days===Infinity) return "Belum ada data";
     if (days>365) return "> 1 tahun";
     return `± ${fmtNum(days)} hari`;
+  }
+  function downloadProcurementXLSX() {
+    const listUntukExport = filteredProcList.length>0 ? filteredProcList : procurementList;
+    const aoa = [
+      ["No Katalog","Nama Material","Satuan","Status","Stok Saat Ini","Min Qty","Estimasi Habis","Usulan Qty Beli","Metode","Harga Satuan","Estimasi Nilai"],
+      ...listUntukExport.map(e=>[e.kat.katalog, e.kat.name, e.kat.satuan, e.risk.label, e.totalQty, e.risk.minQty, formatDays(e.risk.days), e.qty, e.methodLabel||e.method||"", e.price||0, e.value||0]),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Rekomendasi Pengadaan");
+    const tanggal = new Date().toISOString().slice(0,10).replace(/-/g,"");
+    XLSX.writeFile(wb, `REKOMENDASI_PENGADAAN_${uptLens}_${tanggal}.xlsx`);
+    showToast?.(`Rekomendasi ${listUntukExport.length} material diunduh.`);
   }
   function openDetail(entry) {
     setForecastDetail({kat:entry.kat,stockRows:entry.stockRows});
@@ -386,7 +394,14 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
             </div>
 
             <div>
-              <div className="forecast-cockpit-col-title"><strong>Forecast & Usulan Beli</strong><button className="forecast-cockpit-copy-btn" disabled={procurementList.length===0} onClick={copyProcurementList}>Salin daftar</button></div>
+              <div className="forecast-cockpit-col-title"><strong>Forecast & Usulan Beli</strong><button className="forecast-cockpit-copy-btn" disabled={procurementList.length===0} onClick={downloadProcurementXLSX}>Download Rekomendasi</button></div>
+              <div className="forecast-controls">
+                <div className="forecast-search"><span aria-hidden="true">⌕</span><input value={procSearch} onChange={e=>setProcSearch(e.target.value)} placeholder="Cari nama atau nomor katalog..."/></div>
+                <div className="forecast-status-filter">
+                  <button className={procStatusFilter==="ALL"?"is-active":""} onClick={()=>setProcStatusFilter("ALL")}>Semua <b>{procurementList.length}</b></button>
+                  {RISK_FILTERS.map(item=><button key={item.key} className={procStatusFilter===item.key?"is-active":""} onClick={()=>setProcStatusFilter(procStatusFilter===item.key?"ALL":item.key)}>{item.label} <b>{procurementList.filter(e=>e.risk.key===item.key).length}</b></button>)}
+                </div>
+              </div>
               <details className="forecast-methodology"><summary>Bagaimana usulan qty dihitung?</summary><p>Material yang sudah dianalisis di tab Material Cadang memakai angka gap dari perhitungan Poisson service-level per kelas ABC. Sisanya memakai ROP+ROQ: titik pesan ulang (pemakaian rata-rata selama lead time {DEFAULT_LEAD_TIME_DAYS} hari + safety stock Z×σ×√lead time, service level 98% untuk Kritis dan 95% untuk Waspada), ditambah satu lot pesan sebesar pemakaian rata-rata satu bulan atau stok minimum — mana yang lebih besar — agar tidak terjadi pembelian mini berulang. Material tanpa histori pemakaian (belum pernah keluar dari gudang) diusulkan sebesar selisih ke stok minimum saja, tanpa buffer statistik — gunakan tombol "Lihat detail" untuk verifikasi manual atau analisis lewat tab Material Cadang kalau nilainya signifikan. Stok minimum sendiri dihitung otomatis dari histori pemakaian (reorder point, service level 95%) bila datanya sudah ≥{MIN_HISTORY_MONTHS} bulan, dan baru memakai angka manual "Min Qty Alert" dari Data Stok kalau histori belum cukup. Hanya material berstatus Kritis dan Waspada yang ditampilkan.</p></details>
 
               <div className="forecast-table-card mobile-card-table forecast-card-table">
@@ -406,14 +421,14 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
                     </tr>)}
                   </tbody>
                 </table>
-                {procurementList.length > 0 && (
+                {filteredProcList.length > 0 && (
                   <div className="forecast-pagination">
                     <div className="forecast-pagination__size">
                       Tampilkan
                       <select value={procPageSize} onChange={e=>setProcPageSize(Number(e.target.value))}>
                         {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
                       </select>
-                      item per halaman — {procurementList.length} total
+                      item per halaman — {filteredProcList.length} total
                     </div>
                     <div className="forecast-pagination__nav">
                       <button disabled={procPageClamped<=1} onClick={()=>setProcPage(p=>Math.max(1,p-1))}>← Sebelumnya</button>
@@ -423,6 +438,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
                   </div>
                 )}
                 {procurementList.length===0 && <div className="forecast-empty"><strong>Tidak ada material kritis/waspada saat ini</strong><span>Kondisi stok aman, belum ada usulan pengadaan.</span></div>}
+                {procurementList.length>0 && filteredProcList.length===0 && <div className="forecast-empty"><strong>Tidak ada material yang sesuai filter</strong><span>Ubah filter atau kata pencarian untuk melihat data lain.</span></div>}
               </div>
             </div>
           </div>
