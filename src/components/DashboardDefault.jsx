@@ -1,6 +1,6 @@
 // Komponen DashboardDefault — dipindah dari App.jsx (refactor Fase 4f).
 import { useState } from "react";
-import { WAREHOUSE, JENIS_BARANG } from "../constants.js";
+import { JENIS_BARANG } from "../constants.js";
 import { fmtRp } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { summarizeTxnDashboard } from "../lib/analytics.js";
@@ -33,8 +33,6 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, uptLis
   return (
     <div className="dashboard-overview">
       <div className="dashboard-overview__context">
-        <span>Overview operasional</span>
-        <strong>{WAREHOUSE}</strong>
         <small>{new Date().toLocaleDateString("id-ID",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</small>
       </div>
       <div className="dashboard-overview__kpis">
@@ -85,7 +83,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, uptLis
               ].map(k=>(
                 <div key={k.id}>
                   <div style={{fontSize:12,color:C.muted}}>{k.label}</div>
-                  <div style={{fontSize:15,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums"}}>{k.val}</div>
+                  <div style={{fontSize:15,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",overflowWrap:"anywhere"}}>{k.val}</div>
                 </div>
               ))}
             </div>
@@ -110,7 +108,7 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, uptLis
             ].map(k=>(
               <div key={k.id}>
                 <div style={{fontSize:12,color:C.muted}}>{k.label}</div>
-                <div style={{fontSize:15,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums"}}>{k.val}</div>
+                <div style={{fontSize:15,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums",overflowWrap:"anywhere"}}>{k.val}</div>
               </div>
             ))}
           </div>
