@@ -513,9 +513,13 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
 
   return (
     <div>
-      <div style={{marginBottom:16}}>
-        <p style={{color:C.muted,fontSize:13}}>Analisis ABC, inventory policy, dan rekomendasi jumlah ideal material cadang</p>
-      </div>
+      <section className="forecast-overview kpi-banner" style={{marginBottom:16,gridTemplateColumns:"1fr"}}>
+        <div className="forecast-overview__copy">
+          <span>Material Cadang</span>
+          <strong>Analisis ABC & Kesehatan Spare</strong>
+          <small>Inventory policy dan rekomendasi jumlah ideal material cadang</small>
+        </div>
+      </section>
       <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
         {TABS.map(t=>(
           <button key={t.id} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${subTab===t.id?C.accent:C.border}`,background:subTab===t.id?C.accent:"white",color:subTab===t.id?"white":C.muted,fontWeight:700,fontSize:12,cursor:"pointer",position:"relative"}}

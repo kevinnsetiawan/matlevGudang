@@ -3605,7 +3605,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
             enrichedStocks={scopedEnrichedStocks} pagedStocks={pagedStocks}
             setStockDetailId={setStockDetailId}
-            katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList}
+            katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} uptList={uptList}
             subGudangList={subGudangList} visibleGudangList={visibleGudangList}
             stockGudangFilter={stockGudangFilter} setStockGudangFilter={setStockGudangFilter}
             setPendingFoto={setPendingFoto} setLightboxImg={setLightboxImg}

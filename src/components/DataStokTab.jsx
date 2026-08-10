@@ -33,7 +33,7 @@ export function DataStokTab({
   photoSearchResults, setPhotoSearchResults, photoSearchResultMode, photoSearchOcrText,
   enrichedStocks, pagedStocks,
   setStockDetailId,
-  katalogList, lokasiList, gudangList, subGudangList, visibleGudangList,
+  katalogList, lokasiList, gudangList, uptList, subGudangList, visibleGudangList,
   stockGudangFilter, setStockGudangFilter,
   setPendingFoto, setLightboxImg,
   saveToCloud, showToast,
@@ -125,7 +125,7 @@ export function DataStokTab({
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:980}}>
                 <thead>
                   <tr style={{background:C.sidebar,color:"white"}}>
-                    {["Foto","Nama Barang","Kategori","Qty","Gudang","Blok","Harga","Status","Aksi"].map(h=>(
+                    {(stockUptFilterOptions?.length>1 ? ["Foto","Nama Barang","Kategori","Qty","Lokasi UPT","Gudang","Blok","Harga","Status","Aksi"] : ["Foto","Nama Barang","Kategori","Qty","Gudang","Blok","Harga","Status","Aksi"]).map(h=>(
                       <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"||h==="Foto"?"center":"left",whiteSpace:"nowrap",fontSize:12}}>{h}</th>
                     ))}
                   </tr>
@@ -178,6 +178,9 @@ export function DataStokTab({
                               </div>}
                           {isLow && <div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
                         </td>
+                        {stockUptFilterOptions?.length>1 && (
+                          <td data-label="Lokasi UPT" style={{padding:"8px 10px",fontSize:12}}>{uptList.find(u=>u.id===st.uptId)?.nama || "—"}</td>
+                        )}
                         <td data-label="Gudang" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
                           {hasRole(currentUser, "ADMIN","TL") ? (
                             <select
@@ -192,7 +195,7 @@ export function DataStokTab({
                                 // from combining a new gudang with the old lokasi.
                               }}>
                               <option value="">-- Pilih Gudang --</option>
-                              {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
+                              {visibleGudangList.filter(g=>!st.uptId||g.uptId===st.uptId).map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
                             </select>
                           ) : (
                             <span style={{color:C.text}}>{gdg?.kode||gdg?.nama||"—"}</span>
