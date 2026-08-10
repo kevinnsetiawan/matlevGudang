@@ -1436,6 +1436,10 @@ export default function PLNWarehouse() {
     dedupeGudangDanSubGudang(true); // auto-run diam: jangan spam toast "tidak ada duplikat" tiap load
   }, [loading, gudangList]);
 
+  // Peta Wilayah Gudang: scope ke UPT login (null = nasional, lihat semua)
+  const petaScopeUptIds = getScopeUptIds(currentUser, uptList); // null=nasional
+  const petaGudangList = petaScopeUptIds === null ? gudangList : gudangList.filter(g => petaScopeUptIds.includes(g.uptId));
+
   // Peta Wilayah Gudang UPT Surabaya — render/refresh marker Leaflet tiap kali Dashboard dibuka atau data gudang berubah
   useEffect(() => {
     if (tab !== "dashboard" || dashTab !== "ringkasan" || !petaWilayahDivRef.current || typeof window.L === "undefined") return;
@@ -1451,7 +1455,7 @@ export default function PLNWarehouse() {
     // BUDURAN & SURABAYA SELATAN kebetulan punya lat/lng identik dari Excel, marker-nya numpuk
     // persis di titik yang sama jadi kelihatan salah satu "tidak muncul"). Fallback ke g.lat/g.lng
     // kalau alamat tidak mengandung Plus Code (gudang lama yang alamatnya masih teks biasa).
-    const gudangWithCoord = gudangList
+    const gudangWithCoord = petaGudangList
       .map(g => ({ g, coord: extractLatLngFromAddress(g.alamat) || (g.lat!=null && g.lng!=null ? {lat:g.lat,lng:g.lng} : null) }))
       .filter(x => x.coord);
     if (!petaWilayahMapRef.current) {
@@ -1474,11 +1478,11 @@ export default function PLNWarehouse() {
       window.L.marker([coord.lat, coord.lng], {icon:gudangIcon}).addTo(map._markersLayer)
         .bindPopup(`<b>🏭 ${g.nama}</b> (${g.kode})<br/>${g.alamat||"-"}<br/>${itemCount} baris stok • Total Qty: <b>${fmtNum(totalQty)}</b>${lastMaturity?`<br/>Maturity: Level ${lastMaturity.level} (${MATURITY_LEVELS[lastMaturity.level]})`:""}`);
     });
-    if (gudangWithCoord.length > 0) {
-      map.setView([gudangWithCoord[0].coord.lat, gudangWithCoord[0].coord.lng], gudangWithCoord.length===1?13:11);
-    }
+    const pts = gudangWithCoord.map(x => [x.coord.lat, x.coord.lng]);
+    if (pts.length === 1) map.setView(pts[0], 13);
+    else if (pts.length > 1) map.fitBounds(pts, { padding: [30, 30], maxZoom: 13 });
     setTimeout(()=>map.invalidateSize(), 100);
-  }, [tab, dashTab, gudangList, stocks, lokasiList, maturityAssessments, currentUser]);
+  }, [tab, dashTab, petaGudangList, stocks, lokasiList, maturityAssessments, currentUser]);
 
   // Toast error dibiarkan tampil lebih lama (5.5s) daripada sukses (3.5s) —
   // pesan error biasanya lebih panjang/penting untuk dibaca tuntas, terutama
@@ -3512,7 +3516,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             enrichedStocks={scopedEnrichedStocks} txns={scopedTxns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
             topN={topN} setTopN={setTopN} pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
             heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={scopedAttbList} attbBongkaranPool={attbBongkaranPool}
-            materialCadangData={materialCadangData} gudangList={gudangList} petaWilayahDivRef={petaWilayahDivRef}
+            materialCadangData={materialCadangData} gudangList={petaGudangList} petaWilayahDivRef={petaWilayahDivRef}
+            petaUptLabel={petaScopeUptIds === null ? "Semua UPT" : (petaScopeUptIds.length === 1 ? currentUptNama : "Wilayah UIT")}
             procurementSummary={procurementSummary}
           />
         )}
