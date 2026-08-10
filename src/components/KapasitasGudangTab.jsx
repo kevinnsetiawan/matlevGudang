@@ -1,12 +1,13 @@
 // Komponen KapasitasGudangTab — dipindah dari App.jsx (refactor Fase 5a).
 import { useState } from "react";
+import { ChartBar, WarningCircle, Warehouse, ArrowsClockwise } from "@phosphor-icons/react";
 import { KAPASITAS_LABEL, UIT, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { hasRole, getScopeUptIds } from "../lib/roles.js";
 import { supabase } from "../supabaseClient.js";
 import { PetaGudangTab } from "./PetaGudangTab.jsx";
 
-export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab, showToast }) {
+export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab, showToast, onSynced }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
   const [petaUptFilter, setPetaUptFilter] = useState(""); // "" = semua; peta pakai uptId (gudang.uptId)
@@ -25,16 +26,13 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
       const { data, error } = await supabase.functions.invoke("sync-kapasitas", { method: "POST" });
       const err = error || data?.error;
       if (err) {
-        const msg = "Gagal sinkron: " + (data?.error || error?.message || String(err));
-        showToast ? showToast(msg, "error") : alert(msg);
+        showToast("Gagal sinkron: " + (data?.error || error?.message || String(err)), "error");
         return;
       }
-      const msg = `Sinkron berhasil: ${data.kapasitas} kapasitas, ${data.gudang} gudang, ${data.sub_gudang} sub-gudang.`;
-      showToast ? showToast(msg, "success") : alert(msg);
-      window.location.reload();
+      showToast(`Sinkron berhasil: ${data.kapasitas} kapasitas, ${data.gudang} gudang, ${data.sub_gudang} sub-gudang.`, "success");
+      await onSynced?.();
     } catch (e) {
-      const msg = "Gagal sinkron: " + e.message;
-      showToast ? showToast(msg, "error") : alert(msg);
+      showToast("Gagal sinkron: " + e.message, "error");
     } finally {
       setSyncing(false);
     }
@@ -89,6 +87,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
           <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
           {hasRole(currentUser, "ADMIN") && (
             <button style={sty.btn("ghost","sm")} disabled={syncing} onClick={syncFromSheet} aria-label="Sinkron dari Sheet">
+              <ArrowsClockwise size={14} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6}} className={syncing?"capacity-spin":""}/>
               {syncing ? "Menyinkron…" : "Sinkron dari Sheet"}
             </button>
           )}
@@ -119,11 +118,23 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
         ))}
       </div>
 
+      <div className="capacity-content" style={{position:"relative"}}>
+      {syncing && (
+        <div className="capacity-skeleton-overlay" style={{position:"absolute",inset:0,zIndex:10,background:"rgba(255,255,255,0.85)",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:24}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:16}}>Menyinkron data kapasitas…</div>
+          <div style={{width:"100%",maxWidth:900,padding:"0 16px"}}>
+            {[0,1,2,3,4].map(i=>(
+              <div key={i} className="capacity-skeleton" style={{height:16,background:"#eef2f7",borderRadius:8,marginBottom:10}}/>
+            ))}
+          </div>
+        </div>
+      )}
       {/* DASHBOARD */}
       {subTab==="dashboard" && (
         <div>
           {gudangCapacityList.length === 0 ? (
             <div style={{...sty.card,textAlign:"center",padding:40,color:C.muted}}>
+              <Warehouse size={40} weight="regular" aria-hidden style={{color:C.muted,marginBottom:12}}/>
               <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Data kapasitas gudang belum tersedia</div>
               <div style={{fontSize:13,marginBottom:8}}>
                 {pendingImports>0
@@ -137,7 +148,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             <div>
               <div className="capacity-ranking-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
                 <div style={{...sty.card}}>
-                  <div style={{fontWeight:700,marginBottom:10}}>Ranking UPT (Utilisasi)</div>
+                  <div style={{fontWeight:700,marginBottom:10}}><ChartBar size={15} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6,color:C.muted}}/>Ranking UPT (Utilisasi)</div>
                   {uptRanking.map((u,i)=>(
                     <div key={u.upt} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
                       <div>
@@ -154,7 +165,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                   ))}
                 </div>
                 <div style={{...sty.card}}>
-                  <div style={{fontWeight:700,marginBottom:10}}>Sub-Gudang Paling Penuh</div>
+                  <div style={{fontWeight:700,marginBottom:10}}><WarningCircle size={15} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6,color:"#dc2626"}}/>Sub-Gudang Paling Penuh</div>
                   {gudangCapacityList.filter(r=>r.statusKapasitas==="KRITIS").sort((a,b)=>b.persentaseTerpakai-a.persentaseTerpakai).slice(0,8).map((r,i)=>(
                     <div key={i} style={{padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
                       <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -231,7 +242,6 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
       )}
 
 
-      {/* Detail modal */}
       {/* SUB-TAB PETA GUDANG */}
       {subTab==="peta" && (
         <PetaGudangTab
@@ -246,6 +256,8 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
           setUptFilter={setPetaUptFilter}
         />
       )}
+
+      </div>
 
       {detailRecord && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setDetailRecord(null)}>

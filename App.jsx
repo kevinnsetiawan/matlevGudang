@@ -1591,6 +1591,17 @@ export default function PLNWarehouse() {
     setRolePerms(map);
   }
 
+  // Refresh kapasitas gudang in-place setelah sinkron dari Sheet (hindari
+  // window.location.reload). Reuse mapper loadWarehouseCapacity yang sama
+  // dengan startup load (App.jsx L593 masterLoads).
+  async function reloadKapasitas() {
+    const fresh = await loadWarehouseCapacity();
+    if (fresh !== null) {
+      setGudangCapacityList(fresh);
+      CLOUD.set("pln_gudang_capacity_v1", fresh);
+    }
+  }
+
   // Kelola Akun + ganti password mandiri → dipindah ke src/hooks/useAccountAdmin.js
 
   // Pulihkan sesi Supabase Auth yang tersimpan saat app dibuka (reload, buka
@@ -3582,6 +3593,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             setTab={setTab}
             setStockSubTab={setStockSubTab}
             showToast={showToast}
+            onSynced={reloadKapasitas}
           />
         )}
 

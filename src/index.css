@@ -1119,6 +1119,10 @@
 /* Kapasitas Gudang — jalur menuju data dibuat eksplisit dan mudah ditemukan. */
 .capacity-page,
 .capacity-page :is(button,input,select,textarea,table) { font-family: "Segoe UI", Inter, system-ui, sans-serif !important; }
+.capacity-spin { animation: capacity-spin 0.9s linear infinite; }
+@keyframes capacity-spin { to { transform: rotate(360deg); } }
+.capacity-skeleton { animation: capacity-pulse 1.3s ease-in-out infinite; }
+@keyframes capacity-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 .capacity-tabs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; margin-bottom: 16px; padding: 5px; border: 1px solid #dbe3ef; border-radius: 12px; background: #e9eef6; }
 .capacity-tabs button { display: flex; min-height: 50px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 8px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #64748b; text-align: left; cursor: pointer; }
 .capacity-tabs button strong { color: #334155; font-size: 12px; font-weight: 800; }
