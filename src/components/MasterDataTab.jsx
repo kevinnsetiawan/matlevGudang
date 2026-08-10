@@ -65,9 +65,11 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             {stockSubTab==="gudang" && can(currentUser, "aksi.import", rolePerms) && (
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                  <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
-                    {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
-                  </button>
+                  {hasRole(currentUser,"ADMIN") && (
+                    <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
+                      {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
+                    </button>
+                  )}
                   <button style={{...sty.btn("ghost","sm")}} onClick={downloadLokasiTemplate}>⬇️ Download Template Lokasi</button>
                   <button style={{...sty.btn("ghost","sm")}} onClick={()=>setImportLokasiOpen(true)}>📥 Import Excel Lokasi</button>
                 </div>
@@ -76,7 +78,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                     spesifik, bukan pemakaian rutin (keluhan user 2026-07-06: "kenapa ada 3
                     inputan"). Sekarang disembunyikan di balik toggle + dikasih penjelasan
                     kapan masing-masing dipakai. */}
-                {showGudangMaintenance && (
+                {hasRole(currentUser,"ADMIN") && showGudangMaintenance && (
                   <div style={{marginTop:12,...sty.card,background:"#fafafa",border:`1px dashed ${C.border}`,padding:14}}>
                     <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
                       Dua alat ini <b>bukan untuk pemakaian rutin</b> — cuma dipakai kalau menemukan masalah data spesifik berikut:
