@@ -19,6 +19,7 @@ import { PermMatrixPage } from "./PermMatrixPage.jsx";
 export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockSubTab, filteredKatalog, satpamList: rawSatpamList, timMutuList: rawTimMutuList, uitList: rawUitList, uptList: rawUptList, ultgList: rawUltgList, users, gudangList: rawGudangList, lokasiList, subGudangList, visibleGudangList: rawVisibleGudangList, openAddKatalog, openAddSatpam, openAddUIT, openAddGudang, openAddAkun, importGudangOpen, setImportGudangOpen, showGudangMaintenance, setShowGudangMaintenance, importLokasiOpen, setImportLokasiOpen, gudangCapacityImports, setGudangCapacityImports, saveToCloud, showToast, backfillGudangCoordFromCapacity, dedupeGudangDanSubGudang, isKodeDuplicateInSubGudang, setLokasiList, syncLokasi, maraUploadProgress, maraUploadLoading, uploadMaraToDB, katalogList, katalogSearch, setKatalogSearch, katalogFilterBelumMara, setKatalogFilterBelumMara, setBarcodePrintOpen, pagedKatalog, stocks, openEditKatalog, deleteKatalog, katalogPageSize, setKatalogPageSize, katalogPageClamped, setKatalogPage, katalogTotalPages, openEditSatpam, deleteSatpam, openEditTimMutu, orgSearch, setOrgSearch, collapsedUitIds, setCollapsedUitIds, openAddUPT, openEditUIT, deleteUIT, openAddULTG, openEditUPT, deleteUPT, openEditULTG, deleteULTG, expandedGudangId, setExpandedGudangId, openEditGudang, deleteGudang, showGudangDenahTools, setShowGudangDenahTools, uploadDenahGudang, denahLoading, mapConfigGudangId, setMapConfigGudangId, pendingMapLokasi, setPendingMapLokasi, manualAddMode, setManualAddMode, ocrSuggestGudangId, setOcrSuggestGudangId, ocrSuggestSubGudangId, setOcrSuggestSubGudangId, ocrSuggestions, setOcrSuggestions, assignLokasiKoordinat, suggestKodeFromOcr, expandedSubGudangToolsIds, setExpandedSubGudangToolsIds, uploadDenahSubGudang, denahSubLoading, mapConfigSubGudangId, setMapConfigSubGudangId, pendingMapLokasiSub, setPendingMapLokasiSub, manualAddModeSub, setManualAddModeSub, assignLokasiKoordinatSub, openEditLokasi, requestDeleteLokasi, selectedSubGudangId, setSelectedSubGudangId, openEditAkun, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, setStocks, setKatalogList, setTxns, reloadRolePerms }) {
   const [akunSearch, setAkunSearch] = useState("");
   const [akunUptFilter, setAkunUptFilter] = useState("");
+  const [masterUptFilter, setMasterUptFilter] = useState("");
   // UIT dulu dianggap "global" (nasional) — sekarang dibatasi ke semua UPT di UIT-nya lewat
   // getScopeUptIds/inScopeUpt (sumber tunggal 3-tier, lihat src/lib/roles.js).
   const dataScope = getScopeUptIds(currentUser, rawUptList);
@@ -32,17 +33,24 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
   // Record lama tanpa gudang (atau gudang tak dikenal) di-fallback ke UPT legacy Surabaya,
   // sama pola dgn timMutu di bawah, supaya tidak lenyap dari akun Surabaya setelah isolasi multi-UPT.
   const satpamUptId = (s) => rawGudangList.find(g => g.id === s.gudangId)?.uptId || legacySurabayaId;
-  const satpamList = dataScope === null ? rawSatpamList : rawSatpamList.filter(s => inScopeUpt(satpamUptId(s), dataScope));
-  const timMutuList = dataScope === null ? rawTimMutuList : rawTimMutuList.filter(t => t.uptId ? inScopeUpt(t.uptId, dataScope) : inScopeUpt(legacySurabayaId, dataScope));
+  const satpamList = (dataScope === null ? rawSatpamList : rawSatpamList.filter(s => inScopeUpt(satpamUptId(s), dataScope))).filter(s => !masterUptFilter || satpamUptId(s) === masterUptFilter);
+  const timMutuList = (dataScope === null ? rawTimMutuList : rawTimMutuList.filter(t => t.uptId ? inScopeUpt(t.uptId, dataScope) : inScopeUpt(legacySurabayaId, dataScope))).filter(t => !masterUptFilter || (t.uptId||legacySurabayaId) === masterUptFilter);
+  const gudangDisplay = visibleGudangList.filter(g => !masterUptFilter || g.uptId === masterUptFilter);
   return (
           <div className={`workspace-page master-page master-page--${stockSubTab}`}>
             <div className="workspace-page-toolbar">
               <div className="workspace-context-row">
                 <span>
-                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangDisplay.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </span>
               </div>
               <div className="workspace-page-toolbar__actions">
+                {(stockSubTab==="gudang"||stockSubTab==="satpam"||stockSubTab==="timmutu") && uptList.length>1 && (
+                  <select style={sty.select} value={masterUptFilter} onChange={e=>setMasterUptFilter(e.target.value)}>
+                    <option value="">Semua UPT</option>
+                    {uptList.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+                  </select>
+                )}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
@@ -430,8 +438,8 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             {stockSubTab==="gudang" && (
               <div className="master-warehouse-page">
                 {/* Notifikasi approval blok lokasi sudah dipindahkan ke menu "✅ Approval" — lihat di sana. */}
-                {gudangList.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
-                {visibleGudangList.map(g=>{
+                {gudangDisplay.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
+                {gudangDisplay.map(g=>{
                   const upt = uptList.find(u=>u.id===g.uptId);
                   const bloklokasi = lokasiList.filter(l=>l.gudangId===g.id);
                   const blokWithCoord = bloklokasi.filter(l=>l.mapX!=null);
