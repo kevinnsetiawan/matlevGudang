@@ -2036,7 +2036,9 @@ export default function PLNWarehouse() {
       // stok dalam scope efektif" (stockUptFilter kalau dipilih, else getScopeUptIds).
       const uptOf = (s) => {
         const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
-        return gid ? (gudangList.find(g => g.id === gid)?.uptId || null) : null;
+        // Mirror RLS COALESCE(resolve lokasi->gudang.upt_id, stocks.upt_id): stok tanpa gudang
+        // (mis. material Gresik belum di-assign lokasi) tetap terpetakan ke UPT-nya lewat s.uptId.
+        return (gid ? gudangList.find(g => g.id === gid)?.uptId : null) || s.uptId || null;
       };
       const scope = getScopeUptIds(currentUser, uptList);
       const allowedKatalog = new Set(
@@ -3168,7 +3170,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const dataScope = getScopeUptIds(currentUser, uptList);
   const scopedEnrichedStocks = dataScope === null ? enrichedStocks : enrichedStocks.filter(s => {
     const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
-    const uptId = gid ? gudangList.find(g => g.id === gid)?.uptId : null;
+    // Mirror RLS COALESCE(gudang.upt_id, stocks.upt_id): stok tanpa gudang tetap terpetakan ke
+    // UPT-nya lewat s.uptId, bukan dianggap "tanpa UPT" yang lolos ke semua scope.
+    const uptId = (gid ? gudangList.find(g => g.id === gid)?.uptId : null) || s.uptId || null;
     return inScopeUpt(uptId, dataScope);
   });
   const scopedStockIds = dataScope === null ? null : new Set(scopedEnrichedStocks.map(s => s.id));
@@ -3311,7 +3315,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
     const gid = lokasiList.find(l=>l.id===s.lokasiId)?.gudangId || s.gudangId || null;
     const mg = canAccessGudang(currentUser, gid);
-    const mu = !stockUptFilter || (gudangList.find(g=>g.id===gid)?.uptId === stockUptFilter);
+    // Mirror RLS COALESCE(gudang.upt_id, stocks.upt_id): stok tanpa gudang (mis. material Gresik
+    // belum di-assign lokasi) tetap kena filter UPT lewat s.uptId, bukan hilang.
+    const stockUpt = (gid ? gudangList.find(g=>g.id===gid)?.uptId : null) || s.uptId || null;
+    const mu = !stockUptFilter || (stockUpt === stockUptFilter);
     return ms && mj && mg && mu;
   });
   // Opsi filter UPT generik dipakai TUG (identik pola stockUptFilterOptions).
