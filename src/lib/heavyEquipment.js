@@ -147,13 +147,12 @@ export function canApproveHeavyEquipmentLoan(user, loan, uptList) {
   if (user?.role === "SUPERADMIN") return true; // full-access, bypass scope UPT di bawah
   if (user?.role !== "ASMAN") return false;
   const userUpt = getUserUptScope(user, uptList);
-  // Approval discope ke UNIT PEMINJAM (requesterUpt) — Asman UPT sendiri hanya boleh approve
-  // pengajuan peminjaman YANG DIAJUKAN OLEH UPT-nya sendiri, bukan berdasar pemilik alat.
-  // Diperketat 2026-07-06: dulu `requesterUpt` kosong/tidak ke-set otomatis dianggap "boleh
-  // siapa saja" (deny-by-default jadi allow-by-default) — celah yang bikin Asman UPT lain bisa
-  // approve pinjaman yang datanya rusak/tidak lengkap. Sekarang WAJIB match persis.
-  const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
-  return !!requesterUpt && userUpt === requesterUpt;
+  // Approval discope ke UNIT PEMILIK alat (ownerUpt): Asman UPT pemilik yang MENGIZINKAN alatnya
+  // dipinjam UPT lain (keputusan user 2026-08-10 — sebelumnya keliru discope ke requesterUpt,
+  // padahal pesan error, requiredApproverUpt, dan label PDF semua "pemilik alat"). WAJIB match
+  // persis — ownerUpt kosong = tak ada yang boleh approve (deny-by-default), cegah celah data rusak.
+  const ownerUpt = getHeavyEquipmentLoanOwnerUpt(loan);
+  return !!ownerUpt && userUpt === ownerUpt;
 }
 
 export function getEquipmentCategory(e) {
