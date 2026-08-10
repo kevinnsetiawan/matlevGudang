@@ -104,7 +104,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
   // Ajukan Peminjaman = "kita mau pinjam alat", jadi alat yang ditawarkan HARUS di luar UPT
   // sendiri (non-MSB) — pinjam alat sendiri lewat form sendiri tidak masuk akal. MSB/Manager UIT
   // memfasilitasi peminjaman UPT mana pun, jadi tetap lihat semua alat.
-  const borrowableEquipment = equipmentList.filter(e => e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat) && (isMSB || e.upt!==myUpt));
+  const borrowableEquipment = equipmentList
+    .filter(e => e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat) && (isMSB || e.upt!==myUpt))
+    .sort((a,b) => (a.upt||"").localeCompare(b.upt||"") || (a.nama||"").localeCompare(b.nama||""));
   const selectedEquipment = equipmentList.find(e=>e.id===loanForm.equipmentId);
   const requesterOptions = selectedEquipment ? uptOptions.filter(u=>u!==selectedEquipment.upt) : uptOptions;
   const pendingCount = scopedLoans.filter(isPendingHeavyEquipmentLoan).length;
