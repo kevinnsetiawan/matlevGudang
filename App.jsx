@@ -1285,7 +1285,12 @@ export default function PLNWarehouse() {
     // failedLabels di bawah) — ditemukan bug nyata 2026-07-21: syncMasterTable() bisa
     // return false (network error/RLS/dll) tapi hasilnya tidak pernah dicek, jadi toast
     // "berhasil" tetap muncul meski data sebenarnya gagal tersimpan ke Supabase.
-    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null, upt_id: item.uptId || null });
+    // Isi upt_id yang KOSONG dgn UPT penulis (akun scoped): stok tanpa upt_id yang lokasinya
+    // tak resolve ke gudang ber-UPT tak bisa ditulis akun scoped (RLS can_access_upt(null)=false).
+    // Hanya mengisi saat kosong — TIDAK pernah menimpa upt_id yang sudah ada. Penulis nasional
+    // (uptId null) dibiarkan null karena mem-bypass RLS (SUPERADMIN/ADMIN_LOG_PUSAT).
+    const writerUptId = stateRef.current.currentUser?.uptId || null;
+    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null, upt_id: item.uptId || writerUptId });
     const syncTasks = [];
     if (overrides.katalogList !== undefined) {
       // Kalau caller kasih hint baris katalog yang berubah → sync ringan (cuma baris itu),
@@ -1852,7 +1857,7 @@ export default function PLNWarehouse() {
     let sf = stockForm;
     try {
       for (const f of ["fotoNameplate","fotoKeseluruhan"])
-        if (_isDataUrl(sf[f])) sf = {...sf, [f]: await uploadStockFoto(sf.katalogId, f, sf[f])};
+        if (_isDataUrl(sf[f])) sf = {...sf, [f]: await uploadStockFoto(sf.katalogId, f, sf[f], sf.uptId)};
     } catch (e) {
       console.warn("Upload foto Data Stok gagal:", sf.id, e?.message||e);
       showToast("Gagal upload foto ke server, coba lagi.","error"); return;
@@ -1889,17 +1894,21 @@ export default function PLNWarehouse() {
   // ke jsonb `stocks.data` (insiden 2026-07-23 & 2026-07-28: tabel stocks 119KB → 12MB,
   // GET /stocks lambat → snapshot realtime gagal → "koneksi realtime terputus").
   // Melempar kalau upload gagal — pemanggil WAJIB membatalkan simpan, bukan fallback base64.
-  async function uploadStockFoto(katalogId, field, img) {
+  async function uploadStockFoto(katalogId, field, img, uptId) {
     if (!_isDataUrl(img) || isDemoMode()) return img; // sudah URL Storage / mode demo (tidak menulis Storage)
     const kode = String(katalogId || "tanpa-katalog").replace(/^KAT-/, "");
-    const path = `upt-surabaya/${kode}/${field==="fotoNameplate"?"tambahan":"utama"}.jpg`;
+    // Folder per-UPT supaya foto stok antar-UPT tidak saling menimpa (dulu hardcode
+    // "upt-surabaya/" → dua UPT dgn katalog sama menulis path yang sama). Foto lama di
+    // path lama tetap valid: URL tersimpan menunjuk file lama, file tidak dipindah.
+    const uptFolder = String(uptId || "upt-tanpa").toLowerCase();
+    const path = `${uptFolder}/${kode}/${field==="fotoNameplate"?"tambahan":"utama"}.jpg`;
     return _withTimeout(uploadPhotoToStorage(await compressImage(img, {maxBytes:1_000_000}), "stock-photos", path), 30_000, "unggah foto");
   }
   // Upload langsung foto Nameplate/Keseluruhan dari modal detail (klik baris Data Stok) — khusus Admin/TL
   // Return true kalau tersimpan, false kalau upload gagal (foto pending jangan dibuang).
   async function updateStockFoto(id, field, img) {
     let url;
-    try { url = await uploadStockFoto(stocks.find(s=>s.id===id)?.katalogId, field, img); }
+    try { const st = stocks.find(s=>s.id===id); url = await uploadStockFoto(st?.katalogId, field, img, st?.uptId); }
     catch (e) {
       console.warn("Upload foto Data Stok gagal:", id, field, e?.message||e);
       showToast("Gagal upload foto ke server, coba lagi.","error"); return false;
