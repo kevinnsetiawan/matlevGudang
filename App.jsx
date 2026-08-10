@@ -1907,7 +1907,13 @@ export default function PLNWarehouse() {
     let ns = stocks.map(s=>s.id===id?{...s,[field]:url}:s);
     setStocks(ns);
     // Foto = payload paling berat; cuma 1 baris berubah → sync ringan baris itu saja.
-    await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
+    // saveToCloud return false kalau write ke Supabase gagal (401 sesi expired/RLS/network) —
+    // dulu return-nya diabaikan sehingga toast "berhasil" tetap muncul & pendingFoto dibuang
+    // meski DB tak berubah (bug "upload berhasil tapi data tak berubah"). Sekarang dihormati:
+    // saveToCloud sudah tampilkan toast bagian mana yang gagal, jadi di sini cukup return false
+    // supaya pendingFoto TIDAK dibuang (user bisa simpan ulang).
+    const savedOk = await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
+    if (!savedOk) return false;
     showToast(`📷 ${field==="fotoNameplate"?"Foto Nameplate":"Foto Keseluruhan"} diperbarui!`);
     // Nameplate: OCR teksnya sekali & cache di fotoNameplateOcr, supaya foto ini
     // ikut jadi pembanding di pencarian foto mode Nameplate tanpa OCR ulang tiap cari.
