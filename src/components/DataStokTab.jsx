@@ -1,12 +1,12 @@
 // Komponen DataStokTab — dipindah dari App.jsx (refactor batch 2a).
 // Murni relokasi tab "Data Stok" (tab==="stock"); JSX/logic tidak berubah.
-import { JENIS_BARANG } from "../constants.js";
+import { JENIS_BARANG, STATUS_SAP } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
 import { buildAdminStockLocationUpdate } from "../lib/stockLocationApproval.js";
-import { getSAPBadgeStyle } from "../lib/sap.js";
+import { sapBadgeStyleForLabel, stockSapLabel } from "../lib/sap.js";
 import { hasRole } from "../lib/roles.js";
 import { getLokasiPetaInfo } from "../lib/masterSync.js";
-import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
+import { fmtNum } from "../lib/ragShared.mjs";
 import { Camera, X, ImageSquare, Tag, MapPin } from "@phosphor-icons/react";
 import "../styles/stock.css";
 
@@ -28,6 +28,7 @@ export function DataStokTab({
   search, setSearch,
   setPhotoSearchImg, setPhotoSearchOpen,
   filterJenis, setFilterJenis,
+  filterStatusSAP, setFilterStatusSAP,
   stockUptFilter, setStockUptFilter, stockUptFilterOptions,
   filteredStocks, stocks, setStocks,
   photoSearchResults, setPhotoSearchResults, photoSearchResultMode, photoSearchOcrText,
@@ -65,6 +66,9 @@ export function DataStokTab({
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
                   <option value="ALL">Semua Jenis</option>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}
+                </select>
+                <select style={{...sty.select,maxWidth:280}} value={filterStatusSAP} onChange={e=>setFilterStatusSAP(e.target.value)} aria-label="Filter Status Material">
+                  <option value="ALL">Semua Status</option>{STATUS_SAP.map(s=><option key={s} value={s}>{s}</option>)}
                 </select>
                 {/* Filter lokasi material per UPT — hanya muncul utk viewer multi-UPT (UIT/Pusat). */}
                 {stockUptFilterOptions?.length>0 && (
@@ -179,7 +183,7 @@ export function DataStokTab({
                           {isLow && <div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
                         </td>
                         {stockUptFilterOptions?.length>1 && (
-                          <td data-label="Lokasi UPT" style={{padding:"8px 10px",fontSize:12}}>{uptList.find(u=>u.id===st.uptId)?.nama || "—"}</td>
+                          <td data-label="Lokasi UPT" style={{padding:"8px 10px",fontSize:12}}>{uptList.find(u=>u.id===(gdg?.uptId||st.uptId))?.nama || "—"}</td>
                         )}
                         <td data-label="Gudang" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
                           {hasRole(currentUser, "ADMIN","TL") ? (
@@ -264,7 +268,11 @@ export function DataStokTab({
                         </td>
                         <td data-label="Harga" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>Rp {fmtNum(st.price)}</td>
                         <td data-label="Status" style={{padding:"8px 10px"}}>
-                          {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
+                          {(()=>{
+                            const label = stockSapLabel(st);
+                            const bs = sapBadgeStyleForLabel(label);
+                            return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{label}</span>;
+                          })()}
                         </td>
                         <td data-label="Aksi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
                           <div className="stock-mobile-direct-actions" onClick={e=>e.stopPropagation()}>

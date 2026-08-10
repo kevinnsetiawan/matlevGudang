@@ -17,7 +17,7 @@ import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, generateReservasiDocNo, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
-import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, applyMaraNameSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
+import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, applyMaraNameSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan, stockSapLabel } from "./src/lib/sap.js";
 import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
 import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
@@ -380,6 +380,7 @@ export default function PLNWarehouse() {
   const [dashTab, setDashTab] = useState("ringkasan"); // ringkasan terpadu | overview gudang
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
+  const [filterStatusSAP, setFilterStatusSAP] = useState("ALL");
   const [stockUptFilter, setStockUptFilter] = useState(""); // "" = semua; hanya dipakai viewer multi-UPT (UIT/Pusat)
   const [tugUptFilter, setTugUptFilter] = useState(""); // "" = semua; sama pola stockUptFilter, khusus tab TUG
   const [stockPage, setStockPage] = useState(1);
@@ -1423,7 +1424,7 @@ export default function PLNWarehouse() {
   stateRef.current.saveToCloud = saveToCloud;
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
-  useEffect(() => { setStockPage(1); }, [search, filterJenis, stockPageSize]);
+  useEffect(() => { setStockPage(1); }, [search, filterJenis, filterStatusSAP, stockPageSize]);
   useEffect(() => { setKatalogPage(1); }, [katalogPageSize, katalogSearch]);
 
   // Auto-gabungkan Gudang/Sub Gudang duplikat sekali per sesi setelah data dimuat — supaya
@@ -3326,6 +3327,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       gudang: [gdgForSearch?.kode, gdgForSearch?.nama].filter(Boolean).join(" "),
     }, search);
     const mj = filterJenis==="ALL" || s.jenisBarang===filterJenis;
+    const msap = filterStatusSAP==="ALL" || stockSapLabel(s)===filterStatusSAP;
     // RBAC per gudang: sembunyikan stok yang lokasinya milik gudang terlarang.
     // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
     const gid = lokasiList.find(l=>l.id===s.lokasiId)?.gudangId || s.gudangId || null;
@@ -3334,7 +3336,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     // belum di-assign lokasi) tetap kena filter UPT lewat s.uptId, bukan hilang.
     const stockUpt = (gid ? gudangList.find(g=>g.id===gid)?.uptId : null) || s.uptId || null;
     const mu = !stockUptFilter || (stockUpt === stockUptFilter);
-    return ms && mj && mg && mu;
+    return ms && mj && msap && mg && mu;
   });
   // Opsi filter UPT generik dipakai TUG (identik pola stockUptFilterOptions).
   const multiUptFilterOptions = stockUptFilterOptions;
@@ -3617,6 +3619,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             search={search} setSearch={setSearch}
             setPhotoSearchImg={setPhotoSearchImg} setPhotoSearchOpen={setPhotoSearchOpen}
             filterJenis={filterJenis} setFilterJenis={setFilterJenis}
+            filterStatusSAP={filterStatusSAP} setFilterStatusSAP={setFilterStatusSAP}
             stockUptFilter={stockUptFilter} setStockUptFilter={setStockUptFilter} stockUptFilterOptions={stockUptFilterOptions}
             filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
             photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}

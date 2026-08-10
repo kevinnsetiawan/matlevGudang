@@ -2,6 +2,7 @@
 // App.jsx (refactor Fase 3c). Pure string/data ops, tanpa React/state/supabase.
 // CATEGORY_SYNONYMS/QUERY_SYNONYMS dipakai internal oleh mesin pencarian.
 import { subGudangKodeMap } from "./masterSync.js";
+import { getSAPLabel } from "./ragShared.mjs";
 
 // ─── PENCARIAN MATERIAL: struktur nama (KATEGORI;SUBTIPE;SPEK...) di katalog
 // TIDAK diubah — hanya cara membandingkannya saat search yang disesuaikan,
@@ -224,10 +225,24 @@ export function getSAPStatus(katalog) {
 }
 
 // getSAPLabel pindah ke src/lib/ragShared.mjs (dipakai bersama nightly_sync.mjs).
+// Badge 3-warna berdasar LABEL (SAP — Persediaan / SAP — Cadang / Non-SAP),
+// bukan cuma SAP vs Non-SAP. Dipakai kolom Status Data Stok agar 3 status
+// terbedakan warnanya; material Non-SAP (input manual) dipaksa lewat label.
+export function sapBadgeStyleForLabel(label) {
+  const l = String(label || "");
+  if (l.includes("Cadang")) return { bg:"#fee2e2", fg:"#b91c1c" };
+  if (l.includes("Persediaan")) return { bg:"#dbeafe", fg:"#1d4ed8" };
+  return { bg:"#f3f4f6", fg:"#6b7280" }; // Non-SAP
+}
 export function getSAPBadgeStyle(katalog) {
-  return getSAPStatus(katalog) === "SAP"
-    ? { bg:"#dbeafe", fg:"#1d4ed8" }
-    : { bg:"#f3f4f6", fg:"#6b7280" };
+  return sapBadgeStyleForLabel(getSAPLabel(katalog));
+}
+
+// Label status SAP untuk sebuah Data Stok. HANYA material non-stock yg baru
+// diupload (id STK-PREMEM-*) = Non-SAP (kandidat masuk SAP, belum terdaftar);
+// material lain ikut format kode katalognya lewat getSAPLabel.
+export function stockSapLabel(stock) {
+  return String(stock?.id || "").startsWith("STK-PREMEM-") ? "Non-SAP" : getSAPLabel(stock?.katalog);
 }
 
 // Accent color per Jenis Barang, used on the printable QR label
