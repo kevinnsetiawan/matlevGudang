@@ -6,9 +6,14 @@ import { createClient } from "@supabase/supabase-js";
 
 // Test harness is DEV-only and must remain physically unable to construct a
 // production Supabase client, even when the developer has .env.local secrets.
-const E2E_MODE = import.meta.env.DEV && (import.meta.env.MODE === "e2e" || import.meta.env.VITE_E2E === "true");
-export const SUPABASE_URL = E2E_MODE ? undefined : import.meta.env.VITE_SUPABASE_URL;
-export const SUPABASE_KEY = E2E_MODE ? undefined : import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// import.meta.env hanya diisi Vite; di luar Vite (mis. `node --test` yang mengimpor
+// modul app lewat rantai import) objeknya undefined. Fallback {} = fail-safe:
+// DEV/MODE/VITE_* jadi undefined → tak ada client prod yang terbentuk (sesuai intent
+// guard ini), dan di build Vite mana pun perilakunya identik karena env selalu terisi.
+const ENV = import.meta.env || {};
+const E2E_MODE = ENV.DEV && (ENV.MODE === "e2e" || ENV.VITE_E2E === "true");
+export const SUPABASE_URL = E2E_MODE ? undefined : ENV.VITE_SUPABASE_URL;
+export const SUPABASE_KEY = E2E_MODE ? undefined : ENV.VITE_SUPABASE_PUBLISHABLE_KEY;
 const EXPECTED_SUPABASE_HOST = "warnoto.com";
 const CANONICAL_SUPABASE_ORIGIN = "https://warnoto.com";
 
@@ -25,7 +30,7 @@ if (!E2E_MODE && SUPABASE_URL) {
 // Jangan menerima token dari endpoint/project lain. Nama ini eksplisit agar cache
 // profil dan sesi browser selalu terikat ke satu backend self-host yang disepakati.
 export const SUPABASE_AUTH_STORAGE_KEY = E2E_MODE ? "sb-e2e-auth-token" : "sb-warnoto-auth-token";
-const devSupabaseFetch = import.meta.env.DEV && !E2E_MODE
+const devSupabaseFetch = ENV.DEV && !E2E_MODE
   ? (input, init) => {
       const requestUrl = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
       const url = new URL(requestUrl, window.location.origin);

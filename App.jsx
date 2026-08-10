@@ -17,7 +17,7 @@ import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, generateReservasiDocNo, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
-import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
+import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, applyMaraNameSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
 import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
 import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
@@ -1697,15 +1697,12 @@ export default function PLNWarehouse() {
     if (!q || q.trim().length < 2) { setMaraSearchResults([]); return; }
     if (!supabase) { showToast("Supabase tidak terhubung","error"); return; }
     setMaraSearchLoading(true);
-    // Perkaya query dengan sinonim istilah PLN (mis. ketik "pemutus" ikut cari
-    // "cb"/"circuit breaker") — sama kamus dengan matchesMaterialSearch di Data
-    // Stok/Master Katalog, biar konsisten di 3 tempat pencarian material.
-    const terms = expandQueryForIlikeSearch(q);
-    const orFilter = terms.map(t => `nama.ilike.%${t}%`).join(",");
-    const { data, error } = await supabase.from("mara_catalog")
-      .select("kode_material,nama,satuan,material_group,material_group_desc")
-      .or(orFilter)
-      .limit(20);
+    // Pencarian per-kata (AND antar kata, OR sinonim dalam kata) — order/format-independent.
+    // Kamus sinonim PLN (mis. "pemutus"->"cb") ikut di sisi query lewat maraQueryGroups.
+    const { data, error } = await applyMaraNameSearch(
+      supabase.from("mara_catalog").select("kode_material,nama,satuan,material_group,material_group_desc"),
+      q
+    ).limit(20);
     setMaraSearchLoading(false);
     if (error) {
       setMaraSearchResults([]);

@@ -143,23 +143,31 @@ export function queryTokenGroups(query) {
 // memunculkan barang yang salah klasifikasi. Kata yang lebih panjang (>=3
 // huruf) tetap dicocokkan sebagai prefix supaya bisa diketik sebagian
 // ("trans" -> "transformator", "550" -> "550mm2").
-// Untuk pencarian server-side (Supabase `.ilike`, mis. cari referensi MARA) yang
-// tidak bisa memakai expandHaystackSynonyms/queryTokenGroups di sisi klien
-// (haystack-nya ada di database, bukan di memori). Cari padanan tiap kata yang
-// diketik lewat QUERY_SYNONYMS (1:1) DAN CATEGORY_SYNONYMS (reverse lookup: kalau
-// kata yang diketik ada di deskripsi suatu kategori, ikutkan singkatannya juga —
-// mis. "pemutus" -> ikut cari "cb"). Dibatasi 6 istilah biar query `.or()` tidak
-// terlalu panjang.
-export function expandQueryForIlikeSearch(query) {
-  const words = normalizeSearchText(query).split(" ").filter(Boolean);
-  const terms = new Set([query.trim()]);
-  words.forEach(w => {
-    if (QUERY_SYNONYMS[w]) QUERY_SYNONYMS[w].split(" ").forEach(s => terms.add(s));
+// Pencarian MARA per-kata untuk Supabase `.ilike` (menggantikan expandQueryForIlikeSearch
+// yang lama menaruh seluruh FRASA sebagai satu ilike → menuntut substring kontigu sesuai
+// urutan/format). Tiap KATA yang diketik jadi grup alternatif: kata itu sendiri + sinonim
+// 1:1 (QUERY_SYNONYMS) + singkatan kategori reverse (CATEGORY_SYNONYMS, mis. "pemutus"->"cb").
+// AND antar kata, OR dalam grup → order/format-independent, bisa cari per-kata material.
+export function maraQueryGroups(query) {
+  return normalizeSearchText(query).split(" ").filter(Boolean).map(w => {
+    const alts = new Set([w]);
+    if (QUERY_SYNONYMS[w]) QUERY_SYNONYMS[w].split(" ").forEach(s => alts.add(s));
     Object.entries(CATEGORY_SYNONYMS).forEach(([abbr, desc]) => {
-      if (desc.split(" ").includes(w)) terms.add(abbr);
+      if (desc.split(" ").includes(w)) alts.add(abbr);
     });
+    return Array.from(alts);
   });
-  return Array.from(terms).filter(Boolean).slice(0, 6);
+}
+
+// Terapkan maraQueryGroups ke query builder Supabase pada kolom `nama`. Tiap grup jadi
+// satu `.or(...)`; beberapa `.or()` yang dirantai di-AND-kan oleh PostgREST → AND-of-OR.
+// ponytail: ilike %x% seq-scan (tak ada index trigram); cukup utk interaktif limit kecil,
+// upgrade ke pg_trgm/tsvector kalau mara_catalog membesar signifikan.
+export function applyMaraNameSearch(builder, query) {
+  return maraQueryGroups(query).reduce(
+    (b, alts) => b.or(alts.map(t => `nama.ilike.%${t}%`).join(",")),
+    builder
+  );
 }
 
 export function matchesMaterialSearch(fields, query) {

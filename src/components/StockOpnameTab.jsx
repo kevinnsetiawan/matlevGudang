@@ -5,7 +5,7 @@ import { fmtDate, parseSAPFile, parseUsulanPencocokanXLSX } from "../lib/utils.j
 import { fmtNum } from "../lib/ragShared.mjs";
 import { ROLES, hasRole } from "../lib/roles.js";
 import { buildBeritaAcaraHTML } from "../lib/docBuilders.js";
-import { expandQueryForIlikeSearch, getSAPStatus, normalizeKatalog, extractKatalogIdFromScan } from "../lib/sap.js";
+import { applyMaraNameSearch, getSAPStatus, normalizeKatalog, extractKatalogIdFromScan } from "../lib/sap.js";
 import * as XLSX from "xlsx";
 
 export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
@@ -65,10 +65,10 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
     if (!q || q.trim().length < 2) { setMaraResults([]); return; }
     if (!supabase) return;
     setMaraLoading(true);
-    const terms = expandQueryForIlikeSearch(q);
-    const orFilter = terms.map(t => `nama.ilike.%${t}%`).join(",");
-    const { data, error } = await supabase.from("mara_catalog")
-      .select("kode_material,nama,satuan").or(orFilter).limit(15);
+    const { data, error } = await applyMaraNameSearch(
+      supabase.from("mara_catalog").select("kode_material,nama,satuan"),
+      q
+    ).limit(15);
     setMaraLoading(false);
     setMaraResults(error ? [] : (data || []));
   }
