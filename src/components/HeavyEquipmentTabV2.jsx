@@ -277,31 +277,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
         ) : null}
       />
 
-      {/* Blok khusus Overdue — sekarang discope ke UPT yang sedang di-scope (dulu tidak difilter
-          UPT sama sekali, jadi overdue milik UPT lain ikut nongol & bisa "Ditandai Kembali" oleh
-          Admin/TL/Asman Surabaya yang tidak ada urusan sama sekali — keluhan user 2026-07-06). */}
-      {overdueCount > 0 && (
-        <div className="operations-alert is-danger" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
-          <div style={{fontWeight:800,fontSize:13,marginBottom:10,color:C.red}}>Alat melewati jadwal pengembalian ({overdueCount})</div>
-          {scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").map(l=>{
-            const eq = equipmentList.find(e=>e.id===l.equipmentId);
-            const pemohon = users.find(u=>u.id===l.requestedBy);
-            return (
-              <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10,flexWrap:"wrap"}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700}}>{eq?.nama||l.equipmentId} • {l.ownerUpt} → {l.requesterUpt}</div>
-                  <div style={{fontSize:12,color:C.muted}}>Rencana kembali: {l.tanggalKembali||"-"} • {l.namaPekerjaan||"-"} • Diajukan oleh {pemohon?.name||"?"}</div>
-                </div>
-                {hasRole(currentUser, "ADMIN","TL","ASMAN") && (
-                  <button style={sty.btn("success","sm")} onClick={()=>completeLoan(l.id)}>Tandai Kembali</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Mode switch (pola dashboard) — ringkasan/overdue di atas tetap tampil di kedua mode */}
+      {/* Mode switch (pola dashboard) — "Daftar Alat" murni armada; overdue/approval/histori
+          hanya di channel "Peminjaman & Histori" (blok overdue dipindah ke sana, 2026-08-10:
+          dulu di atas mode-switch jadi bocor di atas Daftar Alat — keluhan super admin). */}
       <div className="dashboard-mode-switch" role="tablist" aria-label="Tampilan alat berat" style={{marginBottom:12}}>
         {[{id:"armada",label:"Daftar Alat",caption:"Registry & kondisi armada"},{id:"peminjaman",label:"Peminjaman & Histori",caption:"Pengajuan, approval, dan riwayat"}].map(item=>(
           <button key={item.id} className={viewMode===item.id?"is-active":""} onClick={()=>setViewMode(item.id)} role="tab" aria-selected={viewMode===item.id}>
@@ -432,6 +410,28 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
           <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
             {uptFilterControllable && !myUptSelected ? "Peminjaman & Histori — Semua UPT" : `Peminjaman & Histori — UPT ${effectiveUptFilter||myUpt||"Surabaya"}`}
           </div>
+          {/* Blok Overdue disatukan di atas daftar Peminjaman & Histori (discope UPT aktif) — dulu
+              di atas mode-switch jadi bocor ke channel Daftar Alat (keluhan super admin 2026-08-10). */}
+          {overdueCount > 0 && (
+            <div className="operations-alert is-danger" style={{...sty.card,marginBottom:8,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
+              <div style={{fontWeight:800,fontSize:13,marginBottom:10,color:C.red}}>Alat melewati jadwal pengembalian ({overdueCount})</div>
+              {scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").map(l=>{
+                const eq = equipmentList.find(e=>e.id===l.equipmentId);
+                const pemohon = users.find(u=>u.id===l.requestedBy);
+                return (
+                  <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700}}>{eq?.nama||l.equipmentId} • {l.ownerUpt} → {l.requesterUpt}</div>
+                      <div style={{fontSize:12,color:C.muted}}>Rencana kembali: {l.tanggalKembali||"-"} • {l.namaPekerjaan||"-"} • Diajukan oleh {pemohon?.name||"?"}</div>
+                    </div>
+                    {hasRole(currentUser, "ADMIN","TL","ASMAN") && (
+                      <button style={sty.btn("success","sm")} onClick={()=>completeLoan(l.id)}>Tandai Kembali</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="equipment-loan-list" style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
             {unifiedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,fontSize:13}}>Belum ada data peminjaman.</div>}
             {unifiedLoans.map(loan=>{
