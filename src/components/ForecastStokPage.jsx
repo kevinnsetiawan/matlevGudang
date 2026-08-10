@@ -453,7 +453,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
           katalogList={katalogList} setKatalogList={setKatalogList}
           stocks={stocks} allStocks={allStocks} setStocks={setStocks} gudangList={gudangList} lokasiList={lokasiList}
           txns={txns} currentUser={currentUser} sty={sty} C={C}
-          saveToCloud={saveToCloud} showToast={showToast} users={users}
+          saveToCloud={saveToCloud} showToast={showToast} users={users} uptList={uptList}
         />
       ) : (
         <>

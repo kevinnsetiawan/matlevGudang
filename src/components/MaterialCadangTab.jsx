@@ -9,7 +9,7 @@ import { CLOUD } from "../lib/cloud.js";
 import { parseMaterialCadangRows, hitungMaterialCadang, enrichMaterialCadangHealthResults, generateMaterialCadangAiInsights, mapApplyAuditRow } from "../lib/materialCadang.js";
 import * as XLSX from "xlsx";
 
-export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, materialCadangHealthData, setMaterialCadangHealthData, materialCadangAiInsights, setMaterialCadangAiInsights, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, currentUser, sty, C, saveToCloud, showToast, users }) {
+export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, materialCadangHealthData, setMaterialCadangHealthData, materialCadangAiInsights, setMaterialCadangAiInsights, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, currentUser, sty, C, saveToCloud, showToast, users, uptList }) {
   const [subTab, setSubTab] = useState("hasil");
   const [importing, setImporting] = useState(false);
   const [importPreview, setImportPreview] = useState(null); // { rows, stats, fileName }
@@ -86,7 +86,8 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
   const recUptId = (rec) => rec?.uptId
     || (users||[]).find(u => u.id === (rec?.createdBy || rec?.requestedBy || rec?.importedBy || rec?.uploadedBy))?.uptId
     || null;
-  const inMcScope = (rec) => broadScope || (recUptId(rec) ? recUptId(rec) === myUpt : false);
+  const legacySurabayaId = (uptList||[]).find(u => /surabaya/i.test(u.nama || ""))?.id || null;
+  const inMcScope = (rec) => broadScope || (recUptId(rec) ? recUptId(rec) === myUpt : myUpt === legacySurabayaId);
 
   // Analisis terakhir dari data tersimpan
   const latestAnalysis = mcData.analyses.filter(inMcScope).slice(-1)[0] || null;

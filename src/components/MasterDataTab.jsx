@@ -26,8 +26,12 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
   const ultgList = dataScope === null ? rawUltgList : rawUltgList.filter(u => uptList.some(x => x.id === u.parentUptId));
   const gudangList = dataScope === null ? rawGudangList : rawGudangList.filter(g => inScopeUpt(g.uptId, dataScope));
   const visibleGudangList = dataScope === null ? rawVisibleGudangList : rawVisibleGudangList.filter(g => inScopeUpt(g.uptId, dataScope));
-  const satpamList = dataScope === null ? rawSatpamList : rawSatpamList.filter(s => s.gudangId && gudangList.some(g => g.id === s.gudangId));
   const legacySurabayaId = rawUptList.find(u => /surabaya/i.test(u.nama || ""))?.id;
+  // Satpam tak simpan uptId langsung — turunkan dari gudangId lewat rawGudangList.
+  // Record lama tanpa gudang (atau gudang tak dikenal) di-fallback ke UPT legacy Surabaya,
+  // sama pola dgn timMutu di bawah, supaya tidak lenyap dari akun Surabaya setelah isolasi multi-UPT.
+  const satpamUptId = (s) => rawGudangList.find(g => g.id === s.gudangId)?.uptId || legacySurabayaId;
+  const satpamList = dataScope === null ? rawSatpamList : rawSatpamList.filter(s => inScopeUpt(satpamUptId(s), dataScope));
   const timMutuList = dataScope === null ? rawTimMutuList : rawTimMutuList.filter(t => t.uptId ? inScopeUpt(t.uptId, dataScope) : inScopeUpt(legacySurabayaId, dataScope));
   return (
           <div className={`workspace-page master-page master-page--${stockSubTab}`}>
@@ -46,7 +50,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
               </div>
             </div>
             {stockSubTab==="gudang" && (
-              <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
+              <div style={{...sty.card,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
                 ℹ️ Sebagian besar Gudang biasanya <b>otomatis terbentuk sendiri</b> dari import Excel Kapasitas Gudang (tombol di bawah) setelah disetujui Asman. Kalau ada Gudang yang belum tercakup di laporan itu, tambahkan manual lewat tombol "+ Tambah Gudang Baru" di kanan atas.
               </div>
             )}
@@ -110,7 +114,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             )}
             {/* ── SUB-TAB: MASTER KATALOG ── */}
             {stockSubTab==="katalog" && hasRole(currentUser, "ADMIN") && (
-              <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1",padding:14}}>
+              <div style={{...sty.card,marginBottom:12,border:"1px solid #bfdbfe",padding:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <div>
                     <div style={{fontSize:13,fontWeight:800,color:"#0369a1"}}>📚 Referensi Katalog MARA</div>
@@ -175,7 +179,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                       const sampleFoto = stocks.find(s=>s.katalogId===k.id && s.img)?.img || null;
                       const bs = getSAPBadgeStyle(k.katalog);
                       return (
-                        <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${C.accent}`}}>
+                        <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`}}>
                           <td className="mobile-card-table__photo" data-label="Foto" style={{padding:"8px 10px",textAlign:"center"}}>
                             {sampleFoto ? <img src={sampleFoto} alt={k.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                               : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
@@ -340,7 +344,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                       return next;
                     });
                     return (
-                      <div className="master-organization-card" key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",borderLeft:"4px solid #003087"}}>
+                      <div className="master-organization-card" key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",border:"1px solid #dbe2ea"}}>
                         <div className="master-organization-card__header" style={{background:"#f8fafc"}} onClick={toggleUit}>
                           <div style={{display:"flex",gap:10,alignItems:"flex-start",minWidth:0}}>
                             <div style={{fontSize:22,flexShrink:0}}>🏢</div>
@@ -556,7 +560,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                             // Gudang yang benar (permintaan user 2026-07-06).
                             const isUnregistered = !grp.sg && subsOfGudang.length>0;
                             return (
-                            <div key={grp.id||"umum"} style={{marginBottom:18,paddingLeft:10,borderLeft:`3px solid ${C.border}`}}>
+                            <div key={grp.id||"umum"} style={{marginBottom:18}}>
                               {grp.sg && <div style={{fontSize:13,fontWeight:800,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>🏢 Sub Gudang: {grp.nama}{subKodeMap[grp.sg.id] && <span title="Kode singkatan Sub Gudang (dipakai sebagai tag di depan kode blok)" style={{fontSize:12,fontWeight:800,color:"#1e3a8a",background:"#dbeafe",border:"1px solid #bfdbfe",padding:"1px 7px",borderRadius:6}}>{subKodeMap[grp.sg.id]}</span>}</div>}
 
                               {/* Denah + Konfigurasi Koordinat level Sub Gudang — collapsed by default,
