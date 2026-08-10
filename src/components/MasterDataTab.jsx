@@ -9,7 +9,6 @@ import { getSAPBadgeStyle } from "../lib/sap.js";
 import { getSAPLabel } from "../lib/ragShared.mjs";
 import { uid, fmtDate } from "../lib/utils.js";
 import { subGudangKodeMap } from "../lib/masterSync.js";
-import { KapasitasGudangImportTab } from "./KapasitasGudangImportTab.jsx";
 import { ImportLokasiModal, downloadLokasiTemplate } from "./ImportLokasiModal.jsx";
 import { GudangCoordConfigPanel } from "./GudangCoordConfigPanel.jsx";
 import { MigrasiDataTab } from "./MigrasiDataTab.jsx";
@@ -66,27 +65,12 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             {stockSubTab==="gudang" && can(currentUser, "aksi.import", rolePerms) && (
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                  <button style={sty.btn(importGudangOpen?"danger":"primary")} onClick={()=>setImportGudangOpen(o=>!o)}>
-                    {importGudangOpen?"✕ Tutup Import Data Gudang":"📥 Import Data Gudang (Excel Kapasitas Gudang)"}
-                  </button>
                   <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
                     {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
                   </button>
                   <button style={{...sty.btn("ghost","sm")}} onClick={downloadLokasiTemplate}>⬇️ Download Template Lokasi</button>
                   <button style={{...sty.btn("ghost","sm")}} onClick={()=>setImportLokasiOpen(true)}>📥 Import Excel Lokasi</button>
                 </div>
-                {importGudangOpen && (
-                  <div style={{marginTop:12}}>
-                    <KapasitasGudangImportTab
-                      gudangCapacityImports={gudangCapacityImports}
-                      setGudangCapacityImports={setGudangCapacityImports}
-                      currentUser={currentUser}
-                      sty={sty} C={C}
-                      saveToCloud={saveToCloud}
-                      showToast={showToast}
-                    />
-                  </div>
-                )}
                 {/* Dulu 2 tombol ini sejajar dengan "Import Data Gudang" tanpa penjelasan,
                     keliatan seperti 3 hal setara padahal cuma dipakai kalau ada masalah data
                     spesifik, bukan pemakaian rutin (keluhan user 2026-07-06: "kenapa ada 3

@@ -3576,6 +3576,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             sty={sty} C={C}
             setTab={setTab}
             setStockSubTab={setStockSubTab}
+            showToast={showToast}
           />
         )}
 

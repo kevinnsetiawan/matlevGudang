@@ -3,17 +3,42 @@ import { useState } from "react";
 import { KAPASITAS_LABEL, UIT, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { hasRole, getScopeUptIds } from "../lib/roles.js";
+import { supabase } from "../supabaseClient.js";
 import { PetaGudangTab } from "./PetaGudangTab.jsx";
 
-export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab }) {
+export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab, showToast }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
   const [petaUptFilter, setPetaUptFilter] = useState(""); // "" = semua; peta pakai uptId (gudang.uptId)
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const canEdit = hasRole(currentUser, "ADMIN","TL");
   const pendingImports = gudangCapacityImports.filter(item=>item.status==="PENDING_ASMAN").length;
+
+  async function syncFromSheet() {
+    if (syncing) return;
+    if (!confirm("Sinkron data kapasitas dari Google Sheet? Data kapasitas akan diperbarui.")) return;
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-kapasitas", { method: "POST" });
+      const err = error || data?.error;
+      if (err) {
+        const msg = "Gagal sinkron: " + (data?.error || error?.message || String(err));
+        showToast ? showToast(msg, "error") : alert(msg);
+        return;
+      }
+      const msg = `Sinkron berhasil: ${data.kapasitas} kapasitas, ${data.gudang} gudang, ${data.sub_gudang} sub-gudang.`;
+      showToast ? showToast(msg, "success") : alert(msg);
+      window.location.reload();
+    } catch (e) {
+      const msg = "Gagal sinkron: " + e.message;
+      showToast ? showToast(msg, "error") : alert(msg);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   // Daftar UPT unik dari data (string label, bukan Master UPT)
   const uptLabelList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
@@ -62,6 +87,11 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
         <div className="capacity-summary-banner__header">
           <div><span>Warehouse capacity</span><strong>Data Kapasitas Gudang</strong></div>
           <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
+          {hasRole(currentUser, "ADMIN") && (
+            <button style={sty.btn("ghost","sm")} disabled={syncing} onClick={syncFromSheet}>
+              {syncing ? "⏳ Menyinkron..." : "🔄 Sinkron dari Sheet"}
+            </button>
+          )}
         </div>
         {gudangCapacityList.length > 0 && (
           <div className="capacity-summary-banner__metrics">
