@@ -131,7 +131,7 @@ export function ApprovalTab({ pendingTxns, stocks, katalogList, lokasiList, user
           <div key={t.id} className="approval-card" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${stageColor}`}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
               <div>
-                <div style={{fontSize:12,color:stageColor,fontWeight:800,textTransform:"uppercase"}}>{t.docType.replace("TUG","TUG-")} — {stageLabelOf(t)}</div>
+                <div style={{fontSize:12,color:stageColor,fontWeight:800,textTransform:"uppercase"}}>{t.docType==="TUG5" && t.sourceType==="ULTG" ? "Slip Reservasi" : t.docType.replace("TUG","TUG-")} — {stageLabelOf(t)}</div>
                 <div style={{fontSize:15,fontWeight:800}}>{t.namaPekerjaan||t.keteranganUmum||docNoOf(t)}</div>
                 <div style={{fontSize:12,color:"#0098da",fontWeight:700}}>{docNoOf(t)}</div>
                 {creator.name && <div style={{fontSize:12,color:C.muted}}>Diajukan: {creator.name} ({ROLES[creator.role]}) • {fmtDate(t.createdAt)}</div>}

@@ -430,14 +430,16 @@ create policy "Authenticated write tim_mutu" on tim_mutu for all using (auth.rol
 create extension if not exists vector;
 
 create table if not exists rag_chunks (
-  id text primary key,           -- cth "katalog_KAT-1060011" atau "txn_TUG9-xxxxx"
-  source_type text not null,     -- 'katalog' | 'txn'
+  id text primary key,           -- cth "katalog_UPT-SBY_KAT-1060011" atau "txn_TUG9-xxxxx"
+  source_type text not null,     -- 'katalog' | 'txn' | 'faq' | 'mutasi'
   source_id text not null,       -- id katalog/txn aslinya, utk update/hapus saat sumber berubah
   content text not null,         -- teks yang di-embed (yang juga dikirim balik ke AI sebagai konteks)
   embedding vector(1024),
+  upt_id text,                   -- UPT pemilik chunk; null = SHARED (FAQ, katalog tanpa stok) tampil ke semua viewer
   updated_at timestamptz default now()
 );
 create index if not exists idx_rag_chunks_source on rag_chunks(source_type, source_id);
+create index if not exists idx_rag_chunks_upt on rag_chunks(upt_id);
 create index if not exists idx_rag_chunks_embedding on rag_chunks using hnsw (embedding vector_cosine_ops);
 
 alter table rag_chunks enable row level security;
@@ -447,13 +449,16 @@ create policy "Authenticated read rag_chunks" on rag_chunks for select using (au
 create policy "Authenticated write rag_chunks" on rag_chunks for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
 -- Pencarian similarity (cosine) — dipanggil dari App.jsx lewat supabase.rpc('match_rag_chunks', ...)
-create or replace function match_rag_chunks(query_embedding vector(1024), match_count int default 8)
+-- p_upts: 3-tier scope. NULL = nasional (Pusat/SUPERADMIN) lihat semua chunk;
+-- ARRAY[...] = UIT/UPT hanya chunk upt_id di array + chunk SHARED (upt_id null, mis. FAQ).
+create or replace function match_rag_chunks(query_embedding vector(1024), match_count int default 8, p_upts text[] default null)
 returns table(id text, source_type text, source_id text, content text, similarity float)
 language sql stable
 as $$
   select id, source_type, source_id, content, 1 - (embedding <=> query_embedding) as similarity
   from rag_chunks
   where embedding is not null
+    and (p_upts is null or upt_id is null or upt_id = any(p_upts))
   order by embedding <=> query_embedding
   limit match_count;
 $$;

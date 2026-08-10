@@ -14,6 +14,7 @@ export function TransactionHubTab({
   tugGroup, tugSubTab, setTugSubTab,
   activeTugSummary, rolePerms,
   filterStatus, setFilterStatus,
+  tugUptFilter, setTugUptFilter, tugUptFilterOptions,
   openNewTxn,
   txns, filteredTxns, users, enrichedStocks, stocks,
   katalogList, lokasiList, gudangList, timMutuList, uitList, uptList, ultgList,
@@ -27,6 +28,11 @@ export function TransactionHubTab({
   konfirmasiDraftTUG8, approveTUG5_MgrULTG, rejectTUG5_MgrULTG,
   adoptTUG5ULTG, openDraftTug9,
 }){
+  // Terapkan tugUptFilter ke txns mentah yg dioper ke sub-tab TUG3/TUG5/TUG15 —
+  // filteredTxns (App.jsx) sudah kena filter ini, tapi txns mentah belum.
+  const uptFilteredTxns = tugUptFilter
+    ? txns.filter(t=>(t.uptId||users.find(u=>u.id===t.createdBy)?.uptId)===tugUptFilter)
+    : txns;
   return (
           <div className="workspace-page tug-page">
             <section className={`kpi-banner tug-summary-banner${tugSubTab==="TUG15"?" is-context-only":""}`} aria-label="Ringkasan transaksi TUG">
@@ -83,11 +89,16 @@ export function TransactionHubTab({
               {["ALL","PENDING","APPROVED","REJECTED","DRAFT"].map(s=>(
                 <button key={s} className={filterStatus===s?"is-active":""} onClick={()=>setFilterStatus(s)}>{s==="ALL"?"Semua":s==="PENDING"?"Menunggu":s==="APPROVED"?"Disetujui":s==="REJECTED"?"Ditolak":"Draft"}</button>
               ))}
+              {tugUptFilterOptions?.length>0 && (
+                <select style={{...sty.select,maxWidth:280}} value={tugUptFilter} onChange={e=>setTugUptFilter(e.target.value)} aria-label="Filter UPT">
+                  <option value="">Semua UPT</option>{tugUptFilterOptions.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+                </select>
+              )}
             </div>}
 
             {tugSubTab==="TUG3" ? (
               <TUG3Tab
-                txns={txns.filter(t=>t.docType==="TUG3")}
+                txns={uptFilteredTxns.filter(t=>t.docType==="TUG3")}
                 filterStatus={filterStatus}
                 users={users} sty={sty} C={C} currentUser={currentUser}
                 katalogList={katalogList} lokasiList={lokasiList} timMutuList={timMutuList}
@@ -98,7 +109,7 @@ export function TransactionHubTab({
               />
             ) : tugSubTab==="TUG5" ? (
               <TUG5Tab
-                txns={txns}
+                txns={uptFilteredTxns}
                 filterStatus={filterStatus}
                 users={users} sty={sty} C={C} currentUser={currentUser}
                 katalogList={katalogList} uitList={uitList} uptList={uptList}
@@ -115,7 +126,7 @@ export function TransactionHubTab({
               />
             ) : tugSubTab==="TUG15" ? (
               <TUG15Tab
-                txns={txns} katalogList={katalogList} stocks={stocks}
+                txns={uptFilteredTxns} katalogList={katalogList} stocks={stocks}
                 sty={sty} C={C}
                 filter={{...tug15Filter, ultgList, uitList}} setFilter={setTug15Filter}
                 lokasiList={lokasiList} gudangList={gudangList}

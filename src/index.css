@@ -1290,6 +1290,20 @@
 .forecast-model-update { display: block; margin-top: 8px; color: #94a3b8; font-size: 12px; }
 @keyframes forecast-spin { to { transform: rotate(360deg); } }
 
+/* Cockpit Rekomendasi Pengadaan — lensa UPT + 2 kolom + strip banding per-UPT. */
+.forecast-cockpit-lens { margin-top: 8px; min-height: 30px; padding: 4px 10px; border: 1px solid rgba(255,255,255,.3); border-radius: 7px; background: rgba(255,255,255,.08); color: #fff; font-size: 12px; font-weight: 700; }
+.forecast-cockpit-lens option { color: #0f172a; }
+.forecast-cockpit-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.forecast-cockpit-strip button { display: flex; min-width: 150px; flex: 1 1 150px; flex-direction: column; align-items: flex-start; gap: 3px; padding: 9px 12px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; color: #64748b; font-size: 12px; cursor: pointer; text-align: left; }
+.forecast-cockpit-strip button:hover { border-color: #1d4ed8; }
+.forecast-cockpit-strip button strong { color: #1e293b; font-size: 14px; font-weight: 850; }
+.forecast-cockpit-columns { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.forecast-cockpit-col-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.forecast-cockpit-col-title strong { color: #1e293b; font-size: 13px; font-weight: 850; }
+.forecast-cockpit-copy-btn { min-height: 30px; padding: 5px 11px; border: 1px solid #bfdbfe; border-radius: 7px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 750; cursor: pointer; }
+.forecast-cockpit-copy-btn:disabled { border-color: #e2e8f0; background: #f8fafc; color: #94a3b8; cursor: default; }
+@media (max-width: 900px) { .forecast-cockpit-columns { grid-template-columns: 1fr; } }
+
 /* Pak War — satu conversation shell tanpa panel bertumpuk. */
 .ai-agent-page { width: min(1120px,100%); margin: 0 auto; }
 .ai-conversation { display: flex; height: min(760px,calc(100dvh - 140px)); min-height: 520px; flex-direction: column; overflow: hidden; border: 1px solid #dbe3ef; border-radius: 14px; background: #fff; box-shadow: 0 16px 36px -31px rgba(15,23,42,.9); }
@@ -1496,6 +1510,7 @@
   .dashboard-heavy-loan__upt { grid-column: 1; }
   .dashboard-heavy-loan__date { grid-column: 2; grid-row: 2; margin-left: 0; white-space: normal; }
   .dashboard-heavy-loan > span[style*="italic"] { display: none; }
+  /* Forecast mobile — dari PR #12 Kevin, font floor ≥12px (bukan 10–11px asli PR) */
   .forecast-view-switch {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1509,7 +1524,7 @@
     min-height: 44px;
     height: 100%;
     padding: 6px 4px;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.2;
     text-align: center;
     display: inline-flex;
@@ -1523,7 +1538,7 @@
   .forecast-overview__metrics span {
     white-space: normal;
     word-break: break-word;
-    font-size: 10.5px;
+    font-size: 12px;
     line-height: 1.2;
   }
   .forecast-overview__metrics strong { font-size: 16px; }
@@ -1545,15 +1560,15 @@
     min-height: 52px;
   }
   .forecast-procurement-head .forecast-overview__metrics span {
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.2;
     white-space: normal;
     word-break: break-word;
   }
   .forecast-procurement-head .forecast-overview__metrics strong {
-    font-size: 13.5px;
+    font-size: 14px;
     margin-top: 2px;
-    word-break: break-all;
+    word-break: break-word;
   }
   .forecast-procurement-head > button {
     width: 100%;

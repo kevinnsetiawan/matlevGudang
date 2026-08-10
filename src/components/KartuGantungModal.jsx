@@ -8,7 +8,7 @@ import { resolveStockPhotoUrl } from "../lib/stockCache.js";
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
 import { UPT } from "../constants.js";
 
-export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangList, subGudangList, sty, C, onClose }) {
+export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangList, subGudangList, sty, C, onClose, uptNama }) {
   const [view, setView] = useState("front"); // "front" | "back"
   const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList);
   // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.
@@ -21,7 +21,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
   const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(scanUrl)}`;
 
   const handlePrintFront = async () => {
-    const html = await buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList);
+    const html = await buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList, uptNama);
     const w = window.open("", "_blank");
     if (w) {
       w.document.write(html);
@@ -30,7 +30,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
   };
 
   const handlePrintBack = async () => {
-    const html = await buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList);
+    const html = await buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList, uptNama);
     const w = window.open("", "_blank");
     if (w) {
       w.document.write(html);
@@ -89,7 +89,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                   <div>
                     <div style={{fontSize:11,fontWeight:800,color:"#0f172a",lineHeight:1.2}}>PT PLN (PERSERO)</div>
                     <div style={{fontSize:10,fontWeight:700,color:"#334155",lineHeight:1.2}}>TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
-                    <div style={{fontSize:9.5,fontWeight:700,color:"#475569",lineHeight:1.2}}>{(UPT||"UNIT PELAKSANA SURABAYA").toUpperCase()}</div>
+                    <div style={{fontSize:9.5,fontWeight:700,color:"#475569",lineHeight:1.2}}>{(uptNama||UPT||"UNIT PELAKSANA SURABAYA").toUpperCase()}</div>
                   </div>
                 </div>
                 <div style={{fontSize:15,fontWeight:900,color:"#0f172a",letterSpacing:1}}>
@@ -164,7 +164,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
                   <div>
                     <div style={{fontSize:11,fontWeight:800,color:"#0f172a",lineHeight:1.2}}>PT PLN (PERSERO)</div>
                     <div style={{fontSize:10,fontWeight:700,color:"#334155",lineHeight:1.2}}>TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
-                    <div style={{fontSize:9.5,fontWeight:700,color:"#475569",lineHeight:1.2}}>{(UPT||"UNIT PELAKSANA SURABAYA").toUpperCase()}</div>
+                    <div style={{fontSize:9.5,fontWeight:700,color:"#475569",lineHeight:1.2}}>{(uptNama||UPT||"UNIT PELAKSANA SURABAYA").toUpperCase()}</div>
                   </div>
                 </div>
                 <div style={{fontSize:15,fontWeight:900,color:"#0f172a",letterSpacing:1}}>

@@ -1,7 +1,7 @@
 // Komponen AttbTab — dipindah dari App.jsx (refactor Fase 5b).
 import { useState, useEffect, Fragment } from "react";
 import { UIT } from "../constants.js";
-import { hasRole, getUserUptScope } from "../lib/roles.js";
+import { hasRole, getUserUptScope, roleTier } from "../lib/roles.js";
 import { getLokasiPetaInfo, subGudangKodeMap } from "../lib/masterSync.js";
 import { ATTB_CORE_FIELDS, ATTB_FIELDS_BY_JENIS, ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "../lib/attb.js";
 import * as XLSX from "xlsx";
@@ -10,7 +10,7 @@ import { OperationsHero } from "./OperationsHero.jsx";
 
 // AttbTab — pipeline monitoring penghapusan aset material ATTB, lihat docs/ATTB_SPEC.md.
 // Pola konsisten HeavyEquipmentTabV2: chip filter + kartu, scoping UPT via effectiveUptFilter.
-export function AttbTab({ attbList, currentUser, users, sty, C, createItem, saveEdit, submitToKI, approveToKI, rejectToKI, advanceStage, markBelumLanjut, bulkImport, showToast, gudangList=[], subGudangList=[], lokasiList=[], setPetaMiniDetail, deleteItem, askConfirmDelete, bongkaranPool=[], handleImg }) {
+export function AttbTab({ attbList, currentUser, uptList, users, sty, C, createItem, saveEdit, submitToKI, approveToKI, rejectToKI, advanceStage, markBelumLanjut, bulkImport, showToast, gudangList=[], subGudangList=[], lokasiList=[], setPetaMiniDetail, deleteItem, askConfirmDelete, bongkaranPool=[], handleImg }) {
   const canDelete = hasRole(currentUser, "ADMIN");
   // Key TUG-10 yang sudah "diusulkan" jadi item ATTB (untuk tandai pool yg sudah dipakai).
   const promotedKeys = new Set(attbList.map(a=>a.sourceTug10Key).filter(Boolean));
@@ -64,10 +64,14 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
   async function setAttbLokasi(item, newLokasiId) {
     await saveEdit(item.id, { lokasiId: newLokasiId || null });
   }
-  const myUpt = getUserUptScope(currentUser);
+  const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
-  const [myUptSelected, setMyUptSelected] = useState(isMSB ? "" : (myUpt || ""));
-  const effectiveUptFilter = isMSB ? myUptSelected : (myUpt || "");
+  // Viewer multi-UPT (UIT/Pusat/Global, non-MSB) juga boleh mempersempit ke 1 UPT — reuse
+  // mekanisme effectiveUptFilter/myUptSelected yang sudah ada utk MSB (lihat HeavyEquipmentTabV2).
+  const isMultiUptViewer = ["UIT", "PUSAT", "GLOBAL"].includes(roleTier(currentUser?.role));
+  const uptFilterControllable = isMSB || isMultiUptViewer;
+  const [myUptSelected, setMyUptSelected] = useState(uptFilterControllable ? "" : (myUpt || ""));
+  const effectiveUptFilter = uptFilterControllable ? myUptSelected : (myUpt || "");
   const canManage = hasRole(currentUser, "ADMIN","TL");
 
   const [stageFilter, setStageFilter] = useState("USULAN_AE1"); // default buka langsung ke Tahap 1 (Usulan AE.1 ke Unit Induk)
@@ -260,14 +264,14 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
         eyebrow="Asset Disposal Governance"
         title="ATTB — Penghapusan Aset"
         description="Kelola pipeline penghapusan aset secara tertib, transparan, dan terukur hingga proses lelang."
-        scope={isMSB ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
+        scope={uptFilterControllable ? (myUptSelected||"Semua UPT") : `UPT ${myUpt||"Surabaya"}`}
         metrics={[
           {label:"Total item",value:scopedList.length},
           {label:"Pending approval",value:pendingApprovalCount,alert:pendingApprovalCount>0},
           {label:"Belum lanjut",value:belumLanjutCount,alert:belumLanjutCount>0},
           {label:"Sumber bongkaran",value:bongkaranBelum.length},
         ]}
-        controls={isMSB ? (
+        controls={uptFilterControllable && uptOptions.length>1 ? (
           <div>
             <label>Filter UPT</label>
             <select value={myUptSelected} onChange={e=>setMyUptSelected(e.target.value)}>
@@ -427,7 +431,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
               <tr><td colSpan={7} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada item ATTB untuk filter ini.</td></tr>
             )}
             {pagedList.map(item=>{
-              const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item);
+              const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item, uptList);
               const borderColor = item.lanjutBelumLanjut ? "#f59e0b" : stageColor(item.stage);
               const loc = resolveLokasiMaster(item);
               const selGudangId = attbGudangFilter[item.id] ?? item.gudangId ?? loc?.gdg?.id ?? "";
@@ -596,7 +600,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
         {pagedList.map(item=>{
           const borderColor = item.lanjutBelumLanjut ? "#f59e0b" : stageColor(item.stage);
           const loc = resolveLokasiMaster(item);
-          const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item);
+          const canApproveThis = isPendingAttbApproval(item) && canApproveAttb(currentUser, item, uptList);
           const mobileLocationSummary = [
             loc?.gdg?.kode || loc?.gdg?.nama,
             loc?.lok?.kode || loc?.lok?.nama,
@@ -695,7 +699,7 @@ export function AttbTab({ attbList, currentUser, users, sty, C, createItem, save
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,flexWrap:"wrap",gap:10}}>
           <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.muted}}>
             Tampilkan
-            <select style={{...sty.select,width:"auto",padding:"4px 8px",minHeight:"unset",fontSize:12}} value={attbPageSize} onChange={e=>setAttbPageSize(Number(e.target.value))}>
+            <select style={{...sty.select,width:"auto",paddingTop:4,paddingBottom:4,paddingLeft:8,paddingRight:8,minHeight:"unset",fontSize:12}} value={attbPageSize} onChange={e=>setAttbPageSize(Number(e.target.value))}>
               {[20,50,100].map(n=><option key={n} value={n}>{n}</option>)}
             </select>
             item per halaman — {filteredList.length} total

@@ -15,18 +15,19 @@ import { normalizeKatalogCode } from "./src/lib/normalizeKatalogCode.js";
 import { expandMonthlySeriesFromMap, tsbMonthlyForecast } from "./src/lib/tsbForecast.js";
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
-import { generateDocNumbers, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
+import { generateDocNumbers, generateReservasiDocNo, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
 import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, expandQueryForIlikeSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan } from "./src/lib/sap.js";
-import { ROLES, hasRole, getUserUptScope, canAccessGudang } from "./src/lib/roles.js";
+import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
+import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
 import { can } from "./src/lib/perms.js";
 import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentStatusFromKondisi, normalizeHeavyEquipmentRecord, getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt, getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName, normalizeHeavyEquipmentLoanStatus, isPendingHeavyEquipmentLoan, getHeavyEquipmentLoanRuntimeStatus, canApproveHeavyEquipmentLoan, getEquipmentCategory } from "./src/lib/heavyEquipment.js";
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
 import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
-import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessment, upsertMaturityAudit, upsertMaturityAssessments, upsertMaturityAudits, insertMaturity5SAssessment, deleteMaturityAuditRow } from "./src/lib/maturitySync.js";
+import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessments, upsertMaturityAudits } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
 import { TelegramWhitelistPanel } from "./src/components/TelegramWhitelistPanel.jsx";
@@ -54,6 +55,11 @@ import { AttbTab } from "./src/components/AttbTab.jsx";
 import { DataStokTab } from "./src/components/DataStokTab.jsx";
 import { MasterDataTab } from "./src/components/MasterDataTab.jsx";
 import { MaturityDashboardTab } from "./src/components/MaturityDashboardTab.jsx";
+import { useMaturity } from "./src/hooks/useMaturity.jsx";
+import { useTugApprovals } from "./src/hooks/useTugApprovals.js";
+import { useTugTransactions } from "./src/hooks/useTugTransactions.js";
+import { useStockOpname } from "./src/hooks/useStockOpname.js";
+import { useApprovalHub } from "./src/hooks/useApprovalHub.js";
 import { AUDIT_ASPECTS, AUDIT_CATEGORIES } from "./src/data/auditAspects.js";
 import { StockOpnameTab } from "./src/components/StockOpnameTab.jsx";
 import { MigrasiDataTab } from "./src/components/MigrasiDataTab.jsx";
@@ -93,15 +99,19 @@ import * as XLSX from "xlsx";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-import { recognize as ocrRecognize } from "tesseract.js";
 import { PLN_LOGO_DATA_URI } from "./src/assets/plnLogoBase64.js";
+import { useDenahOcr } from "./src/hooks/useDenahOcr.js";
+import { useHeavyEquipment } from "./src/hooks/useHeavyEquipment.js";
+import { useAccountAdmin } from "./src/hooks/useAccountAdmin.js";
+import { useMasterDataCrud } from "./src/hooks/useMasterDataCrud.jsx";
+import { useWarehouseConfig } from "./src/hooks/useWarehouseConfig.jsx";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
 import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
 import { loadMaterialInspections, loadMaterialInspectionBatches } from "./src/lib/materialInspectionSync.js";
-import { getMaterialAkanHabis, buildMonthlySeriesByKatalog } from "./src/lib/analytics.js";
+import { getMaterialAkanHabis, buildMonthlySeriesByKatalog, computeProcurementList, getTopStockByQty, getTotalPerSatuan } from "./src/lib/analytics.js";
 
 // Turn this on only after the reviewed self-host migration is installed. It
 // makes TUG-8/9 fail closed rather than silently reverting to browser storage.
@@ -285,19 +295,53 @@ export default function PLNWarehouse() {
   const [subGudangList, setSubGudangList] = useState(() => readCachedList("pln_sub_gudang_v1") ?? []); // level di antara Gudang dan Blok Lokasi
   const [importGudangOpen, setImportGudangOpen] = useState(false); // toggle panel Import & Review di Master Gudang
   const [importLokasiOpen, setImportLokasiOpen] = useState(false); // modal Import Excel Master Lokasi
-  const [showGudangMaintenance, setShowGudangMaintenance] = useState(false); // toggle 2 alat perbaikan (bukan pemakaian rutin) di Master Gudang
   const [rencanaKedatanganList, setRencanaKedatanganList] = useState([]);
-  const [opnameList, setOpnameList] = useState(() => readCachedList("pln_opname_v1") ?? []);
-  const [stockCountList, setStockCountList] = useState(() => readCachedList("pln_stockcount_v1") ?? []); // riwayat sesi Stock Count (banding SAP vs Aplikasi)
-  const [approvalHistoryList, setApprovalHistoryList] = useState([]); // log keputusan approval (Lokasi/Blok, Pemindahan Stok, dkk) — TUG tetap diturunkan dari txns
-  const [maturityAssessments, setMaturityAssessments] = useState(() => readCachedList("pln_maturity_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  const [maturityAudits, setMaturityAudits] = useState(() => readCachedList("pln_maturity_audits_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  // Fallback default hanya berlaku untuk UPT pemilik angkanya (lihat getDefaultMaturityAuditHistory);
-  // profil cache sudah terbaca di atas, jadi UPT user tersedia sejak render pertama.
-  const [maturityAuditHistory, setMaturityAuditHistory] = useState(() => readCachedList("pln_maturity_audit_history_v1") ?? getDefaultMaturityAuditHistory(currentUser?.uptId)); // cache/fallback read-only; DB adalah canonical
-  const [maturity5SAssessments, setMaturity5SAssessments] = useState(() => readCachedList("pln_maturity_5s_assessments_v1") ?? []); // cache fallback read-only; DB adalah canonical
-  const [heavyEquipmentList, setHeavyEquipmentList] = useState(() => readCachedList("pln_heavy_equipment_v1") ?? []);
-  const [heavyEquipmentLoans, setHeavyEquipmentLoans] = useState(() => readCachedList("pln_heavy_equipment_loans_v1") ?? []);
+  // opnameList/stockCountList dipindah ke useStockOpname (2026-08-10).
+  // approvalHistoryList + state pagination approval dipindah ke useApprovalHub (2026-08-10).
+  // currentUserUptId + domain Maturity dipanggil sedini mungkin (di sini, bukan
+  // di dekat state operasional bawah) karena state Maturity dipakai di render-body
+  // lebih atas (stateRef, dep-array useEffect) — kalau destructure di bawah titik
+  // itu → ReferenceError TDZ (build lolos, app blank). Dep currentUserUptId sudah
+  // tersedia: currentUser/uptList/ultgList di atas; showToast/askConfirmDelete
+  // function-declaration (hoisted). saveMaturity5SAssessment memakainya saat runtime.
+  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
+  const currentUserUptId = currentUser?.uptId
+    || (ultgList.find(u => u.id === currentUser?.ultgId)?.parentUptId)
+    || (uptList.find(u => String(u.nama || "").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
+  const {
+    maturityAssessments, setMaturityAssessments,
+    maturityAudits, setMaturityAudits,
+    maturityAuditHistory, setMaturityAuditHistory,
+    maturity5SAssessments, setMaturity5SAssessments,
+    maturityModal, setMaturityModal,
+    maturityForm, setMaturityForm,
+    maturitySubTab, setMaturitySubTab,
+    canSwitchMaturityUpt,
+    selectedMaturityUpt, setSelectedMaturityUpt,
+    selectedMaturityUptId,
+    maturityAuditModal, setMaturityAuditModal,
+    maturityAuditForm, setMaturityAuditForm,
+    maturityAuditSaving, setMaturityAuditSaving,
+    maturityAuditEvidence, setMaturityAuditEvidence,
+    expandedAspek, setExpandedAspek,
+    activeAspectId, setActiveAspectId,
+    aspectPage, setAspectPage,
+    auditListPage, setAuditListPage,
+    uptIdByNama,
+    guardMaturityWrite,
+    saveMaturityAssessment,
+    saveMaturity5SAssessment,
+    getCurrentMonth5SEvidence,
+    mergeCurrentMonth5SEvidence,
+    calculateItemLevel,
+    createMaturityAudit,
+    openMaturityAudit,
+    calcMaturityScore,
+    calcMaturityLevel,
+    saveMaturityAudit,
+    deleteMaturityAudit,
+    exportMaturityAuditExcel,
+  } = useMaturity({ currentUser, showToast, uptList, currentUserUptId, askConfirmDelete, MATURITY_LEVELS, MATURITY_WORKFLOW_LABEL });
   const [attbList, setAttbList] = useState(() => readCachedList("pln_attb_v1") ?? []);
   const [materialCadangData, setMaterialCadangData] = useState({ imports:[], analyses:[], applyHistory:[] });
   const [materialCadangHealthData, setMaterialCadangHealthData] = useState({ imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
@@ -336,6 +380,8 @@ export default function PLNWarehouse() {
   const [dashTab, setDashTab] = useState("ringkasan"); // ringkasan terpadu | overview gudang
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("ALL");
+  const [stockUptFilter, setStockUptFilter] = useState(""); // "" = semua; hanya dipakai viewer multi-UPT (UIT/Pusat)
+  const [tugUptFilter, setTugUptFilter] = useState(""); // "" = semua; sama pola stockUptFilter, khusus tab TUG
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(10);
   const [katalogPage, setKatalogPage] = useState(1);
@@ -345,23 +391,6 @@ export default function PLNWarehouse() {
   const [filterStatus, setFilterStatus] = useState("ALL");
 
   // Filter jenis approval (TUG/Alat Berat/Stok/dst) + pagination tiap section —
-  // sebelumnya semua jenis approval digabung jadi 1 list panjang tanpa pemisah,
-  // susah dibaca kalau lagi banyak. 1 pageSize dropdown dipakai bareng semua
-  // section, tapi tiap section punya cursor halaman sendiri-sendiri.
-  const [approvalTypeFilter, setApprovalTypeFilter] = useState("ALL");
-  const [approvalPageSize, setApprovalPageSize] = useState(10);
-  const [approvalStokPage, setApprovalStokPage] = useState(1);
-  const [approvalStokGudangPage, setApprovalStokGudangPage] = useState(1);
-  const [approvalEditStokPage, setApprovalEditStokPage] = useState(1);
-  const [approvalHapusStokPage, setApprovalHapusStokPage] = useState(1);
-  const [approvalAlatBeratPage, setApprovalAlatBeratPage] = useState(1);
-  const [approvalOpnamePage, setApprovalOpnamePage] = useState(1);
-  const [approvalStockCountPage, setApprovalStockCountPage] = useState(1);
-  const [approvalHistoryPage, setApprovalHistoryPage] = useState(1);
-  useEffect(() => {
-    setApprovalStokPage(1); setApprovalStokGudangPage(1); setApprovalEditStokPage(1);
-    setApprovalHapusStokPage(1); setApprovalAlatBeratPage(1); setApprovalOpnamePage(1); setApprovalHistoryPage(1);
-  }, [approvalTypeFilter, approvalPageSize]);
   function renderApprovalPager(page, setPage, totalItems) {
     if (totalItems <= approvalPageSize) return null;
     const totalPages = Math.max(1, Math.ceil(totalItems/approvalPageSize));
@@ -375,38 +404,17 @@ export default function PLNWarehouse() {
   }
 
   const [stockModal, setStockModal] = useState(null);
-  const [txnModal, setTxnModal] = useState(false);
-  const [editingDraftTxnId, setEditingDraftTxnId] = useState(null); // non-null = sedang edit draft TUG-9 hasil adopt ULTG
-  const [tug5ExpandedIdx, setTug5ExpandedIdx] = useState(0); // index baris material TUG-5 yang sedang terbuka penuh (baris lain collapse)
-  const [tug5MaterialPage, setTug5MaterialPage] = useState(0); // 5 item per halaman, max 10 (2 halaman)
-  const [satpamModal, setSatpamModal] = useState(null);
-  const [satpamForm, setSatpamForm] = useState({});
-  const [katalogModal, setKatalogModal] = useState(null);
-  const [katalogForm, setKatalogForm] = useState({});
-  const [lokasiModal, setLokasiModal] = useState(null);
-  const [lokasiForm, setLokasiForm] = useState({});
-  const [lokasiDeleteConfirm, setLokasiDeleteConfirm] = useState(null); // blok gudang (lokasi) yang sedang dikonfirmasi hapus
   const [confirmDialog, setConfirmDialog] = useState(null); // popup konfirmasi hapus generik untuk Master Data lain (Katalog, Satpam, UIT, ULTG, UPT, Gudang): {title, message, warning, confirmLabel, onConfirm}
   function askConfirmDelete({ title, message, warning, confirmLabel, onConfirm, variant }) {
     setConfirmDialog({ title: title||"Hapus Data?", message, warning, confirmLabel: confirmLabel||(variant==="warning"?"Mengerti":"🗑️ Ya, Hapus"), onConfirm, variant });
   }
-  const [timMutuModal, setTimMutuModal] = useState(null);
-  const [timMutuForm, setTimMutuForm] = useState({});
-  const [uitModal, setUitModal] = useState(null);
-  const [uitForm, setUitForm] = useState({});
-  const [ultgModal, setUltgModal] = useState(null);
-  const [ultgForm, setUltgForm] = useState({});
-  const [uptModal, setUptModal] = useState(null);
-  const [uptForm, setUptForm] = useState({});
-  const [akunModal, setAkunModal] = useState(null); // null | "add"
-  const [akunForm, setAkunForm] = useState({});
-  const [akunBusy, setAkunBusy] = useState(false);
-  const [akunResult, setAkunResult] = useState(null); // {username,password} setelah sukses daftar
-  const [gantiPasswordModal, setGantiPasswordModal] = useState(false);
-  const [gantiPasswordForm, setGantiPasswordForm] = useState({oldPassword:"", newPassword:"", confirmPassword:""});
-  const [gantiPasswordBusy, setGantiPasswordBusy] = useState(false);
+  const {
+    akunModal, setAkunModal, akunForm, setAkunForm, akunBusy, setAkunBusy, akunResult, setAkunResult,
+    gantiPasswordModal, setGantiPasswordModal, gantiPasswordForm, setGantiPasswordForm, gantiPasswordBusy, setGantiPasswordBusy,
+    openAddAkun, openEditAkun, isUitScopedRole, isNationalRole, submitAkunEdit, submitAkunBaru,
+    openGantiPassword, submitGantiPassword,
+  } = useAccountAdmin({ currentUser, showToast, reloadUsers });
   const [stockSubTab, setStockSubTab] = useState("katalog"); // "katalog" | "lokasi" | "satpam" | "timmutu" (within Master Data tab)
-  const [tugGroup, setTugGroup] = useState("penerimaan");
   const [tug15Filter, setTug15Filter] = useState({
     dateFrom: "", dateTo: "",
     katalogId: "ALL",
@@ -421,8 +429,7 @@ export default function PLNWarehouse() {
   const [tugExpanded, setTugExpanded] = useState(false); // sidebar accordion state for TUG
   const [tugSubTab, setTugSubTab] = useState("TUG3"); // "TUG3" | "TUG10" (penerimaan) or "TUG9" | "TUG8" (pengeluaran)
   const [masterExpanded, setMasterExpanded] = useState(false); // sidebar accordion state for Master Data
-  const [opnameExpanded, setOpnameExpanded] = useState(false); // sidebar accordion state for Stock Opname & Stock Count (digabung 1 menu)
-  const [opnameSubTab, setOpnameSubTab] = useState("opname"); // "opname" | "stockCount"
+  // opnameExpanded/opnameSubTab dipindah ke useStockOpname (2026-08-10).
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth <= 768);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // drawer sidebar di HP
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -496,23 +503,6 @@ export default function PLNWarehouse() {
     }, 2500);
     return () => clearTimeout(timer);
   }, [txns, stocks, katalogList, currentUser, loading]);
-  const [ocrSuggestions, setOcrSuggestions] = useState([]); // usulan blok batch dari OCR denah: [{id,kode,xPct,yPct,checked}]
-  const [ocrSuggestGudangId, setOcrSuggestGudangId] = useState(null); // gudang mana yang usulannya sedang tampil
-  const [ocrSuggestSubGudangId, setOcrSuggestSubGudangId] = useState(null); // non-null = usulan berasal dari denah Sub Gudang, bukan denah Gudang keseluruhan
-  const [mapConfigSubGudangId, setMapConfigSubGudangId] = useState(null);
-  const [pendingMapLokasiSub, setPendingMapLokasiSub] = useState(null);
-  const [manualAddModeSub, setManualAddModeSub] = useState(false);
-  const [denahSubLoading, setDenahSubLoading] = useState(false);
-  // Denah+Konfigurasi Koordinat level Gudang collapsed by default (dulu selalu terbuka penuh,
-  // bikin halaman kepanjangan — keluhan user 2026-07-06). Boolean tunggal cukup karena cuma 1
-  // Gudang yang expanded sekaligus (accordion via expandedGudangId).
-  const [showGudangDenahTools, setShowGudangDenahTools] = useState(false);
-  // Sama tapi per Sub Gudang (Set, karena beberapa Sub Gudang bisa tampil bersamaan dalam 1 Gudang).
-  const [expandedSubGudangToolsIds, setExpandedSubGudangToolsIds] = useState(() => new Set());
-  // Drill-down: klik Gudang cuma tampilkan menu Sub Gudang dulu, klik Sub Gudang baru tampil
-  // Daftar Blok Lokasi-nya (permintaan user 2026-07-06). Boolean/id tunggal cukup karena cuma
-  // 1 Gudang yang expanded sekaligus (accordion via expandedGudangId).
-  const [selectedSubGudangId, setSelectedSubGudangId] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [docPreview, setDocPreview] = useState(null); // txn object when previewing TUG-9 document
   // One user action keeps the same RPC idempotency keys across retry after a timeout.
@@ -531,21 +521,14 @@ export default function PLNWarehouse() {
   const [photoSearchMode, setPhotoSearchMode] = useState("bentuk"); // "bentuk" = Cohere visual | "nameplate" = OCR.space baca teks nameplate
   const [photoSearchResultMode, setPhotoSearchResultMode] = useState("bentuk"); // mode yang menghasilkan photoSearchResults (utk label hasil)
   const [photoSearchOcrText, setPhotoSearchOcrText] = useState(""); // teks nameplate terbaca (mode nameplate)
-  const savingTxnRef = useRef(false); // cegah double-submit transaksi saat upload foto berjalan
-  const [savingTxn, setSavingTxn] = useState(false); // mirror React untuk tombol Ajukan (disabled + "Menyimpan...")
-  const [savingInfo, setSavingInfo] = useState(null); // {label, done, total} — overlay progres simpan transaksi
-  const [tug10Collapsed, setTug10Collapsed] = useState({}); // {idx:true} kartu barang retur yang diringkas
-  const [tug10Highlight, setTug10Highlight] = useState(null); // key field yang di-highlight setelah gagal validasi
-  const tug10Refs = useRef({}); // anchor scroll per seksi/field TUG-10
   const syncingPhotosRef = useRef(false); // cegah tumpang-tindih auto-sync foto transaksi pending
   const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
   const [lightboxImg, setLightboxImg] = useState(null); // src foto yang sedang di-overview full-screen
   const [scannerTarget, setScannerTarget] = useState(null); // "stockForm" | {index}
   const [stockForm, setStockForm] = useState({});
-  const [txnForm, setTxnForm] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang ${WAREHOUSE}.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
+  const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang PLN.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [ragSyncing, setRagSyncing] = useState(false);
@@ -622,13 +605,18 @@ export default function PLNWarehouse() {
       // non-kritis tetap berjalan paralel dan diproses dengan invariant null/
       // tidak-menulis yang ada di bawah.
       const [initialLokasi, initialKatalog, initialStocks] = await Promise.all([masterLoads[5], masterLoads[8], masterLoads[9]]);
-      if (initialLokasi !== null) setLokasiList(initialLokasi?.length ? dedupeById(initialLokasi).list : (clokLocal || DEFAULT_LOKASI));
+      if (initialLokasi !== null) setLokasiList(initialLokasi?.length ? dedupeById(initialLokasi).list : (initialLokasi ? [] : (clokLocal || DEFAULT_LOKASI)));
       if (initialKatalog !== null) setKatalogList(initialKatalog?.some(k => k.name) ? dedupeById(initialKatalog.filter(k => k.name)).list : (ckat || DEFAULT_KATALOG));
       if (initialStocks !== null) setStocks(initialStocks?.length ? dedupeById(initialStocks).list : (cs || DEFAULT_STOCKS));
       setLoading(false);
 
       const [cuit, cupt, cultg, cgdg, csgdg, clokRemote, csp, ctm, ckatRemote, csRemote, cgcapRemote, cgcapiRemote, cheRemote, chelRemote, copnRemote, cscRemote, cattbRemote, cmaRemote, cmauRemote, cmahRemote, cm5sRemote] = await Promise.all([...masterLoads, ...maturityLoads]);
       const clok = clokRemote || clokLocal; // fallback ke localStorage kalau Supabase belum terkonfigurasi
+      // Seed DEFAULT (gudang/lokasi) hanya boleh oleh viewer NASIONAL (Pusat/SUPERADMIN).
+      // Multi-UPT + RLS: hasil kosong untuk akun scoped berarti "UPT-ku belum punya
+      // gudang/lokasi", BUKAN tabel kosong global — seed di sini akan ditolak RLS (403,
+      // insiden login UPT Gresik 2026-08-07) dan mengisi data Surabaya ke UPT lain.
+      const canSeedMaster = getScopeUptIds(currentUser, cupt) === null;
 
       if (cs && ckat && clok) {
         // Already on new master-data structure.
@@ -691,10 +679,13 @@ export default function PLNWarehouse() {
           const lokFresh = dedupeById(clokRemote).list;
           setLokasiList(lokFresh);
           CLOUD.set("pln_lokasi_v4", lokFresh);
-        } else if (DEFAULT_LOKASI.length > 0) {
+        } else if (canSeedMaster && DEFAULT_LOKASI.length > 0) {
           setLokasiList(DEFAULT_LOKASI);
           await syncMasterTable("lokasi", DEFAULT_LOKASI, l => ({ gudang_id: l.gudangId || null, status: l.status || null }));
           CLOUD.set("pln_lokasi_v4", DEFAULT_LOKASI);
+        } else {
+          setLokasiList([]); // akun scoped tanpa lokasi UPT sendiri — jangan seed/tampilkan data UPT lain
+          CLOUD.set("pln_lokasi_v4", []);
         }
       } else {
         // Check for legacy flat-stock data from older version of the app
@@ -791,10 +782,13 @@ export default function PLNWarehouse() {
       } else if (cgdg.length > 0) {
         setGudangList(cgdg);
         CLOUD.set("pln_gudang_v1", cgdg);
-      } else if (DEFAULT_GUDANG.length > 0) {
+      } else if (canSeedMaster && DEFAULT_GUDANG.length > 0) {
         setGudangList(DEFAULT_GUDANG);
         await syncMasterTable("gudang", DEFAULT_GUDANG, g => ({ upt_id: g.uptId || null }));
         CLOUD.set("pln_gudang_v1", DEFAULT_GUDANG);
+      } else {
+        setGudangList([]); // akun scoped tanpa gudang UPT sendiri — jangan seed data UPT lain
+        CLOUD.set("pln_gudang_v1", []);
       }
       if (csgdg === null) {
         loadFailures.push("Sub Gudang");
@@ -810,7 +804,11 @@ export default function PLNWarehouse() {
       // ke Supabase sama sekali — widget akurasi Dashboard "hilang" kalau dibuka dari
       // device/browser lain karena datanya memang cuma ada di localStorage device asal.
       const opnLocal = copn || [];
-      const scLocal = csc || [];
+      // Newest-first by uploadedAt: konsumen (dashboard "Akurasi SAP vs Fisik",
+      // "sesi terakhir") ambil [0] sbg sesi terbaru. Kolom created_at bisa kembar
+      // (mis. dua sesi disync barengan) → jangan diandalkan utk recency.
+      const byRecency = (a, b) => (b.uploadedAt || 0) - (a.uploadedAt || 0);
+      const scLocal = [...(csc || [])].sort(byRecency);
       if (copnRemote === null) {
         // Fetch GAGAL — tampilkan lokal untuk UX, JANGAN push ke server.
         setOpnameList(opnLocal);
@@ -827,8 +825,9 @@ export default function PLNWarehouse() {
         setStockCountList(scLocal);
         loadFailures.push("Stock Count");
       } else if (cscRemote.length > 0) {
-        setStockCountList(cscRemote);
-        CLOUD.set("pln_stockcount_v1", cscRemote); // refresh cache dgn data terbaru dari server
+        const scSorted = [...cscRemote].sort(byRecency);
+        setStockCountList(scSorted);
+        CLOUD.set("pln_stockcount_v1", scSorted); // refresh cache dgn data terbaru dari server
       } else {
         setStockCountList(scLocal);
         if (scLocal.length > 0) syncMasterTable("stock_count", scLocal);
@@ -1012,7 +1011,102 @@ export default function PLNWarehouse() {
   // to the latest React state via stateRef (always up to date, avoids stale
   // closures without needing every call site updated when new fields are added).
   const stateRef = useRef({});
-  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview };
+  const {
+    heavyEquipmentList, setHeavyEquipmentList,
+    heavyEquipmentLoans, setHeavyEquipmentLoans,
+    saveHeavyEquipmentEdit,
+    createHeavyEquipment,
+    createHeavyEquipmentLoan,
+    approveHeavyEquipmentLoan,
+    rejectHeavyEquipmentLoan,
+    completeHeavyEquipmentLoan,
+  } = useHeavyEquipment({ currentUser, uptList, showToast, stateRef, logApprovalHistory });
+  const {
+    opnameList, setOpnameList,
+    stockCountList, setStockCountList,
+    opnameExpanded, setOpnameExpanded,
+    opnameSubTab, setOpnameSubTab,
+    saveOpname, submitOpname, approveOpname_Asman, approveOpname_Manager, rejectOpname, deleteOpname,
+    addNonStockFoundItem,
+    computeStockCountItems, previewStockCount, saveStockCountSession,
+    approveStockCountItem, rejectStockCountItem, deleteStockCountSession,
+  } = useStockOpname({ currentUser, showToast, stateRef, logApprovalHistory, katalogList, setKatalogList, stocks, setStocks, uploadStockFoto });
+  const {
+    katalogModal, setKatalogModal, katalogForm, setKatalogForm,
+    openAddKatalog, openEditKatalog, saveKatalog, deleteKatalog,
+    satpamModal, setSatpamModal, satpamForm, setSatpamForm,
+    openAddSatpam, openEditSatpam, saveSatpam, deleteSatpam,
+    timMutuModal, setTimMutuModal, timMutuForm, setTimMutuForm,
+    openEditTimMutu, saveTimMutu,
+    uitModal, setUitModal, uitForm, setUitForm,
+    openAddUIT, openEditUIT, saveUIT, deleteUIT,
+    uptModal, setUptModal, uptForm, setUptForm,
+    openAddUPT, openEditUPT, saveUPT, deleteUPT,
+    ultgModal, setUltgModal, ultgForm, setUltgForm,
+    openAddULTG, openEditULTG, saveULTG, deleteULTG,
+  } = useMasterDataCrud({ currentUser, showToast, stateRef, askConfirmDelete, katalogList, setKatalogList, stocks, satpamList, setSatpamList, timMutuList, setTimMutuList, uitList, setUitList, uptList, setUptList, ultgList, setUltgList });
+  const {
+    approvalHistoryList, setApprovalHistoryList,
+    approvalTypeFilter, setApprovalTypeFilter,
+    approvalPageSize, setApprovalPageSize,
+    approvalStokPage, setApprovalStokPage,
+    approvalStokGudangPage, setApprovalStokGudangPage,
+    approvalEditStokPage, setApprovalEditStokPage,
+    approvalHapusStokPage, setApprovalHapusStokPage,
+    approvalAlatBeratPage, setApprovalAlatBeratPage,
+    approvalOpnamePage, setApprovalOpnamePage,
+    approvalStockCountPage, setApprovalStockCountPage,
+    approvalHistoryPage, setApprovalHistoryPage,
+    approveLokasiChange, rejectLokasiChange,
+  } = useApprovalHub({ currentUser, showToast, stateRef, logApprovalHistory, lokasiList, setLokasiList });
+  stateRef.current = { stocks, txns, docSeq, satpamList, katalogList, lokasiList, timMutuList, uitList, uptList, gudangList, subGudangList, rencanaKedatanganList, opnameList, stockCountList, approvalHistoryList, maturityAssessments, maturityAudits, maturityAuditHistory, maturity5SAssessments, heavyEquipmentList, heavyEquipmentLoans, attbList, materialCadangData, materialCadangHealthData, materialCadangAiInsights, gudangCapacityList, gudangCapacityImports, migratedTug15History, migrasiPendingReview, users, currentUser };
+
+  const {
+    lokasiModal, setLokasiModal, lokasiForm, setLokasiForm, lokasiDeleteConfirm, setLokasiDeleteConfirm,
+    showGudangMaintenance, setShowGudangMaintenance,
+    mapConfigSubGudangId, setMapConfigSubGudangId, pendingMapLokasiSub, setPendingMapLokasiSub, manualAddModeSub, setManualAddModeSub,
+    showGudangDenahTools, setShowGudangDenahTools, expandedSubGudangToolsIds, setExpandedSubGudangToolsIds,
+    selectedSubGudangId, setSelectedSubGudangId,
+    openEditLokasi, isKodeDuplicateInSubGudang, syncLokasi, saveLokasi, requestDeleteLokasi, confirmDeleteLokasi,
+    gudangModal, setGudangModal, gudangForm, setGudangForm,
+    mapConfigGudangId, setMapConfigGudangId, pendingMapLokasi, setPendingMapLokasi, expandedGudangId, setExpandedGudangId,
+    gudangWizardStep, setGudangWizardStep, wizardBlokDraft, setWizardBlokDraft, manualAddMode, setManualAddMode,
+    capacityReviewImportId, setCapacityReviewImportId, capacityReviewCandidates, setCapacityReviewCandidates,
+    capacityReviewDecisions, setCapacityReviewDecisions,
+    openAddGudang, openEditGudang, closeGudangWizard, syncGudang, syncSubGudang,
+    backfillGudangCoordFromCapacity, dedupeGudangDanSubGudang,
+    startCapacityApproval, confirmCapacityApproval, rejectCapacityImport,
+    saveGudang, gudangWizardNext, deleteGudang, addWizardBlok,
+    uploadDenahGudang, updateOcrSuggestion, removeOcrSuggestion, confirmOcrSuggestions, uploadDenahSubGudang,
+  } = useWarehouseConfig({
+    currentUser, uptList, showToast, stateRef, askConfirmDelete, logApprovalHistory,
+    gudangList, setGudangList, subGudangList, setSubGudangList, lokasiList, setLokasiList, stocks,
+    gudangCapacityList, setGudangCapacityList, gudangCapacityImports, setGudangCapacityImports,
+  });
+
+  const {
+    ocrSuggestions, setOcrSuggestions,
+    ocrSuggestGudangId, setOcrSuggestGudangId,
+    ocrSuggestSubGudangId, setOcrSuggestSubGudangId,
+    denahLoading, setDenahLoading,
+    denahSubLoading, setDenahSubLoading,
+    runOcrOnDenah, runOcrOnDenahSub,
+    suggestKodeFromOcr,
+    assignLokasiKoordinat, assignLokasiKoordinatSub,
+    resetLokasiKoordinat, resetLokasiKoordinatSub,
+    dismissOcrSuggestions,
+  } = useDenahOcr({ stateRef, setGudangList, setSubGudangList, lokasiList, setLokasiList, syncGudang, syncSubGudang, syncLokasi, showToast });
+  // useWarehouseConfig dipanggil sebelum useDenahOcr ada (perlu syncGudang/syncSubGudang/syncLokasi
+  // lebih dulu) — isi baru bisa dilewat lewat mutasi stateRef.current, bukan sbg argumen hook.
+  stateRef.current.runOcrOnDenah = runOcrOnDenah;
+  // useApprovalHub dipanggil sebelum syncLokasi ada (sama alasan) — approveLokasiChange/
+  // rejectLokasiChange baca lewat stateRef.current.syncLokasi.
+  stateRef.current.syncLokasi = syncLokasi;
+  stateRef.current.runOcrOnDenahSub = runOcrOnDenahSub;
+  stateRef.current.ocrSuggestions = ocrSuggestions;
+  stateRef.current.setOcrSuggestions = setOcrSuggestions;
+  stateRef.current.setDenahLoading = setDenahLoading;
+  stateRef.current.setDenahSubLoading = setDenahSubLoading;
 
   // Realtime hanya untuk Data Stok. State/cachenya diperbarui dari event database,
   // tanpa saveToCloud(), agar echo write tidak mengirim ulang tabel/RAG ke server.
@@ -1191,7 +1285,7 @@ export default function PLNWarehouse() {
     // failedLabels di bawah) — ditemukan bug nyata 2026-07-21: syncMasterTable() bisa
     // return false (network error/RLS/dll) tapi hasilnya tidak pernah dicek, jadi toast
     // "berhasil" tetap muncul meski data sebenarnya gagal tersimpan ke Supabase.
-    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null });
+    const extraColsStocks = item => ({ katalog_id: item.katalogId || null, lokasi_id: item.lokasiId || null, upt_id: item.uptId || null });
     const syncTasks = [];
     if (overrides.katalogList !== undefined) {
       // Kalau caller kasih hint baris katalog yang berubah → sync ringan (cuma baris itu),
@@ -1225,7 +1319,14 @@ export default function PLNWarehouse() {
         ? syncMasterTableRows("heavy_equipment", heHint, e => ({ upt: e.upt || null }))
         : syncMasterTable("heavy_equipment", he, e => ({ upt: e.upt || null })) });
     }
-    if (overrides.heavyEquipmentLoans !== undefined) syncTasks.push({ label: "Peminjaman Alat Berat", promise: syncMasterTable("heavy_equipment_loans", hel, l => ({
+    if (overrides.heavyEquipmentLoans !== undefined) syncTasks.push({ label: "Peminjaman Alat Berat", promise: (Array.isArray(hints.heavyEquipmentLoansChangedRows) && hints.heavyEquipmentLoansChangedRows.length > 0)
+      ? syncMasterTableRows("heavy_equipment_loans", hints.heavyEquipmentLoansChangedRows, l => ({
+        equipment_id: l.equipmentId || null,
+        status: l.status || null,
+        owner_upt: getHeavyEquipmentLoanOwnerUpt(l) || null,
+        requester_upt: getHeavyEquipmentLoanRequesterUpt(l) || null,
+      }))
+      : syncMasterTable("heavy_equipment_loans", hel, l => ({
       equipment_id: l.equipmentId || null,
       status: l.status || null,
       owner_upt: getHeavyEquipmentLoanOwnerUpt(l) || null,
@@ -1238,8 +1339,15 @@ export default function PLNWarehouse() {
     // (widget akurasi Dashboard "hilang" kalau dibuka dari device/browser lain karena datanya
     // memang tidak pernah keluar dari localStorage device asal). Sekarang auto-backup ke
     // Supabase tiap kali berubah, pola sama seperti heavy_equipment (schema.sql section 22).
-    if (overrides.opnameList !== undefined) syncTasks.push({ label: "Stock Opname", promise: syncMasterTable("stock_opname", opn, o => ({ status: o.status || null })) });
-    if (overrides.stockCountList !== undefined) syncTasks.push({ label: "Stock Count", promise: syncMasterTable("stock_count", sc) });
+    // Probe read-only dulu. Sebelum migration kolom upt_id belum ada; jangan
+    // mengirim kolom typed karena PostgREST akan menolak seluruh upsert (PGRST204).
+    const stockScopeLive = !isDemoMode() && (overrides.opnameList !== undefined || overrides.stockCountList !== undefined)
+      ? await stockScopeColumnsAvailable(supabase)
+      : false;
+    const stockScopeContext = { profiles: stateRef.current.users, currentUser: stateRef.current.currentUser };
+    const scopedCols = item => stockScopeExtraCols(item, stockScopeContext, stockScopeLive);
+    if (overrides.opnameList !== undefined) syncTasks.push({ label: "Stock Opname", promise: syncMasterTable("stock_opname", opn, o => ({ status: o.status || null, ...scopedCols(o) })) });
+    if (overrides.stockCountList !== undefined) syncTasks.push({ label: "Stock Count", promise: syncMasterTable("stock_count", sc, scopedCols) });
     const syncResults = await Promise.all(syncTasks.map(task => task.promise));
     const failedLabels = syncTasks.filter((task, i) => syncResults[i] === false).map(task => task.label);
     if (failedLabels.length > 0) {
@@ -1271,6 +1379,9 @@ export default function PLNWarehouse() {
     }
     return cloudSyncOk;
   }, []);
+  // useHeavyEquipment dipanggil sebelum saveToCloud ada (lihat stateRef di atas) — isi
+  // baru bisa dilewat lewat mutasi stateRef.current, bukan sbg argumen hook.
+  stateRef.current.saveToCloud = saveToCloud;
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
   useEffect(() => { setStockPage(1); }, [search, filterJenis, stockPageSize]);
@@ -1335,6 +1446,27 @@ export default function PLNWarehouse() {
   // di HP saat user sedang fokus mengisi form di lapangan.
   function showToast(msg, type="success") { setToast({msg,type}); setTimeout(()=>setToast(null), type==="error"?5500:3500); }
   showToastRef.current = showToast;
+
+  const {
+    txnModal, setTxnModal, txnForm, setTxnForm,
+    editingDraftTxnId, setEditingDraftTxnId,
+    tugGroup, setTugGroup,
+    tug5ExpandedIdx, setTug5ExpandedIdx, tug5MaterialPage, setTug5MaterialPage,
+    savingTxn, setSavingTxn, savingInfo,
+    tug10Collapsed, setTug10Collapsed, tug10Highlight, tug10Refs,
+    setMaterialPhoto, handleMaterialImg,
+    openNewTxn, addItemRow, removeItemRow, updateItemRow,
+    tug10Missing, flagTug10Invalid,
+    saveTxn, commitNewTxn,
+  } = useTugTransactions({
+    currentUser, showToast, rolePerms,
+    txns, setTxns, stocks, setStocks, katalogList, setKatalogList,
+    docSeq, setDocSeq,
+    uitList, uptList, ultgList, currentUserUptId,
+    saveToCloud,
+    canonicalActionKeysRef,
+    stateRef,
+  });
 
   async function handleLogin() {
     if (!loginForm.username.trim() || !loginForm.password) { setLoginErr("Username dan password wajib diisi."); return; }
@@ -1433,114 +1565,7 @@ export default function PLNWarehouse() {
     setRolePerms(map);
   }
 
-  // Kelola Akun (ADMIN only) — daftarkan user baru lewat Edge Function
-  // admin-create-user (service_role di server, supaya sesi Admin yang lagi
-  // login tidak ketimpa jadi sesi user baru seperti kalau pakai signUp() biasa
-  // langsung dari browser).
-  function openAddAkun() {
-    setAkunForm({username:"", password:"", name:"", role:"VIEWER", jabatan:"", uptId:"", ultgId:"", uitId:"", pengadaanScope:"UPT", gudangIds:[]});
-    setAkunResult(null);
-    setAkunModal("add");
-  }
-  function openEditAkun(u) {
-    setAkunForm({id:u.id, username:u.username, password:"", name:u.name||"", role:u.role||"VIEWER", jabatan:u.jabatan||"", uptId:u.uptId||"", ultgId:u.ultgId||"", uitId:u.uitId||"", pengadaanScope:u.uitId?"UIT":"UPT", gudangIds:Array.isArray(u.gudangIds)?u.gudangIds:[]});
-    setAkunResult(null);
-    setAkunModal("edit");
-  }
-  // Role level-UIT (ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT) dan PENGADAAN mode UIT
-  // pakai uitId, bukan uptId — field-nya saling eksklusif di form (lihat render modal).
-  // ADMIN_LOG_PUSAT tidak termasuk: nasional, tidak terikat satu UIT.
-  function isUitScopedRole(f) {
-    return ["ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT"].includes(f.role) || (f.role==="PENGADAAN" && f.pengadaanScope==="UIT");
-  }
-  // Peran nasional (Pusat): lingkupnya seluruh UPT dan UIT, jadi tidak memilih
-  // unit apa pun. Tanpa cabang ini ia jatuh ke "UPT wajib dipilih" dan menyimpan
-  // upt_id yang salah secara semantik untuk peran nasional.
-  function isNationalRole(f) { return f.role === "ADMIN_LOG_PUSAT"; }
-  async function submitAkunEdit() {
-    if (isDemoMode()) { showToast("Mode demo: manajemen akun dinonaktifkan.","error"); return; }
-    const f = akunForm;
-    if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
-    if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
-    const national = isNationalRole(f);
-    const uitScoped = isUitScopedRole(f);
-    if (national) { /* lingkup nasional — tidak memilih UPT maupun UIT */ }
-    else if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
-    else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
-    if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
-    if (f.password && f.password.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
-    setAkunBusy(true);
-    const { data, error } = await supabase.functions.invoke("admin-update-user", { body: {
-      userId: f.id, name: f.name.trim(), role: f.role, jabatan: f.jabatan||"",
-      uptId: (national || uitScoped) ? "" : (f.uptId||""), ultgId: f.ultgId||"", uitId: uitScoped ? (f.uitId||"") : "",
-      pengadaanScope: f.pengadaanScope||"UPT", newPassword: f.password||"",
-      gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
-    }});
-    setAkunBusy(false);
-    if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal menyimpan perubahan akun.","error"); return; }
-    setAkunModal(null);
-    await reloadUsers();
-    logAudit(currentUser, "UPDATE", "akun", f.username, {nama:f.name, role:f.role});
-    showToast("✅ Akun berhasil diperbarui!");
-  }
-  async function submitAkunBaru() {
-    if (isDemoMode()) { showToast("Mode demo: manajemen akun dinonaktifkan.","error"); return; }
-    const f = akunForm;
-    if (!f.username?.trim()) { showToast("Username wajib diisi.","error"); return; }
-    if (!f.password || f.password.length < 6) { showToast("Password minimal 6 karakter.","error"); return; }
-    if (!f.name?.trim()) { showToast("Nama lengkap wajib diisi.","error"); return; }
-    if (!f.jabatan?.trim()) { showToast("Jabatan wajib diisi.","error"); return; }
-    const national = isNationalRole(f);
-    const uitScoped = isUitScopedRole(f);
-    if (national) { /* lingkup nasional — tidak memilih UPT maupun UIT */ }
-    else if (uitScoped) { if (!f.uitId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit UIT.`,"error"); return; } }
-    else { if (!f.uptId) { showToast("UPT wajib dipilih.","error"); return; } }
-    if ((f.role==="ADMIN_ULTG"||f.role==="MGR_ULTG") && !f.ultgId) { showToast(`Role ${ROLES[f.role]} wajib memilih unit ULTG.`,"error"); return; }
-    setAkunBusy(true);
-    const { data, error } = await supabase.functions.invoke("admin-create-user", { body: {
-      username: f.username.trim().toLowerCase(), password: f.password, name: f.name.trim(),
-      role: f.role, jabatan: f.jabatan||"", uptId: (national || uitScoped) ? "" : (f.uptId||""), ultgId: f.ultgId||"",
-      uitId: uitScoped ? (f.uitId||"") : "", pengadaanScope: f.pengadaanScope||"UPT",
-      gudangIds: (Array.isArray(f.gudangIds) && f.gudangIds.length) ? f.gudangIds : null, // null = semua gudang
-    }});
-    setAkunBusy(false);
-    if (error || !data?.ok) { showToast(data?.error || error?.message || "Gagal mendaftarkan akun.","error"); return; }
-    setAkunResult({username: f.username.trim().toLowerCase(), password: f.password});
-    await reloadUsers();
-    logAudit(currentUser, "CREATE", "akun", f.username.trim().toLowerCase(), {nama:f.name, role:f.role});
-    showToast("✅ Akun berhasil didaftarkan!");
-  }
-
-  // Ganti password mandiri (semua role, akun sendiri) — re-auth pakai password
-  // lama dulu (signInWithPassword) sebelum panggil updateUser, supaya device
-  // dengan sesi aktif yang lagi dipegang orang lain tidak bisa ganti password
-  // pemilik akun tanpa tahu password lamanya.
-  function openGantiPassword() {
-    setGantiPasswordForm({oldPassword:"", newPassword:"", confirmPassword:""});
-    setGantiPasswordModal(true);
-  }
-  async function submitGantiPassword() {
-    if (isDemoMode()) { showToast("Mode demo: ganti password dinonaktifkan.","error"); return; }
-    const f = gantiPasswordForm;
-    if (!f.oldPassword) { showToast("Password lama wajib diisi.","error"); return; }
-    if (!f.newPassword || f.newPassword.length < 6) { showToast("Password baru minimal 6 karakter.","error"); return; }
-    if (f.newPassword !== f.confirmPassword) { showToast("Konfirmasi password baru tidak cocok.","error"); return; }
-    setGantiPasswordBusy(true);
-    const { error: reauthErr } = await supabase.auth.signInWithPassword({
-      email: usernameToAuthEmail(currentUser.username), password: f.oldPassword,
-    });
-    if (reauthErr) {
-      setGantiPasswordBusy(false);
-      showToast("Password lama salah.","error");
-      return;
-    }
-    const { error: updateErr } = await supabase.auth.updateUser({ password: f.newPassword });
-    setGantiPasswordBusy(false);
-    if (updateErr) { showToast("Gagal mengubah password: "+updateErr.message,"error"); return; }
-    setGantiPasswordModal(false);
-    logAudit(currentUser, "UPDATE", "akun", currentUser.username, {gantiPassword:true});
-    showToast("✅ Password berhasil diubah!");
-  }
+  // Kelola Akun + ganti password mandiri → dipindah ke src/hooks/useAccountAdmin.js
 
   // Pulihkan sesi Supabase Auth yang tersimpan saat app dibuka (reload, buka
   // tab baru, dst), dan dengarkan event login/logout — satu listener ini
@@ -1615,6 +1640,14 @@ export default function PLNWarehouse() {
     if (currentUser && tab !== "dashboard" && !can(currentUser, "menu." + tab, rolePerms)) setTab("dashboard");
   }, [tab, currentUser, rolePerms]);
 
+  // Role ULTG cuma punya subnav Reservasi (TUG5). Default state app = penerimaan/TUG3
+  // → refresh di tab TUG menampilkan TUG-3/10 yang tidak relevan. Clamp ke permintaan/TUG5.
+  useEffect(() => {
+    if (!currentUser || !ULTG_ROLES.includes(currentUser.role)) return;
+    if (tugGroup !== "permintaan") setTugGroup("permintaan");
+    if (tugSubTab !== "TUG5") setTugSubTab("TUG5");
+  }, [currentUser, tugGroup, tugSubTab]);
+
   // Refresh transaksi TUG canonical dari server tiap kali tab Approval dibuka.
   // tug_transactions TIDAK punya realtime subscription (beda dari stocks) dan cuma
   // di-load sekali saat login — kalau approver lain (mis. TL) baru approve di
@@ -1675,33 +1708,7 @@ export default function PLNWarehouse() {
   }, [docPreview]);
 
   // ── Stock CRUD ──
-  // ── MASTER KATALOG BARANG CRUD ──
-  function openAddKatalog() {
-    setKatalogForm({ id:`KAT-${uid().slice(-6)}`, katalog:"", name:"", category:"Lainnya", satuan:"unit" });
-    setKatalogModal("add");
-  }
-  function openEditKatalog(k) { setKatalogForm({...k}); setKatalogModal("edit"); }
-  async function saveKatalog() {
-    if (!katalogForm.name?.trim()) { showToast("Nama barang tidak boleh kosong!","error"); return; }
-    if (!katalogForm.katalog?.trim()) { showToast("Nomor Katalog tidak boleh kosong!","error"); return; }
-    // Cegah duplikat: 1 barang fisik seharusnya cuma punya 1 katalogId. Kode katalog (nomor
-    // SAP) harus unik mutlak; nama juga dicek (case-insensitive, exact match) karena barang
-    // yang sama sering ke-input dobel dengan kode beda kalau tidak dicek di sini.
-    const kodeDup = katalogList.find(k => k.id!==katalogForm.id && (k.katalog||"").trim().toLowerCase()===katalogForm.katalog.trim().toLowerCase());
-    if (kodeDup) { showToast(`Nomor Katalog "${katalogForm.katalog}" sudah dipakai oleh "${kodeDup.name}"!`, "error"); return; }
-    const namaDup = katalogList.find(k => k.id!==katalogForm.id && (k.name||"").trim().toLowerCase()===katalogForm.name.trim().toLowerCase());
-    if (namaDup) { showToast(`Nama barang "${katalogForm.name}" sudah ada (kode ${namaDup.katalog||"-"}). Kalau ini barang yang sama, edit yang sudah ada — jangan buat baru.`, "error"); return; }
-    // _maraLocked cuma flag UI (kunci form), bukan bagian data katalog — jangan ikut tersimpan.
-    const { _maraLocked, ...katalogClean } = katalogForm;
-    let nk;
-    if (katalogModal==="edit") nk = katalogList.map(k=>k.id===katalogForm.id?{...katalogClean}:k);
-    else nk = [...katalogList, {...katalogClean, createdAt:Date.now()}];
-    setKatalogList(nk); setKatalogModal(null);
-    // Cuma 1 baris katalog berubah (edit/tambah id===katalogForm.id) — sync ringan baris itu.
-    await saveToCloud({katalogList: nk}, {katalogChangedRows: nk.filter(k=>k.id===katalogForm.id)});
-    logAudit(currentUser, katalogModal==="edit"?"UPDATE":"CREATE", "katalog", katalogClean.katalog||katalogClean.id, {kode:katalogClean.katalog, nama:katalogClean.name});
-    showToast(katalogModal==="edit" ? "Master Katalog diupdate!" : "Katalog barang baru ditambahkan!");
-  }
+  // ── MASTER KATALOG BARANG CRUD ── (openAdd/openEdit/save/delete di useMasterDataCrud.jsx)
   async function searchMaraCatalog(q) {
     setMaraSearch(q);
     if (!q || q.trim().length < 2) { setMaraSearchResults([]); return; }
@@ -1774,404 +1781,8 @@ export default function PLNWarehouse() {
     }
     setMaraUploadLoading(false);
   }
-  async function deleteKatalog(id) {
-    if (stocks.some(s=>s.katalogId===id)) { showToast("Tidak bisa hapus: katalog ini masih dipakai di Data Stok!","error"); return; }
-    const k = katalogList.find(x=>x.id===id);
-    askConfirmDelete({
-      title: "Hapus Katalog Barang?",
-      message: <>Apakah Anda yakin ingin menghapus katalog barang <b>{k?.name||"-"}</b> (No. Katalog {k?.katalog||"-"})?</>,
-      warning: "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const nk = katalogList.filter(x=>x.id!==id);
-        setKatalogList(nk); await saveToCloud({katalogList: nk});
-        logAudit(currentUser, "DELETE", "katalog", k?.katalog||id, {nama:k?.name});
-        showToast("Katalog dihapus.");
-      }
-    });
-  }
-
-  // ── MASTER LOKASI GUDANG CRUD ──
-  // Tambah/edit/hapus blok lokasi langsung berlaku, tanpa approval siapapun —
-  // menu ini cuma bisa diakses ADMIN (lihat gating hasRole di render Master
-  // Gudang), jadi tidak perlu alur PENDING/approval TL lagi (permintaan user 2026-07-09).
-  // Tambah Blok manual (modal tanpa denah) sudah dihapus — blok baru sekarang HANYA
-  // ditambahkan lewat "Kelola Denah & Koordinat" (klik titik di denah), jadi tiap blok
-  // dijamin punya koordinat. Modal Lokasi tinggal dipakai untuk EDIT saja.
-  function openEditLokasi(l) { setLokasiForm({...l}); setLokasiModal("edit"); }
-
-  // Cek kode blok sudah dipakai DI SUB GUDANG yang sama (termasuk usulan pending EDIT lain).
-  // Kode boleh sama antar Sub Gudang berbeda (mis. Blok A di Sub Gudang Terbuka & Tertutup itu
-  // wajar) — jadi scope duplikat = gudang yang sama DAN sub gudang yang sama (null=grup "Umum").
-  // Blok tanpa gudangId (belum di-assign) tidak dicek silang, karena belum "di dalam" gudang manapun.
-  function isKodeDuplicateInSubGudang(kode, gudangId, subGudangId, excludeId) {
-    if (!gudangId || !kode?.trim()) return false;
-    const norm = kode.trim().toLowerCase();
-    const sub = subGudangId || null;
-    return lokasiList.some(l => {
-      if (l.id === excludeId) return false;
-      if (l.gudangId !== gudangId) return false;
-      if ((l.subGudangId || null) !== sub) return false;
-      if (l.pendingAction === "DELETE") return false;
-      const kodeAktif = (l.pendingAction === "EDIT" && l.pendingData?.kode) ? l.pendingData.kode : l.kode;
-      return (kodeAktif||"").trim().toLowerCase() === norm;
-    });
-  }
-
-  function syncLokasi(nl) { return syncMasterTable("lokasi", nl, l => ({ gudang_id: l.gudangId || null, status: l.status || null })); }
-
-  async function saveLokasi() {
-    if (!lokasiForm.gudangId) { showToast("Pilih Gudang dulu sebelum mengisi Blok! Data harus berjenjang: Gudang → Blok.","error"); return; }
-    if (!lokasiForm.kode?.trim()) { showToast("Kode Lokasi tidak boleh kosong!","error"); return; }
-    if (isKodeDuplicateInSubGudang(lokasiForm.kode, lokasiForm.gudangId, lokasiForm.subGudangId, lokasiModal==="edit"?lokasiForm.id:null)) {
-      showToast(`Kode blok "${lokasiForm.kode}" sudah dipakai di sub gudang ini!`,"error"); return;
-    }
-    let nl;
-    if (lokasiModal==="edit") {
-      nl = lokasiList.map(l => l.id===lokasiForm.id ? { ...l, ...lokasiForm, status:"APPROVED", pendingAction:null, pendingData:null } : l);
-    } else {
-      const baru = { ...lokasiForm, createdAt:Date.now(), status:"APPROVED", pendingAction:null, requestedBy:currentUser.id, requestedAt:Date.now() };
-      nl = [...lokasiList, baru];
-    }
-    const prevList = lokasiList;
-    setLokasiList(nl); setLokasiModal(null);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, perubahan Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    logAudit(currentUser, lokasiModal==="edit"?"UPDATE":"CREATE", "lokasi", lokasiForm.kode, {kode:lokasiForm.kode});
-    showToast(lokasiModal==="edit" ? "Master Lokasi diupdate!" : "Lokasi gudang baru ditambahkan!");
-  }
-  // Buka popup konfirmasi hapus blok gudang (bukan langsung hapus) —
-  // tombol pemanggil hanya dirender untuk role ADMIN.
-  function requestDeleteLokasi(l) {
-    if (stocks.some(s=>s.lokasiId===l.id)) { showToast("Tidak bisa hapus: lokasi ini masih dipakai di Data Stok!","error"); return; }
-    setLokasiDeleteConfirm(l);
-  }
-  async function confirmDeleteLokasi() {
-    const l = lokasiDeleteConfirm;
-    if (!l) return;
-    const prevList = lokasiList;
-    const nl = lokasiList.filter(x=>x.id!==l.id);
-    setLokasiList(nl); setLokasiDeleteConfirm(null);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menghapus di server, Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    logAudit(currentUser, "DELETE", "lokasi", l.kode, {kode:l.kode});
-    showToast("Lokasi dihapus.");
-  }
-
-  // Nama UPT → id UPT (FK upt.id). Master UPT bisa belum termuat, jadi jatuh ke DEFAULT_UPT_LIST.
-  function uptIdByNama(nama) {
-    return (uptList.length ? uptList : DEFAULT_UPT_LIST).find(item => item.nama === nama)?.id || "";
-  }
-
-  // Gate tulis Maturity — cerminan persis policy "Maturity audits update by stage":
-  // pelaku ditentukan oleh status BARIS SAAT INI, bukan status tujuan.
-  //   DRAFT/SELF_ASSESSMENT/REVISION → ADMIN/TL UPT-nya (can_write_maturity_upt)
-  //   REVIEW_UIT                     → ADMIN_UIT/ASMAN_LOG_UIT/MGR_LOGISTIK_UIT (can_review_maturity_uit)
-  //   REVIEW_PUSAT/FINAL             → ADMIN_LOG_PUSAT (can_review_maturity_pusat)
-  // SUPERADMIN lolos di semua jenjang (hasRole), sama seperti helper SQL-nya —
-  // tanpa itu audit yang macet di meja UIT tidak bisa ditolong siapa pun.
-  // Dicek di klien supaya penolakan server tidak muncul sebagai
-  // "server tidak dapat dihubungi".
-  // `status` null = aksi di luar jenjang audit (asesmen/5S/hapus) → tetap ADMIN/TL.
-  function guardMaturityWrite(aksi, status = null) {
-    if (isDemoMode()) { showToast(`Mode demo: ${aksi} tidak disimpan ke server.`, "error"); return false; }
-    if (status === "REVIEW_UIT") {
-      if (hasRole(currentUser, "ADMIN_UIT", "ASMAN_LOG_UIT", "MGR_LOGISTIK_UIT")) return true; // hasRole = SUPERADMIN ikut lolos (lihat can_review_maturity_uit)
-      showToast(`Audit ada di tahap Review UIT — hanya Admin / Asman / Manager Logistik UIT yang boleh ${aksi}.`, "error");
-      return false;
-    }
-    if (status === "REVIEW_PUSAT" || status === "FINAL") {
-      if (hasRole(currentUser, "ADMIN_LOG_PUSAT")) return true;
-      showToast(`Audit ada di tahap Pusat — hanya Admin Logistik Pusat yang boleh ${aksi}.`, "error");
-      return false;
-    }
-    if (!hasRole(currentUser, "ADMIN", "TL")) { showToast(`Hanya Admin Gudang / TL Logistik yang boleh ${aksi}.`, "error"); return false; }
-    return true;
-  }
-
-  // Simpan 1 entri baru riwayat Maturity Level Gudang (khusus Admin, input manual)
-  async function saveMaturityAssessment(form) {
-    if (!guardMaturityWrite("menyimpan Asesmen Maturity")) return false;
-    const entry = { id:`MAT-${uid().slice(-8)}`, level:form.level, catatan:form.catatan||"", tanggalAsesmen:form.tanggalAsesmen||Date.now(), createdBy:currentUser.id, createdAt:Date.now() };
-    const saved = await upsertMaturityAssessment(entry);
-    if (!saved) {
-      showToast("Asesmen Maturity tidak tersimpan karena server tidak dapat dihubungi.", "error");
-      return false;
-    }
-    setMaturityAssessments(current => [entry, ...current.filter(item => item.id !== entry.id)]);
-    logAudit(currentUser, "CREATE", "maturity_assessment", entry.id, { level: entry.level });
-    showToast("✅ Asesmen Maturity Level disimpan!");
-  }
-
-  // ─── Penilaian Maturity — audit berjenjang (UPT → UIT → Pusat) ─────────
-  // Skor per-aspek: dari rasio bukti ter-upload, atau override manual UIT/Pusat.
-  // Form 5S bersifat append-only supaya audit ulang pada periode yang sama
-  // tetap mempunyai jejak tersendiri. State/cache baru diperbarui setelah
-  // INSERT self-host berhasil, bukan ketika pengguna hanya menekan tombol.
-  async function saveMaturity5SAssessment(form) {
-    if (!guardMaturityWrite("mengisi Form 5S")) return null;
-    const uptNama = form.upt || selectedMaturityUpt || "UPT Surabaya";
-    const entry = {
-      ...form,
-      id: `M5S-${uid().slice(-10)}`,
-      upt: uptNama,
-      // Wajib: kolom upt_id jadi NOT NULL + RLS per-UPT di GELOMBANG B.
-      uptId: form.uptId || uptIdByNama(uptNama) || currentUserUptId || currentUser?.uptId || "",
-      createdAt: Date.now(),
-      createdBy: currentUser?.id || null,
-    };
-    const saved = await insertMaturity5SAssessment(entry);
-    if (!saved) {
-      showToast("Checklist 5S belum tersimpan karena server tidak dapat dihubungi.", "error");
-      return null;
-    }
-    setMaturity5SAssessments(current => {
-      const next = [saved, ...current.filter(item => item.id !== saved.id)];
-      CLOUD.set("pln_maturity_5s_assessments_v1", next);
-      return next;
-    });
-    logAudit(currentUser, "CREATE", "maturity_5s_assessment", saved.id, {
-      upt: saved.upt, gudang: saved.gudangNama, tahun: saved.tahun,
-      bulan: saved.bulan, scorePercent: saved.scorePercent,
-    });
-    return saved;
-  }
-
-  function getCurrentMonth5SEvidence(upt) {
-    const nowD = new Date();
-    const latest = maturity5SAssessments
-      .filter(item => (item.upt || "UPT Surabaya") === (upt || selectedMaturityUpt || "UPT Surabaya")
-        && item.tahun === nowD.getFullYear() && item.bulan === nowD.getMonth() + 1)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    if (!latest) return [];
-    const savedAt = latest.createdAt || Date.now();
-    const timestamp = new Date(savedAt).toLocaleString("id-ID");
-    const user = latest.auditor || "Pengguna";
-    const checklistEvidence = {
-      id: "k3_5s_chk",
-      name: `Checklist 5S — ${latest.gudangNama || "Gudang"}, ${latest.bulan}/${latest.tahun} (${Number(latest.scorePercent || 0).toFixed(1)}%)`,
-      url: `#form-5s-history-${latest.id}`,
-      size: 0,
-      auto: true,
-      source: "Form Pengisian 5S",
-      assessment5SId: latest.id,
-      meta: `Diisi oleh: ${user} | Skor: ${Number(latest.scorePercent || 0).toFixed(2)}% (${latest.totalChecked}/${latest.totalItems}) | Disimpan: ${timestamp}`,
-      savedAt,
-    };
-    const photos = (latest.samplePhotos || []).map((photo, index) => ({
-      id: "k3_5s_foto",
-      name: `Foto Sampling 5S ${index + 1} — ${photo.name || "Foto"}`,
-      url: photo.url,
-      size: photo.size || 0,
-      auto: true,
-      source: "Form Pengisian 5S",
-      assessment5SId: latest.id,
-      meta: `Referensi Form 5S: ${latest.id} | Disimpan: ${timestamp}`,
-    }));
-    return [checklistEvidence, ...photos];
-  }
-
-  function mergeCurrentMonth5SEvidence(evidence, upt) {
-    const existing = Object.entries(evidence || {}).reduce((next, [aspectId, files]) => {
-      next[aspectId] = Array.isArray(files) ? [...files] : [];
-      return next;
-    }, {});
-    const current5S = getCurrentMonth5SEvidence(upt);
-    if (!current5S.length) return existing;
-    // Bukti otomatis 5S mewakili rekam periode berjalan yang paling baru;
-    // bukti manual 4.5 tetap utuh. Ini mencegah skor maturity menghitung
-    // beberapa Form 5S sebagai evidence yang berbeda.
-    const nonCurrent5S = (existing["4.5"] || []).filter(file => file?.source !== "Form Pengisian 5S");
-    return { ...existing, "4.5": [...current5S, ...nonCurrent5S] };
-  }
-
-  function calculateItemLevel(uploadedCount, totalRequired) {
-    if (uploadedCount === 0) return 1;
-    if (uploadedCount === totalRequired) return 5;
-    const ratio = uploadedCount / totalRequired;
-    if (ratio < 0.35) return 2;
-    if (ratio < 0.7) return 3;
-    return 4;
-  }
-  function createMaturityAudit() {
-    // Batasi 1 audit baru per bulan kalender per UPT
-    const nowD = new Date();
-    const existingAudit = maturityAudits.find(a => {
-      if ((a.upt || "UPT Surabaya") !== selectedMaturityUpt) return false;
-      const d = new Date(a.createdAt);
-      return d.getMonth() === nowD.getMonth() && d.getFullYear() === nowD.getFullYear();
-    });
-    if (existingAudit) {
-      showToast(`⚠️ UPT ini sudah punya audit bulan ini (dibuat ${fmtDateOnly(existingAudit.createdAt)}). Audit baru cuma bisa dibuat 1x per bulan.`, "error");
-      return;
-    }
-    const scores = {};
-    AUDIT_ASPECTS.forEach(a => { scores[a.id] = { upt:0, uit:0, pusat:0 }; });
-    setMaturityAuditForm({ aspekScores: scores, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
-    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence({}, selectedMaturityUpt));
-    setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
-    setActiveAspectId(null);
-    setAspectPage(1);
-    // ID dibuat saat draft dibuka agar evidence Google Drive dapat memiliki
-    // stable key sebelum tombol Simpan Audit ditekan; record audit tetap hanya
-    // dipersist ketika alur Simpan yang ada dijalankan.
-    setMaturityAuditModal({ id: `MA-${uid().slice(-8)}`, isNew:true, upt: selectedMaturityUpt, createdAt: Date.now() });
-    setMaturitySubTab("pelaksanaan");
-  }
-  function openMaturityAudit(audit) {
-    setMaturityAuditForm({ aspekScores: JSON.parse(JSON.stringify(audit.aspekScores || {})), catatanUPT: audit.catatanUPT || "", catatanUIT: audit.catatanUIT || "", catatanPusat: audit.catatanPusat || "", fileUrl: audit.fileUrl || "", fileNama: audit.fileNama || "" });
-    setMaturityAuditEvidence(mergeCurrentMonth5SEvidence(JSON.parse(JSON.stringify(audit.evidence || {})), audit.upt));
-    setExpandedAspek(AUDIT_CATEGORIES[0]?.id || null);
-    setActiveAspectId(null);
-    setAspectPage(1);
-    setMaturityAuditModal(audit);
-  }
-  // Skor akhir: getScore pilih pusat>uit>upt(rasio bukti), rata 5 kategori,
-  // A = avg(5 kategori)*0.75 + B = avg(sarana_prasarana,k3,teknologi)*0.25;
-  // level dibucket dari threshold 1.5 / 2.5 / 3.5 / 4.5.
-  function calcMaturityScore(scores = {}, evidence = {}) {
-    const getAspectScore = (a) => {
-      const centerscore = scores[a.id]?.pusat || 0;
-      if (centerscore > 0) return centerscore;
-      const uitscore = scores[a.id]?.uit || 0;
-      if (uitscore > 0) return uitscore;
-      const uptscore = scores[a.id]?.upt || 0;
-      if (uptscore > 0) return uptscore;
-      const uploadedCount = (evidence[a.id] || []).length;
-      return calculateItemLevel(uploadedCount, a.requiredEvidence.length);
-    };
-    const getCatAvg = (catId) => {
-      const catAspects = AUDIT_ASPECTS.filter(a => a.category === catId);
-      if (catAspects.length === 0) return 0;
-      const sum = catAspects.reduce((acc, a) => acc + getAspectScore(a), 0);
-      return sum / catAspects.length;
-    };
-    const c1 = getCatAvg("tata_kelola");
-    const c2 = getCatAvg("tenaga_kerja");
-    const c3 = getCatAvg("sarana_prasarana");
-    const c4 = getCatAvg("k3");
-    const c5 = getCatAvg("teknologi");
-    const itemA = ((c1 + c2 + c3 + c4 + c5) / 5) * 0.75;
-    const itemB = ((c3 + c4 + c5) / 3) * 0.25;
-    const total = itemA + itemB;
-    let level = 1;
-    if (total >= 4.5) level = 5;
-    else if (total >= 3.5) level = 4;
-    else if (total >= 2.5) level = 3;
-    else if (total >= 1.5) level = 2;
-    else level = 1;
-    return { c1, c2, c3, c4, c5, itemA, itemB, total, level };
-  }
-  function calcMaturityLevel(scores, evidence = {}) {
-    return calcMaturityScore(scores, evidence).level;
-  }
-  async function saveMaturityAudit(audit, newStatus) {
-    // Yang menentukan siapa boleh bertindak adalah status LAMA (klausa USING policy);
-    // audit baru belum punya baris di server, jadi diperlakukan sebagai DRAFT.
-    if (!guardMaturityWrite("menyimpan Audit Maturity", audit?.isNew ? "DRAFT" : (audit?.status || "DRAFT"))) return;
-    setMaturityAuditSaving(true);
-    try {
-      // Draft Drive sekarang sudah menerima ID stabil sebelum Simpan. ID saja
-      // bukan berarti record sudah ada di state/UI; bedakan dengan lookup
-      // canonical agar audit baru tetap masuk sebagai CREATE, bukan UPDATE.
-      const isExistingAudit = maturityAudits.some(item => item.id === audit?.id);
-      const { isNew: _isNew, ...auditData } = audit || {};
-      const scores = maturityAuditForm.aspekScores;
-      const scoreResult = calcMaturityScore(scores, maturityAuditEvidence);
-      const level = scoreResult.level;
-      const createdAt = auditData.createdAt || Date.now();
-      const createdDate = new Date(createdAt);
-      const periodKey = auditData.periodKey || `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, "0")}`;
-      const uptName = auditData.upt || selectedMaturityUpt || "UPT Surabaya";
-      const uptId = auditData.uptId || uptIdByNama(uptName) || null;
-      const entry = {
-        ...(isExistingAudit ? auditData : {}),
-        id: auditData.id || `MA-${uid().slice(-8)}`,
-        upt: uptName,
-        uptId,
-        status: newStatus,
-        level,
-        score: Number(scoreResult.total.toFixed(2)),
-        periodKey,
-        aspekScores: scores,
-        evidence: maturityAuditEvidence,
-        catatanUPT: maturityAuditForm.catatanUPT,
-        catatanUIT: maturityAuditForm.catatanUIT,
-        catatanPusat: maturityAuditForm.catatanPusat,
-        fileUrl: maturityAuditForm.fileUrl,
-        fileNama: maturityAuditForm.fileNama,
-        createdAt,
-        createdBy: auditData.createdBy || currentUser.id,
-        updatedAt: Date.now(),
-        updatedBy: currentUser.id,
-        history: [...(auditData.history || []), { action: newStatus, by: currentUser.id, at: Date.now() }],
-      };
-      const saved = await upsertMaturityAudit(entry);
-      if (!saved) {
-        showToast("Audit Maturity tidak tersimpan karena server tidak dapat dihubungi.", "error");
-        return;
-      }
-      setMaturityAudits(current => isExistingAudit ? current.map(a => a.id === entry.id ? entry : a) : [entry, ...current]);
-      logAudit(currentUser, isExistingAudit ? "UPDATE" : "CREATE", "maturity_audit", entry.id, { status: newStatus, level, upt: entry.upt });
-      if (newStatus === "FINAL") {
-        // Trigger DB menerbitkan baris history sendiri saat audit masuk FINAL,
-        // jadi state & cache klien langsung basi — muat ulang dari server.
-        const freshHistory = await loadMaturityAuditHistory();
-        if (freshHistory) {
-          setMaturityAuditHistory(freshHistory);
-          CLOUD.set("pln_maturity_audit_history_v1", freshHistory);
-        }
-      }
-      setMaturityAuditModal(null);
-      showToast(`Audit ${entry.upt} disimpan — ${MATURITY_WORKFLOW_LABEL[newStatus]}${newStatus === "FINAL" ? " (Nilai Final)" : ""}`);
-    } finally { setMaturityAuditSaving(false); }
-  }
-  async function deleteMaturityAudit(id) {
-    if (!guardMaturityWrite("menghapus Audit Maturity")) return;
-    const audit = maturityAudits.find(a => a.id === id);
-    askConfirmDelete({
-      title: "Hapus Riwayat Audit Maturity?",
-      message: <>Apakah Anda yakin ingin menghapus data audit maturity untuk <b>{audit?.upt || "UPT"}</b> (Level {audit?.level || "?"})?</>,
-      warning: "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const deleted = await deleteMaturityAuditRow(id);
-        if (!deleted) {
-          // Bisa gagal koneksi ATAU ditolak server (angka audit memang tidak
-          // boleh dihapus). Apa pun sebabnya, state TIDAK boleh ikut berubah.
-          showToast("Audit Maturity TIDAK dihapus — ditolak server atau server tidak dapat dihubungi. Data di server tetap utuh.", "error");
-          return;
-        }
-        setMaturityAudits(current => current.filter(a => a.id !== id));
-        logAudit(currentUser, "DELETE", "maturity_audit", id, { upt: audit?.upt });
-        showToast("Riwayat audit maturity berhasil dihapus.");
-        if (maturityAuditModal && maturityAuditModal.id === id) setMaturityAuditModal(null);
-      }
-    });
-  }
-  async function exportMaturityAuditExcel(audit) {
-    const XLSX = await import("xlsx");
-    const rows = [["Aspek ID", "Deskripsi", "Skor UPT", "Skor UIT", "Skor Pusat", "Evidence"]];
-    AUDIT_ASPECTS.forEach(a => {
-      const s = audit.aspekScores?.[a.id] || {};
-      const evi = audit.evidence?.[a.id] || [];
-      const uploadedCount = evi.length;
-      const uptScore = calculateItemLevel(uploadedCount, a.requiredEvidence.length);
-      rows.push([a.id, a.title, uptScore, s.uit || 0, s.pusat || 0, evi.map(e => e.name).join("; ") || "—"]);
-    });
-    rows.push([]);
-    rows.push(["Level Akhir", MATURITY_LEVELS[audit.level] || "—"]);
-    rows.push(["Status", MATURITY_WORKFLOW_LABEL[audit.status] || audit.status]);
-    rows.push(["Catatan UPT", audit.catatanUPT || ""]);
-    rows.push(["Catatan UIT", audit.catatanUIT || ""]);
-    rows.push(["Catatan Pusat", audit.catatanPusat || ""]);
-    rows.push(["Lampiran Umum", audit.fileNama || audit.fileUrl || ""]);
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Audit Maturity");
-    XLSX.writeFile(wb, `Audit_Maturity_${audit.id}.xlsx`);
-    showToast("File Excel berhasil didownload!");
-  }
+  // ── MASTER LOKASI GUDANG CRUD, Gudang/Sub Gudang CRUD, denah-tools, Kapasitas Gudang ──
+  // dipindah ke src/hooks/useWarehouseConfig.jsx (2026-08-09).
 
   // Catat 1 keputusan approval (disetujui/ditolak) ke riwayat — dipakai oleh
   // semua jenis approval non-TUG (TUG sudah punya jejaknya sendiri di txns).
@@ -2182,45 +1793,7 @@ export default function PLNWarehouse() {
     logAudit(currentUser, entry.decision==="REJECTED"?"REJECT":"APPROVE", entry.docType || entry.type || "approval", entry.refId ?? null, entry);
   }
 
-  // Approve/reject pengajuan perubahan blok lokasi (khusus role TL)
-  async function approveLokasiChange(id) {
-    const item = lokasiList.find(l=>l.id===id);
-    if (!item) return;
-    let nl;
-    if (item.pendingAction === "DELETE") {
-      nl = lokasiList.filter(l=>l.id!==id);
-    } else if (item.pendingAction === "EDIT") {
-      nl = lokasiList.map(l=>l.id===id ? {...l, ...item.pendingData, status:"APPROVED", pendingAction:null, pendingData:null, approvedBy:currentUser.id, approvedAt:Date.now()} : l);
-    } else {
-      nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, approvedBy:currentUser.id, approvedAt:Date.now()} : l);
-    }
-    const prevList = lokasiList;
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, approval Blok Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
-    await logApprovalHistory({type:"LOKASI", decision:"APPROVED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
-    showToast("✅ Perubahan Blok Lokasi disetujui.");
-  }
-  async function rejectLokasiChange(id) {
-    const item = lokasiList.find(l=>l.id===id);
-    if (!item) return;
-    let nl;
-    if (item.pendingAction === "ADD") {
-      nl = lokasiList.filter(l=>l.id!==id);
-    } else {
-      nl = lokasiList.map(l=>l.id===id ? {...l, status:"APPROVED", pendingAction:null, pendingData:null} : l);
-    }
-    const prevList = lokasiList;
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, penolakan Blok Lokasi DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    const aksiLabel = {ADD:"Tambah Blok Baru",EDIT:"Ubah Data Blok",DELETE:"Hapus Blok"}[item.pendingAction]||item.pendingAction;
-    await logApprovalHistory({type:"LOKASI", decision:"REJECTED", title:`${aksiLabel}: ${item.pendingAction==="EDIT"?item.pendingData?.kode:item.kode}`, requestedBy:item.requestedBy, requestedAt:item.requestedAt});
-    showToast("❌ Perubahan Blok Lokasi ditolak.");
-  }
+  // approveLokasiChange/rejectLokasiChange dipindah ke useApprovalHub (2026-08-10).
 
   // Approve/reject pengajuan pemindahan gudang Data Stok — 1 per 1, bukan bulk.
   async function approveStockMove(id) {
@@ -2421,8 +1994,8 @@ export default function PLNWarehouse() {
   // Cari barang dengan foto — dua mode:
   //  • "bentuk"   : embed foto query (Cohere image) → cocokkan ke stock_photo_embeddings
   //                 via RPC match_stock_photos (skor tertinggi per katalog, ≥75%, top 10).
-  //                 p_upt=null: WARNOTO saat ini single-UPT (Surabaya), semua embedding
-  //                 memang Surabaya. Saat multi-UPT nanti, isi p_upt sesuai UPT viewer.
+  //                 p_upt=null di RPC (katalog lintas-UPT); filter UPT client-side lewat
+  //                 allowedKatalog (katalog yang punya stok di scope efektif / stockUptFilter).
   //  • "nameplate": OCR.space baca teks nameplate di foto → cocokkan ke Master
   //                 Katalog (nomor katalog/nama/type/merk) DAN ke teks foto
   //                 nameplate tersimpan (fotoNameplateOcr) — matchNameplateAll.
@@ -2430,11 +2003,26 @@ export default function PLNWarehouse() {
     if (!photoSearchImg) return;
     setPhotoSearchLoading(true);
     try {
+      // Katalog hasil pencarian = master lintas-UPT. Filter benar = "katalog yang punya
+      // stok dalam scope efektif" (stockUptFilter kalau dipilih, else getScopeUptIds).
+      const uptOf = (s) => {
+        const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
+        return gid ? (gudangList.find(g => g.id === gid)?.uptId || null) : null;
+      };
+      const scope = getScopeUptIds(currentUser, uptList);
+      const allowedKatalog = new Set(
+        stocks
+          .filter(s => stockUptFilter ? uptOf(s) === stockUptFilter : inScopeUpt(uptOf(s), scope))
+          .map(s => String(s.katalog))
+          .filter(k => k && k !== "undefined" && k !== "null")
+      );
+      const keepInScope = (rows) => (rows || []).filter(r => allowedKatalog.has(String(r.katalog)));
+
       if (photoSearchMode === "nameplate") {
         const text = await ocrSpaceOCR(photoSearchImg);
         setPhotoSearchOcrText(text);
         setPhotoSearchResultMode("nameplate");
-        setPhotoSearchResults(matchNameplateAll(text, katalogList, stocks));
+        setPhotoSearchResults(keepInScope(matchNameplateAll(text, katalogList, stocks)));
         setPhotoSearchOpen(false);
       } else {
         if (!supabase) return;
@@ -2445,7 +2033,7 @@ export default function PLNWarehouse() {
         if (error) throw error;
         setPhotoSearchOcrText("");
         setPhotoSearchResultMode("bentuk");
-        setPhotoSearchResults(data || []);
+        setPhotoSearchResults(keepInScope(data || []));
         setPhotoSearchOpen(false);
       }
     } catch (e) {
@@ -2499,1099 +2087,19 @@ export default function PLNWarehouse() {
     showToast(`❌ Penghapusan ${st.name} ditolak.`);
   }
 
-  // ── Satpam CRUD ──
-  function openAddSatpam() { setSatpamForm({ id:"SP"+uid().slice(-6), name:"", telp:"", gudangId:"" }); setSatpamModal("add"); }
-  function openEditSatpam(sp) { setSatpamForm({...sp}); setSatpamModal("edit"); }
-  async function saveSatpam() {
-    if (!satpamForm.name?.trim()) { showToast("Nama Satpam tidak boleh kosong!","error"); return; }
-    const prevList = satpamList;
-    let nsp;
-    if (satpamModal==="edit") nsp = satpamList.map(s=>s.id===satpamForm.id?{...satpamForm}:s);
-    else nsp = [...satpamList, {...satpamForm, createdAt:Date.now()}];
-    setSatpamList(nsp); setSatpamModal(null);
-    const ok = await syncMasterTable("satpam", nsp);
-    if (!ok) { setSatpamList(prevList); showToast("Gagal menyimpan ke server, perubahan Satpam DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_satpam_v1", nsp);
-    logAudit(currentUser, satpamModal==="edit"?"UPDATE":"CREATE", "satpam", satpamForm.id, {nama:satpamForm.name});
-    showToast(satpamModal==="edit" ? "Data Satpam diupdate!" : "Satpam baru ditambahkan!");
-  }
-  async function deleteSatpam(id) {
-    const s = satpamList.find(x=>x.id===id);
-    askConfirmDelete({
-      title: "Hapus Data Satpam?",
-      message: <>Apakah Anda yakin ingin menghapus data Satpam <b>{s?.name||"-"}</b>?</>,
-      warning: "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const prevList = satpamList;
-        const nsp = satpamList.filter(x=>x.id!==id);
-        setSatpamList(nsp);
-        const ok = await syncMasterTable("satpam", nsp);
-        if (!ok) { setSatpamList(prevList); showToast("Gagal menghapus di server, data Satpam DIKEMBALIKAN. Coba lagi.","error"); return; }
-        CLOUD.set("pln_satpam_v1", nsp);
-        logAudit(currentUser, "DELETE", "satpam", id, {nama:s?.name});
-        showToast("Satpam dihapus.");
-      }
-    });
-  }
+  // ── Satpam / Tim Mutu / UIT / ULTG / UPT CRUD di useMasterDataCrud.jsx ──
 
-  // ── Master Tim Mutu CRUD (2 paket TETAP — hanya edit anggota, tidak tambah/hapus paket) ──
-  function openEditTimMutu(tm) { setTimMutuForm({...tm}); setTimMutuModal("edit"); }
-  async function saveTimMutu() {
-    const prevList = timMutuList;
-    const ntm = timMutuList.map(t=>t.id===timMutuForm.id?{...timMutuForm}:t);
-    setTimMutuList(ntm); setTimMutuModal(null);
-    const ok = await syncMasterTable("tim_mutu", ntm);
-    if (!ok) { setTimMutuList(prevList); showToast("Gagal menyimpan ke server, perubahan Tim Mutu DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_tim_mutu_v1", ntm);
-    logAudit(currentUser, "UPDATE", "tim_mutu", timMutuForm.id);
-    showToast("Paket Tim Mutu diupdate!");
-  }
-
-  // ── Master UIT CRUD ──
-  function openAddUIT() { setUitForm({id:"UIT-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", alamat:"", createdAt:Date.now()}); setUitModal("add"); }
-  function openEditUIT(u) { setUitForm({...u}); setUitModal("edit"); }
-  async function saveUIT() {
-    if (!uitForm.nama?.trim()||!uitForm.kode?.trim()) { showToast("Nama dan Kode UIT wajib diisi!","error"); return; }
-    const prevList = uitList;
-    const nu = uitModal==="add" ? [...uitList, uitForm] : uitList.map(u=>u.id===uitForm.id?uitForm:u);
-    setUitList(nu); setUitModal(null);
-    const ok = await syncMasterTable("uit", nu);
-    if (!ok) { setUitList(prevList); showToast("Gagal menyimpan ke server, perubahan UIT DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_uit_v1", nu);
-    logAudit(currentUser, uitModal==="add"?"CREATE":"UPDATE", "uit", uitForm.id, {nama:uitForm.nama, kode:uitForm.kode});
-    showToast(uitModal==="add"?"UIT ditambahkan!":"UIT diupdate!");
-  }
-  async function deleteUIT(id) {
-    const u = uitList.find(x=>x.id===id);
-    const uptCount = uptList.filter(p=>p.uitId===id).length;
-    askConfirmDelete({
-      title: "Hapus UIT?",
-      message: <>Apakah Anda yakin ingin menghapus UIT <b>{u?.nama||"-"}</b>?</>,
-      warning: uptCount>0 ? `Tindakan ini tidak bisa dibatalkan dan ada ${uptCount} UPT yang masih terhubung ke UIT ini.` : "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const prevList = uitList;
-        const nu = uitList.filter(x=>x.id!==id);
-        setUitList(nu);
-        const ok = await syncMasterTable("uit", nu);
-        if (!ok) { setUitList(prevList); showToast("Gagal menghapus di server, UIT DIBATALKAN. Coba lagi.","error"); return; }
-        CLOUD.set("pln_uit_v1", nu);
-        logAudit(currentUser, "DELETE", "uit", id, {nama:u?.nama});
-        showToast("UIT dihapus.");
-      }
-    });
-  }
-
-  // ── Master ULTG CRUD (unit di bawah UPT) ──
-  function syncUltg(nu) { return syncMasterTable("ultg", nu, u => ({ upt_id: u.parentUptId || null })); }
-  function openAddULTG(presetUptId) { setUltgForm({id:"ULTG-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", parentUptId: presetUptId || uptList[0]?.id||"", createdAt:Date.now()}); setUltgModal("add"); }
-  function openEditULTG(u) { setUltgForm({...u}); setUltgModal("edit"); }
-  async function saveULTG() {
-    if (!ultgForm.nama?.trim()||!ultgForm.kode?.trim()) { showToast("Nama dan Kode ULTG wajib diisi!","error"); return; }
-    if (!ultgForm.parentUptId) { showToast("Pilih UPT induk!","error"); return; }
-    const prevList = ultgList;
-    const nu = ultgModal==="add" ? [...ultgList, ultgForm] : ultgList.map(u=>u.id===ultgForm.id?ultgForm:u);
-    setUltgList(nu); setUltgModal(null);
-    const ok = await syncUltg(nu);
-    if (!ok) { setUltgList(prevList); showToast("Gagal menyimpan ke server, perubahan ULTG DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_ultg_v1", nu);
-    logAudit(currentUser, ultgModal==="add"?"CREATE":"UPDATE", "ultg", ultgForm.id, {nama:ultgForm.nama, kode:ultgForm.kode});
-    showToast(ultgModal==="add"?"ULTG ditambahkan!":"ULTG diupdate!");
-  }
-  async function deleteULTG(id) {
-    const u = ultgList.find(x=>x.id===id);
-    askConfirmDelete({
-      title: "Hapus ULTG?",
-      message: <>Apakah Anda yakin ingin menghapus ULTG <b>{u?.nama||"-"}</b>?</>,
-      warning: "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const prevList = ultgList;
-        const nu = ultgList.filter(x=>x.id!==id);
-        setUltgList(nu);
-        const ok = await syncUltg(nu);
-        if (!ok) { setUltgList(prevList); showToast("Gagal menghapus di server, ULTG DIBATALKAN. Coba lagi.","error"); return; }
-        CLOUD.set("pln_ultg_v1", nu);
-        logAudit(currentUser, "DELETE", "ultg", id, {nama:u?.nama});
-        showToast("ULTG dihapus.");
-      }
-    });
-  }
-
-  // ── Master UPT CRUD ──
-  function openAddUPT(presetUitId) { setUptForm({id:"UPT-"+uid().slice(-6).toUpperCase(), nama:"", kode:"", alamat:"", uitId: presetUitId || uitList[0]?.id||"", createdAt:Date.now()}); setUptModal("add"); }
-  function openEditUPT(u) { setUptForm({...u}); setUptModal("edit"); }
-  function syncUpt(nu) { return syncMasterTable("upt", nu, u => ({ uit_id: u.uitId || null })); }
-  async function saveUPT() {
-    if (!uptForm.nama?.trim()||!uptForm.kode?.trim()) { showToast("Nama dan Kode UPT wajib diisi!","error"); return; }
-    const prevList = uptList;
-    const nu = uptModal==="add" ? [...uptList, uptForm] : uptList.map(u=>u.id===uptForm.id?uptForm:u);
-    setUptList(nu); setUptModal(null);
-    const ok = await syncUpt(nu);
-    if (!ok) { setUptList(prevList); showToast("Gagal menyimpan ke server, perubahan UPT DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_upt_v1", nu);
-    logAudit(currentUser, uptModal==="add"?"CREATE":"UPDATE", "upt", uptForm.id, {nama:uptForm.nama, kode:uptForm.kode});
-    showToast(uptModal==="add"?"UPT ditambahkan!":"UPT diupdate!");
-  }
-  async function deleteUPT(id) {
-    const u = uptList.find(x=>x.id===id);
-    const ultgCount = ultgList.filter(g=>g.parentUptId===id).length;
-    askConfirmDelete({
-      title: "Hapus UPT?",
-      message: <>Apakah Anda yakin ingin menghapus UPT <b>{u?.nama||"-"}</b>?</>,
-      warning: ultgCount>0 ? `Tindakan ini tidak bisa dibatalkan dan ada ${ultgCount} ULTG yang masih terhubung ke UPT ini.` : "Tindakan ini tidak bisa dibatalkan.",
-      onConfirm: async () => {
-        const prevList = uptList;
-        const nu = uptList.filter(x=>x.id!==id);
-        setUptList(nu);
-        const ok = await syncUpt(nu);
-        if (!ok) { setUptList(prevList); showToast("Gagal menghapus di server, UPT DIBATALKAN. Coba lagi.","error"); return; }
-        CLOUD.set("pln_upt_v1", nu);
-        logAudit(currentUser, "DELETE", "upt", id, {nama:u?.nama});
-        showToast("UPT dihapus.");
-      }
-    });
-  }
-
-  // ── Master Gudang CRUD ──
-  const [gudangModal, setGudangModal] = useState(null);
-  const [maturityModal, setMaturityModal] = useState(false);
-  const [maturityForm, setMaturityForm] = useState({ level:3, catatan:"", tanggalAsesmen:Date.now() });
-  // ─── Penilaian Maturity (audit workflow) — UI state ───────────────────
-  const [maturitySubTab, setMaturitySubTab] = useState("dashboard"); // dashboard | pelaksanaan | history | 5s
-  // Peninjau lintas UPT saja. MANAGER dibuang: tiap UPT punya tepat satu MANAGER
-  // dan cakupannya HANYA UPT itu (keputusan user 2026-08-02).
-  const canSwitchMaturityUpt = hasRole(currentUser, "ADMIN_UIT","ASMAN_LOG_UIT","MGR_LOGISTIK_UIT","ADMIN_LOG_PUSAT","SUPERADMIN");
-  const [selectedMaturityUpt, setSelectedMaturityUpt] = useState(() => {
-    const match = (uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId);
-    return match?.nama || "UPT Surabaya";
-  });
-  // Scoping UI Maturity pakai id UPT (FK), bukan kecocokan string nama — nama di
-  // Master UPT bisa berbeda ejaan dengan nama yang tersimpan di baris audit.
-  const selectedMaturityUptId = uptIdByNama(selectedMaturityUpt);
-  const [maturityAuditModal, setMaturityAuditModal] = useState(null); // null | {isNew:true,...} (new) | auditObj (edit/review)
-  const [maturityAuditForm, setMaturityAuditForm] = useState({ aspekScores:{}, catatanUPT:"", catatanUIT:"", catatanPusat:"", fileUrl:"", fileNama:"" });
-  const [maturityAuditSaving, setMaturityAuditSaving] = useState(false);
-  const [maturityAuditEvidence, setMaturityAuditEvidence] = useState({}); // {aspekId: [{url,name,size,itemId,...}]}
-  const [expandedAspek, setExpandedAspek] = useState(null); // kategori aktif di editor
-  const [activeAspectId, setActiveAspectId] = useState(null);
-  const [aspectPage, setAspectPage] = useState(1);
-  const [auditListPage, setAuditListPage] = useState(1); // pagination "Daftar Audit Aktif" (5/hal)
-  useEffect(() => { setAuditListPage(1); }, [selectedMaturityUpt]);
-  const [gudangForm, setGudangForm] = useState({});
-  const [denahLoading, setDenahLoading] = useState(false);
-  const [mapConfigMode, setMapConfigMode] = useState(false);
-  const [mapConfigGudangId, setMapConfigGudangId] = useState(null);
-  const [pendingMapLokasi, setPendingMapLokasi] = useState(null);
-  const [expandedGudangId, setExpandedGudangId] = useState(null); // accordion: hanya 1 gudang terbuka sekaligus di Master Gudang
-  useEffect(() => { setShowGudangDenahTools(false); setSelectedSubGudangId(null); }, [expandedGudangId]);
+  // ── Master Gudang CRUD, wizard, Kapasitas Gudang, denah-tools ── dipindah ke
+  // src/hooks/useWarehouseConfig.jsx (2026-08-09).
   const [collapsedUitIds, setCollapsedUitIds] = useState(() => new Set()); // Struktur Organisasi: default semua UIT terbuka, per-item bisa ditutup (bukan accordion — beda dari Gudang, biasanya cuma 1-2 UIT jadi tidak perlu maksa 1 saja yang terbuka)
   const [orgSearch, setOrgSearch] = useState("");
-  const [gudangWizardStep, setGudangWizardStep] = useState(1); // 1=Data Gudang, 2=Upload Denah, 3=Tambah Blok (hanya untuk mode "add")
-  const [wizardBlokDraft, setWizardBlokDraft] = useState(null); // {kode,keterangan,kapasitas,xPct,yPct} saat klik titik di denah pada wizard step 3
-  const [manualAddMode, setManualAddMode] = useState(false); // mode "Tambah Blok Baru" di Konfigurasi Koordinat Blok: klik di peta menambah draft usulan (belum dikirim ke TL)
-  const [capacityReviewImportId, setCapacityReviewImportId] = useState(null); // import kapasitas gudang yang sedang direview Admin sebelum approve (ada kandidat Gudang baru)
-  const [capacityReviewCandidates, setCapacityReviewCandidates] = useState([]); // hasil previewCapacityGudangMatch untuk import di atas
-  const [capacityReviewDecisions, setCapacityReviewDecisions] = useState({}); // key "UPT|GUDANG" -> {action:"NEW"} | {action:"MAP",mappedGudangId}
-
-  function openAddGudang() { setGudangForm({id:"GDG-"+uid().slice(-6), nama:"", kode:"", alamat:"", uptId:uptList[0]?.id||"", denahImageData:null, denahUploadedAt:null, createdAt:Date.now()}); setGudangModal("add"); setGudangWizardStep(1); setWizardBlokDraft(null); }
-  function openEditGudang(g) { setGudangForm({...g}); setGudangModal("edit"); }
-  function closeGudangWizard() { setGudangModal(null); setGudangWizardStep(1); setWizardBlokDraft(null); }
-  function syncGudang(ng) { return syncMasterTable("gudang", ng, g => ({ upt_id: g.uptId || null })); }
-  function syncSubGudang(nsg) { return syncMasterTable("sub_gudang", nsg, sg => ({ gudang_id: sg.gudangId || null })); }
-
-  // Cari Master UPT yang cocok dengan label string UPT dari laporan kapasitas (fuzzy, uppercase)
-  function findMatchingUpt(uptLabel) {
-    const needle = String(uptLabel||"").trim().toUpperCase();
-    if (!needle) return null;
-    return uptList.find(u =>
-      String(u.nama||"").toUpperCase().includes(needle) ||
-      needle.includes(String(u.nama||"").toUpperCase().replace(/^UPT\s+/,"")) ||
-      String(u.kode||"").toUpperCase()===needle
-    ) || null;
-  }
-
-  // Auto-create/merge Master Gudang + Sub Gudang dari record kapasitas yang disetujui.
-  // Data yang sudah ada (manual atau dari import sebelumnya) TIDAK di-overwrite,
-  // hanya alamat kosong yang dilengkapi. UPT yang tidak match di-skip + dilaporkan.
-  // Pencocokan nama Gudang pakai normalizeGudangName (diperketat 2026-07-06 — lihat
-  // komentar di fungsi itu). `decisions` (opsional): map key "UPT|GUDANG" -> hasil
-  // konfirmasi manual Admin dari panel review (lihat startCapacityApproval) —
-  // { action:"MAP", mappedGudangId } artinya JANGAN buat Gudang baru, pakai yang
-  // sudah ada itu; { action:"NEW" } atau tidak ada entry sama sekali = perilaku lama
-  // (cocokkan otomatis via normalizeGudangName, baru buat baru kalau benar2 tidak ada).
-  function syncGudangCapacityToMasterGudang(records, decisions = {}) {
-    let gList = [...gudangList];
-    let sgList = [...subGudangList];
-    const created = [];
-    const createdSub = [];
-    const skippedNoUpt = [];
-    const uniqueRows = new Map(); // key: "UPT|GUDANG|SUBGUDANG" -> record
-    records.forEach(r => {
-      const key = `${r.upt}|${r.gudang}|${r.subGudang}`;
-      if (!uniqueRows.has(key)) uniqueRows.set(key, r);
-    });
-    uniqueRows.forEach(r => {
-      const uptMatch = findMatchingUpt(r.upt);
-      if (!uptMatch) { skippedNoUpt.push(`${r.upt} / ${r.gudang}`); return; }
-
-      const gudangKey = `${r.upt}|${r.gudang}`;
-      const decision = decisions[gudangKey];
-      let gudangEntry = decision?.action === "MAP"
-        ? gList.find(g => g.id === decision.mappedGudangId)
-        : gList.find(g => g.uptId===uptMatch.id && normalizeGudangName(g.nama)===normalizeGudangName(r.gudang));
-      if (gudangEntry) {
-        const patch = {};
-        if (!gudangEntry.alamat && r.alamat) patch.alamat = r.alamat;
-        if (gudangEntry.lat == null && r.latitude != null) patch.lat = r.latitude;
-        if (gudangEntry.lng == null && r.longitude != null) patch.lng = r.longitude;
-        if (Object.keys(patch).length) {
-          gList = gList.map(g => g.id===gudangEntry.id ? {...g, ...patch} : g);
-          gudangEntry = {...gudangEntry, ...patch};
-        }
-      } else {
-        gudangEntry = {
-          id: `GDG-CAP-${r.upt}-${r.gudang}`.replace(/\s+/g,"-").toUpperCase(),
-          nama: r.gudang, kode: "", alamat: r.alamat||"", uptId: uptMatch.id,
-          lat: r.latitude ?? null, lng: r.longitude ?? null,
-          denahImageData: null, denahUploadedAt: null, createdAt: Date.now(),
-          sourceCapacityImport: true,
-        };
-        gList.push(gudangEntry);
-        created.push(r.gudang);
-      }
-
-      if (!r.subGudang) return;
-      const existingSub = sgList.find(sg => sg.gudangId===gudangEntry.id && normalizeGudangName(sg.nama)===normalizeGudangName(r.subGudang));
-      if (!existingSub) {
-        sgList.push({
-          id: `SGD-CAP-${r.upt}-${r.gudang}-${r.subGudang}`.replace(/\s+/g,"-").toUpperCase(),
-          nama: r.subGudang, gudangId: gudangEntry.id, createdAt: Date.now(),
-          sourceCapacityImport: true,
-        });
-        createdSub.push(r.subGudang);
-      }
-    });
-    return { gList, sgList, created, createdSub, skippedNoUpt };
-  }
-
-  // Preview (read-only, tidak mengubah apa pun) — dipakai SEBELUM approve untuk deteksi
-  // baris mana yang bakal jadi Gudang BARU kalau langsung di-approve, supaya Admin bisa
-  // konfirmasi dulu satu-satu ("ini memang Gudang baru" vs "ini sebenarnya Gudang X yang
-  // sudah ada, cuma beda tulisan") — permintaan user 2026-07-06 supaya duplikat Gudang
-  // dari import tidak terus berulang.
-  function previewCapacityGudangMatch(records) {
-    const seen = new Set();
-    const newCandidates = [];
-    records.forEach(r => {
-      const gudangKey = `${r.upt}|${r.gudang}`;
-      if (seen.has(gudangKey)) return;
-      seen.add(gudangKey);
-      const uptMatch = findMatchingUpt(r.upt);
-      if (!uptMatch) return; // sudah dilaporkan terpisah sebagai skippedNoUpt saat approve
-      const existing = gudangList.find(g => g.uptId===uptMatch.id && normalizeGudangName(g.nama)===normalizeGudangName(r.gudang));
-      if (existing) return;
-      newCandidates.push({
-        key: gudangKey, upt: r.upt, gudang: r.gudang, uptId: uptMatch.id,
-        suggestions: suggestSimilarGudang(r.gudang, uptMatch.id, gudangList),
-      });
-    });
-    return newCandidates;
-  }
-
-  // Sinkron ulang koordinat lat/lng + alamat Master Gudang dari data Kapasitas Gudang yang
-  // sudah live (gudangCapacityList) — dipakai saat data lama sudah live tapi lat/lng belum
-  // sempat ikut ke Master Gudang (mis. dibuat sebelum field koordinat ditambahkan).
-  async function backfillGudangCoordFromCapacity() {
-    if (!gudangCapacityList.length) { showToast("Belum ada data Kapasitas Gudang live.", "error"); return; }
-    const prevGudangList = gudangList;
-    const prevSubGudangList = subGudangList;
-    const { gList: newGudangList, sgList: newSubGudangList } = syncGudangCapacityToMasterGudang(gudangCapacityList);
-    setGudangList(newGudangList);
-    setSubGudangList(newSubGudangList);
-    const okG = await syncGudang(newGudangList);
-    const okSG = okG && await syncSubGudang(newSubGudangList);
-    if (!okG || !okSG) {
-      setGudangList(prevGudangList); setSubGudangList(prevSubGudangList);
-      showToast("Gagal menyimpan ke server, sinkronisasi koordinat Gudang DIBATALKAN. Coba lagi.","error");
-      return;
-    }
-    CLOUD.set("pln_gudang_v1", newGudangList);
-    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
-    showToast("✅ Koordinat & data Master Gudang disinkron ulang dari Kapasitas Gudang.", "success");
-  }
-
-  // Gabungkan Gudang/Sub Gudang duplikat (nama sama, ID beda — biasanya karena satu dibuat manual
-  // dan satu lagi otomatis dari import Kapasitas Gudang). Ini penyebab umum denah/koordinat "hilang":
-  // datanya nyasar ke ID duplikat yang sedang tidak ditampilkan. Blok Lokasi & Sub Gudang direassign
-  // ke ID "primary" yang dipilih (prioritas: sudah punya denah > sudah punya koordinat > paling lama).
-  async function dedupeGudangDanSubGudang(silent = false) {
-    const norm = s => String(s||"").trim().toUpperCase().replace(/\s+/g," ");
-    let newGudangList = [...gudangList];
-    let newSubGudangList = [...subGudangList];
-    let newLokasiList = [...lokasiList];
-    let mergedGudang = 0, mergedSub = 0;
-
-    const gGroups = new Map();
-    gudangList.forEach(g => {
-      const key = `${g.uptId||""}|${norm(g.nama)}`;
-      if (!gGroups.has(key)) gGroups.set(key, []);
-      gGroups.get(key).push(g);
-    });
-    gGroups.forEach(list => {
-      if (list.length <= 1) return;
-      mergedGudang += list.length - 1;
-      const primary = [...list].sort((a,b) => {
-        const scoreA = (a.denahImageData?2:0)+(a.lat!=null?1:0);
-        const scoreB = (b.denahImageData?2:0)+(b.lat!=null?1:0);
-        if (scoreA !== scoreB) return scoreB - scoreA;
-        return (a.createdAt||0) - (b.createdAt||0);
-      })[0];
-      const losers = list.filter(g=>g.id!==primary.id);
-      const loserIds = new Set(losers.map(g=>g.id));
-      let merged = {...primary};
-      losers.forEach(l => {
-        if (!merged.denahImageData && l.denahImageData) { merged.denahImageData=l.denahImageData; merged.denahUploadedAt=l.denahUploadedAt; merged.denahOcrWords=l.denahOcrWords; }
-        if (merged.lat == null && l.lat != null) { merged.lat=l.lat; merged.lng=l.lng; }
-        if (!merged.alamat && l.alamat) merged.alamat = l.alamat;
-        if (!merged.kode && l.kode) merged.kode = l.kode;
-      });
-      newGudangList = newGudangList.filter(g=>!loserIds.has(g.id)).map(g=>g.id===primary.id?merged:g);
-      newLokasiList = newLokasiList.map(l => loserIds.has(l.gudangId) ? {...l, gudangId: primary.id} : l);
-      newSubGudangList = newSubGudangList.map(sg => loserIds.has(sg.gudangId) ? {...sg, gudangId: primary.id} : sg);
-    });
-
-    const sgGroups = new Map();
-    newSubGudangList.forEach(sg => {
-      const key = `${sg.gudangId}|${norm(sg.nama)}`;
-      if (!sgGroups.has(key)) sgGroups.set(key, []);
-      sgGroups.get(key).push(sg);
-    });
-    sgGroups.forEach(list => {
-      if (list.length <= 1) return;
-      mergedSub += list.length - 1;
-      const primary = [...list].sort((a,b) => {
-        const scoreA = a.denahImageData?1:0, scoreB = b.denahImageData?1:0;
-        if (scoreA !== scoreB) return scoreB - scoreA;
-        return (a.createdAt||0) - (b.createdAt||0);
-      })[0];
-      const losers = list.filter(sg=>sg.id!==primary.id);
-      const loserIds = new Set(losers.map(sg=>sg.id));
-      let merged = {...primary};
-      losers.forEach(l => { if (!merged.denahImageData && l.denahImageData) { merged.denahImageData=l.denahImageData; merged.denahUploadedAt=l.denahUploadedAt; merged.denahOcrWords=l.denahOcrWords; } });
-      newSubGudangList = newSubGudangList.filter(sg=>!loserIds.has(sg.id)).map(sg=>sg.id===primary.id?merged:sg);
-      newLokasiList = newLokasiList.map(l => loserIds.has(l.subGudangId) ? {...l, subGudangId: primary.id} : l);
-    });
-
-    if (mergedGudang===0 && mergedSub===0) { if (!silent) showToast("Tidak ada Gudang/Sub Gudang duplikat ditemukan.", "success"); return; }
-
-    const prevGudangList = gudangList;
-    const prevSubGudangList = subGudangList;
-    const prevLokasiList = lokasiList;
-    setGudangList(newGudangList);
-    setSubGudangList(newSubGudangList);
-    setLokasiList(newLokasiList);
-    const okG = await syncGudang(newGudangList);
-    const okSG = okG && await syncSubGudang(newSubGudangList);
-    const okL = okSG && await syncLokasi(newLokasiList);
-    if (!okG || !okSG || !okL) {
-      setGudangList(prevGudangList); setSubGudangList(prevSubGudangList); setLokasiList(prevLokasiList);
-      showToast("Gagal menyimpan ke server, penggabungan Gudang/Sub Gudang duplikat DIBATALKAN. Coba lagi.","error");
-      return;
-    }
-    CLOUD.set("pln_gudang_v1", newGudangList);
-    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
-    CLOUD.set("pln_lokasi_v4", newLokasiList);
-    showToast(`✅ ${mergedGudang} Gudang duplikat & ${mergedSub} Sub Gudang duplikat digabungkan.`, "success");
-  }
-
-  async function approveCapacityImport(importId, decisions = {}) {
-    const imp = gudangCapacityImports.find(i=>i.id===importId);
-    if (!imp) return;
-    // id stabil per baris (UPT+Gudang+SubGudang) supaya upsert Supabase konsisten
-    // antar batch — kalau baris yang sama diimport ulang di batch berikutnya,
-    // dia menimpa dirinya sendiri (bukan duplikat), bukan menimpa baris lain.
-    const batchRecords = imp.records.map(r => ({
-      ...r,
-      id: r.id || `CAP-${r.upt}-${r.gudang}-${r.subGudang}`.replace(/\s+/g,"-").toUpperCase(),
-      importBatchId: imp.id,
-    }));
-    const newList = [...gudangCapacityList.filter(r => r.importBatchId !== imp.id), ...batchRecords];
-    const newImports = gudangCapacityImports.map(i => i.id===importId
-      ? {...i, status:"APPROVED", approvedBy:currentUser.id, approvedAt:Date.now()} : i);
-    const { gList: newGudangList, sgList: newSubGudangList, created, createdSub, skippedNoUpt } = syncGudangCapacityToMasterGudang(newList, decisions);
-    const prevGudangList = gudangList;
-    const prevSubGudangList = subGudangList;
-    setGudangCapacityList(newList);
-    setGudangCapacityImports(newImports);
-    setGudangList(newGudangList);
-    setSubGudangList(newSubGudangList);
-    await saveToCloud({ gudangCapacityList: newList, gudangCapacityImports: newImports });
-    const okG = await syncGudang(newGudangList);
-    const okSG = okG && await syncSubGudang(newSubGudangList);
-    if (!okG || !okSG) {
-      setGudangList(prevGudangList); setSubGudangList(prevSubGudangList);
-      showToast("Gagal menyimpan Master Gudang/Sub Gudang ke server, coba approve ulang.","error");
-      return;
-    }
-    CLOUD.set("pln_gudang_v1", newGudangList);
-    CLOUD.set("pln_sub_gudang_v1", newSubGudangList);
-    await logApprovalHistory({ type:"KAPASITAS_GUDANG_IMPORT", refId:imp.id, decision:"APPROVED", note:`${imp.sourceFile} — ${newList.length} record, ${created.length} Gudang + ${createdSub.length} Sub Gudang baru` });
-    let msg = `Import disetujui — ${newList.length} record kapasitas gudang kini live.`;
-    if (created.length || createdSub.length) msg += ` ${created.length} Gudang, ${createdSub.length} Sub Gudang baru dibuat otomatis.`;
-    showToast(msg, "success");
-    if (skippedNoUpt.length) {
-      showToast(`⚠️ ${skippedNoUpt.length} gudang di-skip dari Master Gudang (UPT tidak dikenal): ${skippedNoUpt.slice(0,3).join(", ")}${skippedNoUpt.length>3?"...":""}`, "error");
-    }
-  }
-
-  // Dipanggil dari tombol "Setujui & Publish" di Approval (menggantikan panggilan
-  // langsung approveCapacityImport) — cek dulu apakah ada kandidat Gudang BARU yang
-  // bakal otomatis dibuat; kalau ada, buka panel konfirmasi Admin dulu (permintaan
-  // user 2026-07-06) sebelum benar-benar approve. Kalau tidak ada kandidat baru sama
-  // sekali (semua baris cocok Gudang existing), langsung approve seperti biasa tanpa
-  // friksi tambahan.
-  function startCapacityApproval(importId) {
-    const imp = gudangCapacityImports.find(i=>i.id===importId);
-    if (!imp) return;
-    const candidates = previewCapacityGudangMatch(imp.records);
-    if (candidates.length === 0) { approveCapacityImport(importId); return; }
-    setCapacityReviewImportId(importId);
-    setCapacityReviewCandidates(candidates);
-    setCapacityReviewDecisions(Object.fromEntries(candidates.map(c => [c.key, { action: "NEW" }])));
-  }
-  function confirmCapacityApproval() {
-    if (!capacityReviewImportId) return;
-    approveCapacityImport(capacityReviewImportId, capacityReviewDecisions);
-    setCapacityReviewImportId(null);
-    setCapacityReviewCandidates([]);
-    setCapacityReviewDecisions({});
-  }
-
-  async function rejectCapacityImport(importId, reason) {
-    const imp = gudangCapacityImports.find(i=>i.id===importId);
-    if (!imp) return;
-    const newImports = gudangCapacityImports.map(i => i.id===importId
-      ? {...i, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : i);
-    setGudangCapacityImports(newImports);
-    await saveToCloud({ gudangCapacityImports: newImports });
-    await logApprovalHistory({ type:"KAPASITAS_GUDANG_IMPORT", refId:imp.id, decision:"REJECTED", note:reason });
-    showToast("Import ditolak.", "success");
-  }
-  async function saveGudang() {
-    if (!gudangForm.nama?.trim()) { showToast("Nama Gudang wajib diisi!","error"); return; }
-    const prevList = gudangList;
-    const ng = gudangModal==="add" ? [...gudangList, gudangForm] : gudangList.map(g=>g.id===gudangForm.id?gudangForm:g);
-    setGudangList(ng); setGudangModal(null);
-    const ok = await syncGudang(ng);
-    if (!ok) { setGudangList(prevList); showToast("Gagal menyimpan ke server, perubahan Gudang DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_gudang_v1", ng);
-    logAudit(currentUser, gudangModal==="add"?"CREATE":"UPDATE", "gudang", gudangForm.id, {nama:gudangForm.nama});
-    showToast(gudangModal==="add"?"Gudang ditambahkan!":"Gudang diupdate!");
-  }
-  // Step 1 wizard: simpan data gudang lalu lanjut ke Step 2 (upload denah) tanpa menutup modal
-  async function gudangWizardNext() {
-    if (!gudangForm.nama?.trim()) { showToast("Nama Gudang wajib diisi!","error"); return; }
-    const prevList = gudangList;
-    const exists = gudangList.some(g=>g.id===gudangForm.id);
-    const ng = exists ? gudangList.map(g=>g.id===gudangForm.id?gudangForm:g) : [...gudangList, gudangForm];
-    setGudangList(ng);
-    const ok = await syncGudang(ng);
-    if (!ok) { setGudangList(prevList); showToast("Gagal menyimpan ke server, perubahan Gudang DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_gudang_v1", ng);
-    logAudit(currentUser, exists?"UPDATE":"CREATE", "gudang", gudangForm.id, {nama:gudangForm.nama});
-    setGudangWizardStep(2);
-  }
-  async function deleteGudang(id) {
-    const g = gudangList.find(x=>x.id===id);
-    const blokCount = lokasiList.filter(l=>l.gudangId===id).length;
-    askConfirmDelete({
-      title: "Hapus Gudang?",
-      message: <>Apakah Anda yakin ingin menghapus Gudang <b>{g?.nama||"-"}</b>?</>,
-      warning: `Tindakan ini tidak bisa dibatalkan dan ada ${blokCount} Blok Lokasi terkait yang akan kehilangan koordinat denah.`,
-      onConfirm: async () => {
-        const prevList = gudangList;
-        const ng = gudangList.filter(x=>x.id!==id);
-        setGudangList(ng);
-        const ok = await syncGudang(ng);
-        if (!ok) { setGudangList(prevList); showToast("Gagal menghapus di server, Gudang DIBATALKAN. Coba lagi.","error"); return; }
-        CLOUD.set("pln_gudang_v1", ng);
-        logAudit(currentUser, "DELETE", "gudang", id, {nama:g?.nama});
-        showToast("Gudang dihapus.");
-      }
-    });
-  }
-  // Tambah blok langsung dari klik titik di denah pada wizard step 3 (tanpa modal Lokasi terpisah)
-  async function addWizardBlok() {
-    if (!wizardBlokDraft?.kode?.trim()) { showToast("Kode blok tidak boleh kosong!","error"); return; }
-    if (isKodeDuplicateInSubGudang(wizardBlokDraft.kode, gudangForm.id, null, null)) {
-      showToast(`Kode blok "${wizardBlokDraft.kode}" sudah dipakai di gudang ini!`,"error"); return;
-    }
-    const baru = {
-      id: `LOK-${uid().slice(-6)}`,
-      kode: wizardBlokDraft.kode.trim(), keterangan: wizardBlokDraft.keterangan||"", kapasitas: wizardBlokDraft.kapasitas||50,
-      mapX: wizardBlokDraft.xPct, mapY: wizardBlokDraft.yPct, gudangId: gudangForm.id,
-      createdAt: Date.now(),
-      status: "APPROVED", pendingAction: null,
-      requestedBy: currentUser.id, requestedAt: Date.now(),
-    };
-    const prevList = lokasiList;
-    const nl = [...lokasiList, baru];
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, Blok DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    setWizardBlokDraft(null);
-    showToast("✅ Blok ditambahkan!");
-  }
-
-  // Upload gambar denah gudang (PNG/JPG) — kompres otomatis jika > 1MB
-  async function uploadDenahGudang(gudangId, file) {
-    setDenahLoading(true);
-    try {
-      const imgData = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = ev => {
-          const img = new Image();
-          img.onload = () => {
-            // Target max dimension 1400px, JPEG 80% — menghasilkan ~300-800KB
-            const maxDim = 1400;
-            let w = img.width, h = img.height;
-            if (w > maxDim || h > maxDim) {
-              const ratio = Math.min(maxDim/w, maxDim/h);
-              w = Math.round(w * ratio);
-              h = Math.round(h * ratio);
-            }
-            const canvas = document.createElement("canvas");
-            canvas.width = w; canvas.height = h;
-            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.80));
-          };
-          img.onerror = () => reject(new Error("Gagal membaca gambar"));
-          img.src = ev.target.result;
-        };
-        reader.onerror = () => reject(new Error("Gagal membaca file"));
-        reader.readAsDataURL(file);
-      });
-      const prevList = gudangList;
-      const ng = gudangList.map(g=>g.id===gudangId ? {...g, denahImageData:imgData, denahUploadedAt:Date.now(), denahOcrWords:null} : g);
-      setGudangList(ng);
-      const ok = await syncGudang(ng);
-      if (!ok) { setGudangList(prevList); showToast("Gagal menyimpan denah ke server, upload DIBATALKAN. Coba lagi.","error"); return; }
-      CLOUD.set("pln_gudang_v1", ng);
-      showToast("✅ Denah gudang berhasil diupload! Membaca label blok di gambar...");
-      await runOcrOnDenah(gudangId, imgData);
-    } catch(e) {
-      showToast("Gagal upload denah: " + e.message, "error");
-    } finally {
-      setDenahLoading(false);
-    }
-  }
-
-  // Baca teks/label blok yang sudah tergambar di PNG denah (OCR) supaya
-  // sistem bisa mengusulkan kode blok otomatis saat user klik titik di peta.
-  async function runOcrOnDenah(gudangId, imgData) {
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error("Gagal membaca dimensi gambar"));
-        im.src = imgData;
-      });
-      const { data } = await ocrRecognize(imgData, "eng");
-      const words = (data.words || [])
-        .filter(w => w.text && w.text.trim().length > 0)
-        .map(w => ({
-          text: w.text.trim(),
-          xPct: Number((((w.bbox.x0 + w.bbox.x1) / 2) / img.naturalWidth * 100).toFixed(1)),
-          yPct: Number((((w.bbox.y0 + w.bbox.y1) / 2) / img.naturalHeight * 100).toFixed(1)),
-        }));
-      // Pakai stateRef.current.gudangList (selalu terkini), bukan closure `gudangList` yang
-      // sudah usang setelah OCR (proses beberapa detik) — kalau pakai closure lama, hasilnya
-      // menimpa balik denahImageData yang baru diset di uploadDenahGudang sehingga gambar hilang.
-      const prevList2 = stateRef.current.gudangList;
-      const ng2 = prevList2.map(g => g.id === gudangId ? { ...g, denahOcrWords: words } : g);
-      setGudangList(ng2);
-      const ok2 = await syncGudang(ng2);
-      if (!ok2) { setGudangList(prevList2); showToast("Gagal menyimpan hasil OCR ke server. Coba lagi.","error"); return; }
-      CLOUD.set("pln_gudang_v1", ng2);
-
-      // Usulkan blok batch dari semua label yang terbaca (filter noise teks pendek/simbol)
-      const suggestions = words
-        .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
-        .slice(0, 40)
-        .map(w => ({ id: uid(), kode: w.text.toUpperCase().replace(/[^A-Z0-9]/g,""), jenisArea:"Rak Tertutup", luasan:"", xPct: w.xPct, yPct: w.yPct, checked: true }));
-      setOcrSuggestions(suggestions);
-      setOcrSuggestGudangId(gudangId);
-
-      showToast(words.length > 0 ? `🔎 OCR selesai: ${words.length} label terbaca, ${suggestions.length} diusulkan jadi blok.` : "🔎 OCR selesai, tidak ada teks terbaca di denah.");
-    } catch (e) {
-      showToast("OCR gagal membaca label di denah: " + e.message, "error");
-    }
-  }
-
-  // Edit/hapus baris usulan blok hasil OCR sebelum dikonfirmasi
-  function updateOcrSuggestion(id, patch) {
-    setOcrSuggestions(s => s.map(x => x.id===id ? {...x, ...patch} : x));
-  }
-  function removeOcrSuggestion(id) {
-    setOcrSuggestions(s => s.filter(x => x.id!==id));
-  }
-  function dismissOcrSuggestions() {
-    setOcrSuggestions([]); setOcrSuggestGudangId(null); setOcrSuggestSubGudangId(null);
-  }
-  // Konfirmasi: usulan yang dicentang ditambahkan langsung ke Master Lokasi (tanpa approval —
-  // tools ini hanya bisa diakses ADMIN). subGudangId non-null = usulan berasal dari denah Sub
-  // Gudang -> koordinat disimpan di subMapX/subMapY (bukan mapX/mapY denah Gudang keseluruhan).
-  async function confirmOcrSuggestions(gudangId, subGudangId=null) {
-    const checked = ocrSuggestions.filter(s => s.checked);
-    if (checked.length === 0) { showToast("Tidak ada usulan yang dicentang.","error"); return; }
-    if (checked.some(s => !s.kode.trim())) { showToast("Nama Area wajib diisi untuk semua usulan yang dicentang!","error"); return; }
-
-    // Saring duplikat kode: terhadap blok yang sudah ada di gudang ini, DAN antar sesama usulan yang dicentang.
-    const seenInBatch = new Set();
-    const valid = [], duplikat = [];
-    checked.forEach(s => {
-      const norm = s.kode.trim().toLowerCase();
-      if (seenInBatch.has(norm) || isKodeDuplicateInSubGudang(s.kode, gudangId, subGudangId, null)) {
-        duplikat.push(s.kode);
-      } else {
-        seenInBatch.add(norm);
-        valid.push(s);
-      }
-    });
-    if (valid.length === 0) { showToast(`Semua usulan terpilih duplikat kode dengan blok yang sudah ada di ${subGudangId?"sub gudang":"gudang"} ini.`,"error"); return; }
-
-    const baru = valid.map(s => ({
-      id: `LOK-${uid().slice(-6)}`,
-      kode: s.kode.trim(), keterangan: "", kapasitas: 50,
-      jenisArea: s.jenisArea||"Rak Tertutup", luasan: s.luasan||"",
-      ...(subGudangId ? { subMapX: s.xPct, subMapY: s.yPct, subGudangId } : { mapX: s.xPct, mapY: s.yPct }),
-      gudangId,
-      createdAt: Date.now(),
-      status: "APPROVED", pendingAction: null,
-      requestedBy: currentUser.id, requestedAt: Date.now(),
-    }));
-    const prevList = lokasiList;
-    const nl = [...lokasiList, ...baru];
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan ke server, blok usulan OCR DIBATALKAN. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    setOcrSuggestions(s => s.filter(x => !checked.includes(x)));
-    const dupMsg = duplikat.length ? ` (${duplikat.length} dilewati karena duplikat kode: ${duplikat.join(", ")})` : "";
-    showToast(`✅ ${baru.length} blok ditambahkan!` + dupMsg);
-  }
-
-  // Cari label OCR terdekat dari titik klik untuk diusulkan sebagai kode blok.
-  function suggestKodeFromOcr(gudang, xPct, yPct) {
-    const words = gudang?.denahOcrWords || [];
-    if (words.length === 0) return "";
-    let best = null, bestDist = Infinity;
-    words.forEach(w => {
-      const dx = w.xPct - xPct, dy = w.yPct - yPct;
-      const dist = dx*dx + dy*dy;
-      if (dist < bestDist) { bestDist = dist; best = w; }
-    });
-    return best ? best.text.toUpperCase().replace(/[^A-Z0-9]/g,"") : "";
-  }
-
-  // Assign koordinat blok via klik di gambar denah
-  async function assignLokasiKoordinat(lokasiId, xPct, yPct, gudangId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:xPct, mapY:yPct, gudangId} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan koordinat ke server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast(`📍 Koordinat Blok disimpan!`);
-  }
-
-  async function resetLokasiKoordinat(lokasiId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, mapX:null, mapY:null, gudangId:null} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal reset koordinat di server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast("Koordinat blok direset.");
-  }
-
-  // Assign koordinat blok via klik di denah Sub Gudang (terpisah dari mapX/mapY denah Gudang keseluruhan)
-  async function assignLokasiKoordinatSub(lokasiId, xPct, yPct, subGudangId, gudangId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:xPct, subMapY:yPct, subGudangId, gudangId} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal menyimpan koordinat ke server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast(`📍 Koordinat Blok (Sub Gudang) disimpan!`);
-  }
-
-  // Reset hanya koordinat pin di denah Sub Gudang — assignment subGudangId (pengelompokan) tidak ikut dihapus
-  async function resetLokasiKoordinatSub(lokasiId) {
-    const prevList = lokasiList;
-    const nl = lokasiList.map(l=>l.id===lokasiId ? {...l, subMapX:null, subMapY:null} : l);
-    setLokasiList(nl);
-    const ok = await syncLokasi(nl);
-    if (!ok) { setLokasiList(prevList); showToast("Gagal reset koordinat di server. Coba lagi.","error"); return; }
-    CLOUD.set("pln_lokasi_v4", nl);
-    showToast("Koordinat blok (Sub Gudang) direset.");
-  }
-
-  async function uploadDenahSubGudang(subGudangId, gudangId, file) {
-    setDenahSubLoading(true);
-    try {
-      const imgData = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = ev => {
-          const img = new Image();
-          img.onload = () => {
-            const maxDim = 1400;
-            let w = img.width, h = img.height;
-            if (w > maxDim || h > maxDim) {
-              const ratio = Math.min(maxDim/w, maxDim/h);
-              w = Math.round(w * ratio);
-              h = Math.round(h * ratio);
-            }
-            const canvas = document.createElement("canvas");
-            canvas.width = w; canvas.height = h;
-            canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL("image/jpeg", 0.80));
-          };
-          img.onerror = () => reject(new Error("Gagal membaca gambar"));
-          img.src = ev.target.result;
-        };
-        reader.onerror = () => reject(new Error("Gagal membaca file"));
-        reader.readAsDataURL(file);
-      });
-      const prevList = subGudangList;
-      const nsg = subGudangList.map(sg=>sg.id===subGudangId ? {...sg, denahImageData:imgData, denahUploadedAt:Date.now(), denahOcrWords:null} : sg);
-      setSubGudangList(nsg);
-      const ok = await syncSubGudang(nsg);
-      if (!ok) { setSubGudangList(prevList); showToast("Gagal menyimpan denah ke server, upload DIBATALKAN. Coba lagi.","error"); return; }
-      CLOUD.set("pln_sub_gudang_v1", nsg);
-      showToast("✅ Denah Sub Gudang berhasil diupload! Membaca label blok di gambar...");
-      await runOcrOnDenahSub(subGudangId, gudangId, imgData);
-    } catch(e) {
-      showToast("Gagal upload denah: " + e.message, "error");
-    } finally {
-      setDenahSubLoading(false);
-    }
-  }
-
-  async function runOcrOnDenahSub(subGudangId, gudangId, imgData) {
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const im = new Image();
-        im.onload = () => resolve(im);
-        im.onerror = () => reject(new Error("Gagal membaca dimensi gambar"));
-        im.src = imgData;
-      });
-      const { data } = await ocrRecognize(imgData, "eng");
-      const words = (data.words || [])
-        .filter(w => w.text && w.text.trim().length > 0)
-        .map(w => ({
-          text: w.text.trim(),
-          xPct: Number((((w.bbox.x0 + w.bbox.x1) / 2) / img.naturalWidth * 100).toFixed(1)),
-          yPct: Number((((w.bbox.y0 + w.bbox.y1) / 2) / img.naturalHeight * 100).toFixed(1)),
-        }));
-      const prevList2 = stateRef.current.subGudangList;
-      const nsg2 = prevList2.map(sg => sg.id === subGudangId ? { ...sg, denahOcrWords: words } : sg);
-      setSubGudangList(nsg2);
-      const ok2 = await syncSubGudang(nsg2);
-      if (!ok2) { setSubGudangList(prevList2); showToast("Gagal menyimpan hasil OCR ke server. Coba lagi.","error"); return; }
-      CLOUD.set("pln_sub_gudang_v1", nsg2);
-
-      const suggestions = words
-        .filter(w => w.text.replace(/[^A-Za-z0-9]/g,"").length >= 2)
-        .slice(0, 40)
-        .map(w => ({ id: uid(), kode: w.text.toUpperCase().replace(/[^A-Z0-9]/g,""), jenisArea:"Rak Tertutup", luasan:"", xPct: w.xPct, yPct: w.yPct, checked: true }));
-      setOcrSuggestions(suggestions);
-      setOcrSuggestGudangId(gudangId);
-      setOcrSuggestSubGudangId(subGudangId);
-
-      showToast(words.length > 0 ? `🔎 OCR selesai: ${words.length} label terbaca, ${suggestions.length} diusulkan jadi blok.` : "🔎 OCR selesai, tidak ada teks terbaca di denah.");
-    } catch (e) {
-      showToast("OCR gagal membaca label di denah: " + e.message, "error");
-    }
-  }
-
   // "Import dari SAP (PEMAT)" (importFromSAP) dihapus 2026-07-02 — digabung jadi satu dengan
   // wizard "Migrasi Data" (MigrasiDataTab/handleBackupAndApply) yang lebih aman (ada preview,
   // backup otomatis, panel review manual). Jangan bikin ulang fitur input Data Stok manual di
   // luar wizard itu — kebijakan bisnis: semua material masuk WAJIB lewat TUG, kecuali migrasi
   // data awal yang memang lewat wizard khusus itu.
-  async function saveOpname(opn) {
-    const exists = opnameList.find(o=>o.id===opn.id);
-    const nl = exists ? opnameList.map(o=>o.id===opn.id?opn:o) : [...opnameList, opn];
-    setOpnameList(nl);
-    await saveToCloud({opnameList: nl});
-    showToast("✅ Data opname disimpan!");
-  }
-  async function submitOpname(opn) {
-    const updated = {...opn, status:"PENDING_ASMAN", submittedAt:Date.now()};
-    // Sesi baru yang langsung di-submit tanpa pernah "Simpan Draft" dulu belum ada di
-    // opnameList sama sekali (startOpname cuma setActiveOpname, tidak append ke list) —
-    // pakai pola exists?map:append sama seperti saveOpname, supaya tidak silently dropped.
-    const exists = opnameList.find(o=>o.id===opn.id);
-    const nl = exists ? opnameList.map(o=>o.id===opn.id?updated:o) : [...opnameList, updated];
-    setOpnameList(nl);
-    await saveToCloud({opnameList: nl});
-    showToast("📋 Opname disubmit! Menunggu approval Asman.");
-  }
-  async function approveOpname_Asman(opn, catatan) {
-    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman yang bisa approve.","error"); return; }
-    const updated = {...opn, status:"PENDING_MANAGER", approvedByAsman:currentUser.id, approvedAtAsman:Date.now(), catatanAsman:catatan||""};
-    const nl = opnameList.map(o=>o.id===opn.id?updated:o);
-    setOpnameList(nl);
-    await saveToCloud({opnameList: nl});
-    showToast("✅ Disetujui Asman! Menunggu Manager.");
-  }
-  async function approveOpname_Manager(opn, catatan) {
-    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa approve.","error"); return; }
-    let newStocks = [...stocks];
-    // Material baru dari SAP (item.katalogId null — belum ada di Master Katalog saat upload)
-    // sekarang IKUT approval sesi ini (Asman->Manager), TIDAK ada approval TL terpisah (keputusan
-    // user 2026-07-07, supaya tidak ada 2 alur approval yang membingungkan). Cuma diproses kalau
-    // qty fisik benar-benar terisi (>0) — dibiarkan 0/kosong dianggap belum sempat dihitung fisik,
-    // diabaikan total (tidak dibuatkan Master Katalog/Data Stok apa pun). No. Katalog dari SAP
-    // dicek dulu via normalizeKatalog (bukan match string mentah, SAP kadang beda zero-padding) —
-    // kalau bentrok dengan katalog yang SUDAH ADA, baris itu di-skip + Manager diberi tahu lewat
-    // toast, TIDAK PERNAH menimpa diam-diam (pola sama seperti aturan keamanan Migrasi Data).
-    let newKatalogList = [...katalogList];
-    const materialBaruDibuat = [];
-    const materialBaruKonflik = [];
-    const nowOpn = Date.now();
-    (opn.items||[]).filter(item => !item.katalogId && Number(item.qtsFisik)>0).forEach(item => {
-      const noKatalog = String(item.noKatalog||"").trim();
-      const namaBarang = String(item.namaBarang||"").trim();
-      if (!noKatalog || !namaBarang) return;
-      const konflik = newKatalogList.find(k => normalizeKatalog(k.katalog) === normalizeKatalog(noKatalog));
-      if (konflik) { materialBaruKonflik.push(`${namaBarang} (No. Katalog ${noKatalog} sudah dipakai "${konflik.name}")`); return; }
-      const jenisBarangBaru = /^\d{10}$/.test(noKatalog) ? "Cadang" : /^\d{7,8}$/.test(noKatalog) ? "Persediaan" : "Cadang";
-      const newKatalogId = "KAT-OPN-" + noKatalog;
-      newKatalogList = [...newKatalogList, {
-        id: newKatalogId, katalog: noKatalog, name: namaBarang,
-        category: namaBarang.split(";")[0].trim() || "Material",
-        jenisBarang: jenisBarangBaru, satuan: item.satuan || "-",
-        keterangan: `Material baru terdeteksi dari Stock Opname ${opn.semester} (${opn.jenisAlur})`,
-        createdAt: nowOpn,
-      }];
-      newStocks = [...newStocks, {
-        id: "STK-OPN-" + noKatalog + "-" + nowOpn,
-        katalogId: newKatalogId, lokasiId: null,
-        qty: Number(item.qtsFisik), price: 0, minQty: 0, unit: item.satuan || "-",
-        jenisBarang: jenisBarangBaru, name: namaBarang, katalog: noKatalog,
-        category: namaBarang.split(";")[0].trim() || "Material",
-        sapBaselineQty: Number(item.qtsFisik), sapBaselineAt: nowOpn, createdAt: nowOpn, updatedAt: nowOpn,
-      }];
-      materialBaruDibuat.push(`${namaBarang} (${noKatalog})`);
-    });
-
-    (opn.items||[]).filter(item=>item.selisih!==0 && item.katalogId).forEach(item => {
-      const stockRows = newStocks.filter(s=>s.katalogId===item.katalogId);
-      if (!stockRows.length) return;
-      const totalSistem = stockRows.reduce((a,s)=>a+(s.qty||0),0);
-      if (totalSistem===0) {
-        newStocks = newStocks.map(s=>s.id===stockRows[0].id?{...s,qty:item.qtsFisik}:s);
-        return;
-      }
-      let remaining = item.qtsFisik;
-      stockRows.forEach((sr,idx)=>{
-        if (idx===stockRows.length-1) {
-          newStocks = newStocks.map(s=>s.id===sr.id?{...s,qty:Math.max(0,remaining)}:s);
-        } else {
-          const portion = Math.round((sr.qty/totalSistem)*item.qtsFisik);
-          newStocks = newStocks.map(s=>s.id===sr.id?{...s,qty:Math.max(0,portion)}:s);
-          remaining -= portion;
-        }
-      });
-    });
-    // Material Non-Stock yang ditemukan saat opname fisik (Opsi A) — katalog & stok-nya
-    // SUDAH dibuat sejak "Simpan" di lapangan (lihat addNonStockFoundItem), bukan di sini.
-    // Approve Manager di sini cuma melepas flag pendingOpnameId (mengonfirmasi), tidak bikin
-    // baris baru — beda dari material baru SAP di atas yang memang baru dibuat saat ini.
-    let konfirmasiNonStock = 0;
-    newKatalogList = newKatalogList.map(k => k.pendingOpnameId === opn.id ? { ...k, pendingOpnameId: null } : k);
-    newStocks = newStocks.map(s => {
-      if (s.pendingOpnameId === opn.id) { konfirmasiNonStock++; return { ...s, pendingOpnameId: null }; }
-      return s;
-    });
-
-    const updated = {...opn, status:"SELESAI", approvedByManager:currentUser.id, approvedAtManager:Date.now(), catatanManager:catatan||""};
-    const nl = opnameList.map(o=>o.id===opn.id?updated:o);
-    setOpnameList(nl); setStocks(newStocks); setKatalogList(newKatalogList);
-    await saveToCloud({opnameList: nl, stocks: newStocks, katalogList: newKatalogList});
-    // Ditemukan 2026-07-07: approve/reject Opname tidak pernah lapor ke logApprovalHistory
-    // (beda dari semua jenis approval lain — Lokasi, Stock Move/Edit/Delete, Alat Berat,
-    // Stock Count), jadi keputusannya tidak pernah muncul di "Riwayat Approval" terpusat.
-    await logApprovalHistory({type:"OPNAME", decision:"APPROVED", title:`Stock Opname ${opn.semester} (${opn.jenisAlur})`, requestedBy:opn.dibuatOleh, requestedAt:opn.dibuatAt});
-    let msg = "✅ Stock Opname SELESAI! Data Stok disesuaikan.";
-    if (materialBaruDibuat.length) msg += ` ${materialBaruDibuat.length} material baru ditambahkan ke Master Katalog.`;
-    if (materialBaruKonflik.length) msg += ` ⚠️ ${materialBaruKonflik.length} material baru TIDAK ditambahkan (bentrok No. Katalog): ${materialBaruKonflik.slice(0,2).join("; ")}${materialBaruKonflik.length>2?"...":""}.`;
-    if (konfirmasiNonStock) msg += ` ${konfirmasiNonStock} material Non-Stock hasil opname dikonfirmasi aktif.`;
-    showToast(msg, materialBaruKonflik.length ? "error" : "success");
-  }
-  async function rejectOpname(opn, reason) {
-    const updated = {...opn, status:"DITOLAK", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason};
-    const nl = opnameList.map(o=>o.id===opn.id?updated:o);
-    setOpnameList(nl); await saveToCloud({opnameList: nl});
-    await logApprovalHistory({type:"OPNAME", decision:"REJECTED", title:`Stock Opname ${opn.semester} (${opn.jenisAlur})`, requestedBy:opn.dibuatOleh, requestedAt:opn.dibuatAt});
-    showToast("❌ Opname ditolak.", "error");
-  }
-  async function deleteOpname(id) {
-    if (!window.confirm("Hapus sesi opname ini?")) return;
-    const nl = opnameList.filter(o=>o.id!==id);
-    setOpnameList(nl); await saveToCloud({opnameList: nl});
-    showToast("Opname dihapus.");
-  }
-
-  // Kode fallback untuk material Non-Stock yang TIDAK ketemu padanan MARA-nya —
-  // format NS-<UPT singkat>-<urut 4 digit>, jelas beda dari kode SAP/MARA asli
-  // (yang selalu angka murni) supaya tidak ada yang salah kira ini kode resmi.
-  function generateNonStockFallbackCode() {
-    const uptShort = ((typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim().slice(0, 3) || "UPT").toUpperCase();
-    const prefix = `NS-${uptShort}-`;
-    let maxN = 0;
-    katalogList.forEach(k => {
-      const m = String(k.katalog || "").match(new RegExp(`^${prefix}(\\d+)$`));
-      if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
-    });
-    return `${prefix}${String(maxN + 1).padStart(4, "0")}`;
-  }
-
-  // Material Non-Stock yang ditemukan SAAT opname fisik (bukan dari upload SAP) —
-  // KEPUTUSAN SENGAJA (Opsi A, disepakati user): katalog + stok dibuat LANGSUNG di
-  // sini (bukan menunggu Manager approve seperti material baru SAP), berstatus
-  // "pendingOpnameId" terisi, supaya QR/label bisa langsung dicetak & ditempel ke
-  // barang selagi Admin/TL masih di depannya — tidak perlu balik ke gudang lagi
-  // nanti. QR encode `katalog.id` (bukan field `katalog` yang bisa dikoreksi
-  // belakangan kalau kandidat MARA ditemukan susulan), jadi label fisik tetap
-  // valid walau kode katalognya diperbarui.
-  async function addNonStockFoundItem({ opnameId, nama, katalogCode, satuan, qty, lokasiId, foto, belumDicocokkanMara }) {
-    const code = katalogCode || generateNonStockFallbackCode();
-    const newKatalogId = "KAT-" + code;
-    if (katalogList.some(k => k.id === newKatalogId)) {
-      showToast(`Kode katalog "${code}" sudah dipakai. Coba lagi.`, "error");
-      return null;
-    }
-    // Foto ke Storage dulu (sama alasannya dengan updateStockFoto/saveStock — JANGAN
-    // base64 mentah masuk jsonb stocks.data, insiden 2026-07-23 & 2026-07-28).
-    let fotoUrl = null;
-    try { fotoUrl = await uploadStockFoto(newKatalogId, "fotoKeseluruhan", foto); }
-    catch (e) {
-      console.warn("Upload foto material baru (opname) gagal:", newKatalogId, e?.message||e);
-      showToast("Gagal upload foto ke server, coba lagi.","error"); return null;
-    }
-    const now = Date.now();
-    const newKatalog = {
-      id: newKatalogId, katalog: code, name: nama,
-      category: nama.split(";")[0].trim() || "Material",
-      jenisBarang: "Non-Stock", satuan: satuan || "-",
-      keterangan: `Ditemukan saat Stock Opname Non-SAP (menunggu approval sesi ${opnameId})`,
-      pendingOpnameId: opnameId, belumDicocokkanMara: !!belumDicocokkanMara,
-      createdAt: now,
-    };
-    const newStock = {
-      id: "STK-OPN-" + code + "-" + now,
-      katalogId: newKatalogId, lokasiId: lokasiId || null,
-      qty: Number(qty) || 0, price: 0, minQty: 0, unit: satuan || "-",
-      jenisBarang: "Non-Stock", name: nama, katalog: code,
-      category: nama.split(";")[0].trim() || "Material",
-      fotoKeseluruhan: fotoUrl,
-      pendingOpnameId: opnameId,
-      createdAt: now, updatedAt: now,
-    };
-    const nk = [...katalogList, newKatalog];
-    const ns = [...stocks, newStock];
-    setKatalogList(nk); setStocks(ns);
-    // Cuma 1 baris katalog & 1 baris stok baru ditambah — sync ringan baris itu saja.
-    await saveToCloud({ katalogList: nk, stocks: ns }, {katalogChangedRows: [newKatalog], stocksChangedRows: [newStock]});
-    return { ...newKatalog, fotoKeseluruhan: fotoUrl };
-  }
-
-  // ── STOCK COUNT (banding SAP vs Aplikasi) — read-only, TIDAK mengubah
-  // Data Stok/Master Katalog sama sekali (beda dari "Import dari SAP" yang
-  // memang sengaja mengganti Data Stok). Cuma membandingkan qty per material
-  // ber-status SAP, lalu setiap temuan selisih menunggu approval Asman
-  // (per item, bukan bulk — konsisten dengan aturan approval lain di app
-  // ini). Approval di sini TIDAK memicu aksi otomatis apa pun (tidak bikin
-  // draft TUG / tidak bikin Data Stok baru) — cuma menandai temuan itu valid
-  // atau tidak, rekomendasi tindak lanjutnya tetap teks saran saja.
-  function computeStockCountItems(sapRows) {
-    const TOL_PCT = 5; // toleransi sama dengan widget "Akurasi Material" sebelumnya
-    return (sapRows||[]).filter(r=>r.katalog).map(row => {
-      const kat = katalogList.find(k=>k.katalog===row.katalog);
-      const qtyApp = kat ? totalQtyForKatalog(kat.id, stocks) : 0;
-      const qtySap = row.qty || 0;
-      const selisih = qtyApp - qtySap;
-      const selisihPct = qtySap===0 ? (qtyApp===0?0:100) : Math.round(Math.abs(selisih)/qtySap*1000)/10;
-      let status = "AKURAT", rekomendasi = null;
-      if (selisihPct > TOL_PCT) {
-        if (selisih < 0) { status = "APP_KURANG"; rekomendasi = "TAMBAH_STOK"; }
-        else { status = "APP_LEBIH"; rekomendasi = "BUAT_TUG_KELUAR"; }
-      }
-      return {
-        id: `SCI-${uid().slice(-8)}`,
-        katalogId: kat?.id || null,
-        katalogKode: row.katalog,
-        nama: row.nama || kat?.name || "(tidak ada di Master Katalog)",
-        satuan: row.satuan || kat?.satuan || "-",
-        qtySap, qtyApp, selisih, selisihPct, status, rekomendasi,
-        approval: status==="AKURAT" ? null : "PENDING",
-        approvedBy: null, approvedAt: null, catatan: null,
-      };
-    });
-  }
-  // Upload CSV/XLSX hanya menghasilkan DRAFT (dihitung di memori, belum
-  // disimpan/belum terlihat siapa pun) — Admin me-review tiap item satu per
-  // satu (termasuk material baru yang belum ada di Master Katalog) dan boleh
-  // mencoret item yang tidak relevan, baru tombol "Simpan & Kirim ke Asman"
-  // di review yang benar-benar membuat sesi dan memunculkan approval Asman.
-  function previewStockCount(sapRows) {
-    return computeStockCountItems(sapRows);
-  }
-  async function saveStockCountSession(items) {
-    const akuratCount = items.filter(i=>i.status==="AKURAT").length;
-    const session = {
-      id: `SC-${uid().slice(-8)}`,
-      uploadedAt: Date.now(), uploadedBy: currentUser.id,
-      items,
-      summary: { totalItem: items.length, akuratCount, akuratPct: items.length ? Math.round(akuratCount/items.length*100) : 0 },
-    };
-    const nsc = [session, ...stockCountList].slice(0, 50); // riwayat dibatasi 50 sesi terakhir
-    setStockCountList(nsc);
-    await saveToCloud({ stockCountList: nsc });
-    showToast(`✅ Stock Count disimpan: ${items.length} item, ${akuratCount} akurat.`);
-    return session;
-  }
-  async function approveStockCountItem(sessionId, itemId, catatan) {
-    const session = stockCountList.find(s=>s.id===sessionId);
-    const item = session?.items.find(i=>i.id===itemId);
-    if (!item) return;
-    const nsc = stockCountList.map(s=>s.id!==sessionId ? s : {
-      ...s, items: s.items.map(it=>it.id!==itemId?it:{...it, approval:"APPROVED", approvedBy:currentUser.id, approvedAt:Date.now(), catatan:catatan||it.catatan})
-    });
-    setStockCountList(nsc); await saveToCloud({stockCountList: nsc});
-    await logApprovalHistory({type:"STOCK_COUNT", decision:"APPROVED", title:`Temuan Stock Count: ${item.nama} (selisih ${item.selisih>0?"+":""}${item.selisih} ${item.satuan})`, requestedBy:null, requestedAt:session.uploadedAt});
-    showToast("✅ Temuan Stock Count disetujui.");
-  }
-  async function rejectStockCountItem(sessionId, itemId, catatan) {
-    const session = stockCountList.find(s=>s.id===sessionId);
-    const item = session?.items.find(i=>i.id===itemId);
-    if (!item) return;
-    const nsc = stockCountList.map(s=>s.id!==sessionId ? s : {
-      ...s, items: s.items.map(it=>it.id!==itemId?it:{...it, approval:"REJECTED", approvedBy:currentUser.id, approvedAt:Date.now(), catatan:catatan||it.catatan})
-    });
-    setStockCountList(nsc); await saveToCloud({stockCountList: nsc});
-    await logApprovalHistory({type:"STOCK_COUNT", decision:"REJECTED", title:`Temuan Stock Count: ${item.nama} (selisih ${item.selisih>0?"+":""}${item.selisih} ${item.satuan})`, requestedBy:null, requestedAt:session.uploadedAt});
-    showToast("❌ Temuan Stock Count ditolak.");
-  }
-  async function deleteStockCountSession(id) {
-    if (!window.confirm("Hapus sesi Stock Count ini?")) return;
-    const nsc = stockCountList.filter(s=>s.id!==id);
-    setStockCountList(nsc); await saveToCloud({stockCountList: nsc});
-    showToast("Sesi Stock Count dihapus.");
-  }
+  // saveOpname..deleteStockCountSession (Stock Opname & Stock Count) dipindah ke
+  // src/hooks/useStockOpname.js (2026-08-10).
 
   async function saveRencana(rencana) {
     const exists = rencanaKedatanganList.find(r=>r.id===rencana.id);
@@ -3671,146 +2179,6 @@ export default function PLNWarehouse() {
     try { const img = await compressImage(f, { maxDim:400, maxBytes:120_000 }); setSatpamForm(sf=>({...sf, foto:img})); }
     catch { showToast("Gagal memproses foto.","error"); }
   }
-  async function saveHeavyEquipmentEdit(equipmentId, updates) {
-    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengubah data alat.","error"); return false; }
-    const alat = heavyEquipmentList.find(eq=>eq.id===equipmentId);
-    if (!alat) return false;
-    if (["MAINTENANCE","KIR"].includes(updates.statusAlat) && alat.availabilityStatus==="DIPINJAM") {
-      showToast("Alat sedang dipinjam, tidak bisa diubah ke status ini.","error"); return false;
-    }
-    // Foto ke Storage dulu (pola sama dengan Data Stok — JANGAN base64 mentah masuk
-    // jsonb heavy_equipment.data, cegah pola insiden 2026-07-23 & 2026-07-28 terulang
-    // di tabel lain). Bucket reuse "tug-photos" (sudah publik), folder alat-berat/.
-    const canEditAllHeavyEquipment = hasRole(currentUser, "ADMIN");
-    // Jangan menyebarkan properti yang tidak memiliki input (id, availabilityStatus,
-    // metadata audit, dst.) ketika Admin membuka form lengkap. Untuk TL, payload
-    // sengaja hanya dua field yang memang diizinkan.
-    const editableFields = ["upt","lokasi","nama","jenis","merkType","kapasitas","nomorSeri","tahun","kondisi","suratIzinAlat","statusAlat"];
-    let upd = canEditAllHeavyEquipment
-      ? Object.fromEntries(editableFields.map(key => [key, updates[key] ?? alat[key] ?? ""]))
-      : { statusAlat: updates.statusAlat ?? alat.statusAlat };
-    // URL lama bukan perubahan foto. Ini menghindari metadata foto berubah hanya
-    // karena TL/Admin membuka lalu menyimpan status alat.
-    const needsPhotoStorage = _isDataUrl(updates.foto) && !isDemoMode();
-    // Foto lama berbentuk data URL (dari sebelum migrasi Storage) harus ikut
-    // dipindahkan pada penyimpanan berikutnya, walau pengguna tidak memilih file baru.
-    const isPhotoChanged = updates.foto !== alat.foto || needsPhotoStorage;
-    if (needsPhotoStorage) {
-      let compressedPhoto;
-      try { compressedPhoto = await compressImage(updates.foto, {maxBytes:1_000_000}); }
-      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
-      try {
-        const url = await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${equipmentId}.jpg`), 30_000, "unggah foto");
-        upd = { ...upd, foto: url };
-      } catch (e) {
-        console.warn("Upload foto alat berat gagal:", equipmentId, e?.message||e);
-        showToast(getHeavyEquipmentUploadErrorMessage(e),"error"); return false;
-      }
-    }
-    if (isPhotoChanged && !_isDataUrl(updates.foto)) upd = { ...upd, foto: updates.foto || null };
-    upd = { ...upd, updatedAt:Date.now(), updatedBy:currentUser.id };
-    const next = heavyEquipmentList.map(eq => eq.id === equipmentId ? { ...eq, ...upd, ...(isPhotoChanged ? {fotoUpdatedAt:Date.now(), fotoUpdatedBy:currentUser.id} : {}) } : eq);
-    const ok = await saveToCloud({heavyEquipmentList: next}, {heavyEquipmentChangedRows:[next.find(eq=>eq.id===equipmentId)]});
-    if (!ok) return false;
-    setHeavyEquipmentList(next);
-    logAudit(currentUser, "UPDATE", "heavy_equipment", equipmentId, {nama:alat.nama});
-    showToast("✅ Data alat berat disimpan.");
-    return true;
-  }
-  async function createHeavyEquipment(form) {
-    if (!hasRole(currentUser, "ADMIN")) { showToast("Hanya Admin Gudang yang bisa menambah alat.", "error"); return false; }
-    if (!form?.upt || !form?.nama?.trim() || !form?.lokasi?.trim()) { showToast("UPT, nama, dan lokasi wajib diisi.", "error"); return false; }
-    const now = Date.now();
-    let item = normalizeHeavyEquipmentRecord({ ...form, id:`HE-${uid().slice(-8)}`, availabilityStatus:"TERSEDIA", createdAt:now, createdBy:currentUser.id, updatedAt:now, updatedBy:currentUser.id, source:"Input Admin Gudang" });
-    if (_isDataUrl(item.foto) && !isDemoMode()) {
-      let compressedPhoto;
-      try { compressedPhoto = await compressImage(item.foto, {maxBytes:1_000_000}); }
-      catch (e) { showToast(getHeavyEquipmentProcessingErrorMessage(e), "error"); return false; }
-      try { item = { ...item, foto: await _withTimeout(uploadPhotoToStorage(compressedPhoto, "tug-photos", `alat-berat/${item.id}.jpg`), 30_000, "unggah foto") }; }
-      catch (e) { console.warn("Upload foto alat berat gagal:", item.id, e?.message||e); showToast(getHeavyEquipmentUploadErrorMessage(e), "error"); return false; }
-    }
-    const next = [item, ...heavyEquipmentList];
-    const ok = await saveToCloud({heavyEquipmentList: next}, {heavyEquipmentChangedRows:[item]});
-    if (!ok) return false;
-    setHeavyEquipmentList(next);
-    logAudit(currentUser, "CREATE", "heavy_equipment", item.id, {nama:item.nama});
-    showToast("✅ Alat berat ditambahkan.");
-    return true;
-  }
-  async function createHeavyEquipmentLoan(form) {
-    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL yang bisa mengajukan peminjaman alat.","error"); return; }
-    if (!form.equipmentId || !form.requesterUpt || !form.namaPekerjaan?.trim() || !form.tanggalAmbil || !form.tanggalKembali || !form.keperluan?.trim()) {
-      showToast("Lengkapi alat, UPT peminjam, nama pekerjaan, tanggal, dan keperluan.","error"); return;
-    }
-    const alat = heavyEquipmentList.find(eq=>eq.id===form.equipmentId);
-    if (!alat) { showToast("Alat tidak ditemukan.","error"); return; }
-    if (alat.availabilityStatus === "DIPINJAM") { showToast("Alat sedang dipinjam, tidak bisa diajukan lagi.","error"); return; }
-    if (alat.statusAlat === "MAINTENANCE") { showToast("Alat sedang maintenance, tidak bisa dipinjam UPT lain.","error"); return; }
-    if (alat.statusAlat === "KIR") { showToast("Alat sedang KIR, tidak bisa dipinjam UPT lain.","error"); return; }
-    if (alat.upt === form.requesterUpt) { showToast("Peminjaman harus antar UPT. Pilih UPT peminjam yang berbeda dari UPT pemilik alat.","error"); return; }
-    const loan = {
-      id: `HLOAN-${uid().slice(-8)}`,
-      equipmentId: form.equipmentId,
-      ownerUpt: alat.upt,
-      requesterUpt: form.requesterUpt,
-      fromUpt: alat.upt,
-      toUpt: form.requesterUpt,
-      namaPekerjaan: form.namaPekerjaan.trim(),
-      tanggalAmbil: form.tanggalAmbil,
-      tanggalKembali: form.tanggalKembali,
-      tanggalMulai: form.tanggalAmbil,
-      tanggalSelesai: form.tanggalKembali,
-      keperluan: form.keperluan.trim(),
-      catatan: form.catatan || "",
-      status: "PENDING_OWNER_ASMAN",
-      requestedBy: currentUser.id,
-      requestedAt: Date.now(),
-      requiredApprover: "ASMAN",
-      requiredApproverUpt: alat.upt,
-    };
-    const nextLoans = [loan, ...heavyEquipmentLoans];
-    setHeavyEquipmentLoans(nextLoans);
-    await saveToCloud({heavyEquipmentLoans: nextLoans});
-    showToast("Peminjaman alat diajukan. Menunggu approval Asman.");
-  }
-  async function approveHeavyEquipmentLoan(loanId, catatan="") {
-    const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
-    if (!loan || !isPendingHeavyEquipmentLoan(loan)) return;
-    if (!canApproveHeavyEquipmentLoan(currentUser, loan)) { showToast("Hanya Asman UPT pemilik alat yang bisa approve peminjaman ini.","error"); return; }
-    const ownerUpt = getHeavyEquipmentLoanOwnerUpt(loan);
-    const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
-    const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, ownerUpt, requesterUpt, status:"DIPINJAM", approvedBy:currentUser.id, approvedAt:Date.now(), catatanApproval:catatan } : l);
-    const nextEquipment = heavyEquipmentList.map(eq=>eq.id===loan.equipmentId ? { ...eq, availabilityStatus:"DIPINJAM", activeLoanId:loanId, borrowedToUpt:requesterUpt, borrowedJobName:getHeavyEquipmentLoanJobName(loan), borrowedUntil:getHeavyEquipmentLoanReturnDate(loan) } : eq);
-    setHeavyEquipmentLoans(nextLoans);
-    setHeavyEquipmentList(nextEquipment);
-    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment});
-    await logApprovalHistory({type:"HEAVY_EQUIPMENT_LOAN", decision:"APPROVED", title:`Peminjaman alat ${loan.equipmentId}: ${ownerUpt} -> ${requesterUpt}`, requestedBy:loan.requestedBy, requestedAt:loan.requestedAt});
-    showToast("Peminjaman alat disetujui.");
-  }
-  async function rejectHeavyEquipmentLoan(loanId, reason) {
-    if (!reason?.trim()) { showToast("Masukkan alasan penolakan.","error"); return; }
-    const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
-    if (!loan || !isPendingHeavyEquipmentLoan(loan)) return;
-    if (!canApproveHeavyEquipmentLoan(currentUser, loan)) { showToast("Hanya Asman UPT pemilik alat yang bisa menolak peminjaman ini.","error"); return; }
-    const ownerUpt = getHeavyEquipmentLoanOwnerUpt(loan);
-    const requesterUpt = getHeavyEquipmentLoanRequesterUpt(loan);
-    const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, ownerUpt, requesterUpt, status:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason.trim() } : l);
-    setHeavyEquipmentLoans(nextLoans);
-    await saveToCloud({heavyEquipmentLoans: nextLoans});
-    await logApprovalHistory({type:"HEAVY_EQUIPMENT_LOAN", decision:"REJECTED", title:`Peminjaman alat ${loan.equipmentId}: ${ownerUpt} -> ${requesterUpt}`, requestedBy:loan.requestedBy, requestedAt:loan.requestedAt});
-    showToast("Peminjaman alat ditolak.", "error");
-  }
-  async function completeHeavyEquipmentLoan(loanId) {
-    const loan = heavyEquipmentLoans.find(l=>l.id===loanId);
-    if (!loan || !["DIPINJAM","OVERDUE"].includes(getHeavyEquipmentLoanRuntimeStatus(loan))) return;
-    if (!hasRole(currentUser, "ADMIN","TL","ASMAN")) { showToast("Role kamu tidak bisa menandai alat kembali.","error"); return; }
-    const nextLoans = heavyEquipmentLoans.map(l=>l.id===loanId ? { ...l, status:"SELESAI", returnedBy:currentUser.id, returnedAt:Date.now() } : l);
-    const nextEquipment = heavyEquipmentList.map(eq=>eq.id===loan.equipmentId ? { ...eq, availabilityStatus:"TERSEDIA", activeLoanId:null, borrowedToUpt:null, borrowedJobName:null, borrowedUntil:null } : eq);
-    setHeavyEquipmentLoans(nextLoans);
-    setHeavyEquipmentList(nextEquipment);
-    await saveToCloud({heavyEquipmentLoans: nextLoans, heavyEquipmentList: nextEquipment});
-    showToast("Alat ditandai sudah kembali.");
-  }
   // ATTB — lihat docs/ATTB_SPEC.md. Tahap1 (Usulan AE.1): createAttbItem (DRAFT) ->
   // submitAttbToKI (PENDING_ASMAN) -> approveAttbToKI/rejectAttbToKI oleh Asman UPT
   // pengaju. Tahap2->3->4->5: advanceAttbStage, dieksekusi langsung Admin/TL tanpa
@@ -3824,7 +2192,7 @@ export default function PLNWarehouse() {
     const item = {
       ...form,
       id: `ATTB-${uid().slice(-8)}`,
-      upt: form.upt || getUserUptScope(currentUser),
+      upt: form.upt || getUserUptScope(currentUser, uptList),
       stage: "USULAN_AE1",
       approvalStatus: "DRAFT",
       lanjutBelumLanjut: false,
@@ -3860,7 +2228,7 @@ export default function PLNWarehouse() {
   async function approveAttbToKI(id, catatan="") {
     const item = attbList.find(a=>a.id===id);
     if (!item || !isPendingAttbApproval(item)) return;
-    if (!canApproveAttb(currentUser, item)) { showToast("Hanya Asman UPT pengaju yang bisa approve item ini.","error"); return; }
+    if (!canApproveAttb(currentUser, item, uptList)) { showToast("Hanya Asman UPT pengaju yang bisa approve item ini.","error"); return; }
     const now = Date.now();
     const next = attbList.map(a => a.id===id ? {
       ...a, approvalStatus:"APPROVED", approvedBy:currentUser.id, approvedAt:now, catatanApproval:catatan,
@@ -3876,7 +2244,7 @@ export default function PLNWarehouse() {
     if (!alasan?.trim()) { showToast("Masukkan alasan penolakan.","error"); return; }
     const item = attbList.find(a=>a.id===id);
     if (!item || !isPendingAttbApproval(item)) return;
-    if (!canApproveAttb(currentUser, item)) { showToast("Hanya Asman UPT pengaju yang bisa menolak item ini.","error"); return; }
+    if (!canApproveAttb(currentUser, item, uptList)) { showToast("Hanya Asman UPT pengaju yang bisa menolak item ini.","error"); return; }
     const next = attbList.map(a => a.id===id ? { ...a, approvalStatus:"DRAFT", rejectedBy:currentUser.id, rejectedAt:Date.now(), alasanTolak:alasan.trim() } : a);
     setAttbList(next);
     await saveToCloud({attbList: next});
@@ -3969,17 +2337,6 @@ export default function PLNWarehouse() {
     logAudit(currentUser, "DELETE", "attb", id);
     showToast("Item ATTB dihapus.", "error");
   }
-  function setMaterialPhoto(stockId, dataUrl) {
-    setTxnForm(tf => {
-      const existing = tf.fotoMaterial.filter(fm => fm.stockId !== stockId);
-      return { ...tf, fotoMaterial: [...existing, { stockId, img: dataUrl }] };
-    });
-  }
-  function handleMaterialImg(e, stockId) {
-    const f = e.target.files[0]; if (!f) return;
-    const r = new FileReader(); r.onload = ev => setMaterialPhoto(stockId, ev.target.result); r.readAsDataURL(f);
-  }
-
   // ── Barcode scan handling ──
   function openScanner(target) { setScannerTarget(target); setScannerOpen(true); }
 
@@ -4016,410 +2373,9 @@ export default function PLNWarehouse() {
     setScannerOpen(false);
   }
 
-  // ── Transaction (TUG-9) ──
-  function openNewTxn(docType = "TUG9") {
-    const canonicalUptId = currentUserUptId || currentUser?.uptId || "";
-    const base = {
-      docType,
-      pekerjaan: "", namaPekerjaan: "", lokasiPekerjaan: "",
-      perkiraanPembebanan: "", kodePerkiraan: "",
-      stockItems: [{ stockId: "", qty: 1 }],
-      keteranganBarang: "",
-    };
-    if (docType === "TUG9") {
-      setTxnForm({
-        ...base,
-        uptId: canonicalUptId,
-        noNodin: "", noPersetujuan: "",
-        nopol: "", simKtp: "", namaPengemudi: "",
-        penerimaNama: "", penerimaJabatan: "", penerimaUnit: "",
-        satpamId: "",
-        fotoKendaraan: null, fotoSimKtp: null, fotoSuratPengembalian: null,
-        fotoMaterial: [],
-      });
-    } else if (docType === "TUG8") {
-      setTxnForm({
-        ...base,
-        uptId: canonicalUptId,
-        unitTujuan: "",
-        noNodin: "", noPersetujuan: "",
-        nopol: "", simKtp: "", namaPengemudi: "",
-        penerimaNama: "", penerimaJabatan: "", penerimaUnit: "",
-        satpamId: "",
-        fotoKendaraan: null, fotoSimKtp: null, fotoSuratPengembalian: null,
-        fotoMaterial: [],
-      });
-    } else if (docType === "TUG10") {
-      setTxnForm({
-        ...base,
-        stockItems: [{ katalogMode:"existing", katalogId:"", namaBaru:"", katalogBaru:"", categoryBaru:"Lainnya", satuanBaru:"unit", qty:1, statusMaterial:"Material Sisa Baru", noAsset:"", noSeri:"", fotoNameplate:null, fotoBarangRetur:null }],
-        noBAPenggantian: "",
-        // For TUG10 the flow is reversed: external party hands back to PLN
-        menyerahkanNama: "",
-        gudangTujuanId: "", subGudangTujuanId: "", // cascade Gudang → Sub Gudang → Blok
-        lokasiTujuanId: "", // which Master Lokasi (Blok) the returned items go into
-        satpamId: "", // satpam gudang penyimpanan (Mengetahui di dokumen)
-        fotoBAPengembalian: null,
-      });
-    } else if (docType === "TUG3") {
-      setTxnForm({
-        ...base,
-        stockItems: [{ katalogMode:"existing", katalogId:"", namaBaru:"", katalogBaru:"", categoryBaru:"Lainnya", satuanBaru:"unit", qty:1, harga:0, lokasiTujuanId:"" }],
-        tanggalDiterima: "", dariSupplier: "", denganKirim: "Dikirim Langsung",
-        noFaktur: "", tglFaktur: "",
-        noSuratJalan: "", tglSuratJalan: "",
-        noSpk: "", tglSpk: "",
-        noAmandemen: "", tglAmandemen: "",
-        biayaAngkutan: 0,
-        notaNo: "", perintahKerja: "", fungsi: "",
-        keteranganTug3: "Baik",
-        timMutuId: "",
-        lokasiPenyerahan: "",
-        hasilPemeriksaan: "Barang Diterima Sesuai Pengadaan",
-        fotoKendaraan: null, fotoSimKtp: null, fotoSuratJalanImg: null, fotoKontrak: null,
-        fotoMaterial: [],
-      });
-    } else if (docType === "TUG5") {
-      setTug5ExpandedIdx(0); setTug5MaterialPage(0);
-      if (hasRole(currentUser, "ADMIN_ULTG")) {
-        // TUG-5 dari ULTG: tujuan implisit = UPT induk ULTG-nya, tidak perlu pilih UIT/jenis transfer
-        setTxnForm({
-          ...base,
-          sourceType: "ULTG",
-          ultgId: currentUser.ultgId || "",
-          lokasiPekerjaan: "",
-          keteranganUmum: "",
-          perintahKerja: "", kodePerkiraan: "", fungsi: "",
-          stockItems: [{ katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }],
-        });
-      } else {
-        setTxnForm({
-          ...base,
-          // TUG-5 header
-          uitId: uitList[0]?.id || "",       // Kepada: UIT tujuan
-          jenisTransfer: "INTRACOMPANY",     // INTRACOMPANY | INTERCOMPANY
-          keteranganUmum: "",
-          perintahKerja: "", kodePerkiraan: "", fungsi: "",
-          // Per-item fields for TUG-5 tabel
-          stockItems: [{ katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }],
-        });
-      }
-    }
-    setTxnModal(true);
-  }
-  function addItemRow() {
-    if (txnForm.docType === "TUG5" && txnForm.stockItems.length >= 10) {
-      showToast("Maksimal 10 item material per TUG-5.","error");
-      return;
-    }
-    if (txnForm.docType === "TUG5") {
-      const newIdx = txnForm.stockItems.length;
-      setTug5ExpandedIdx(newIdx);
-      setTug5MaterialPage(Math.floor(newIdx/5));
-    }
-    setTxnForm(tf => {
-      if (tf.docType === "TUG10") {
-        return { ...tf, stockItems: [...tf.stockItems, { katalogMode:"existing", katalogId:"", namaBaru:"", katalogBaru:"", categoryBaru:"Lainnya", satuanBaru:"unit", qty:1, statusMaterial:"Material Sisa Baru", noAsset:"", noSeri:"", fotoNameplate:null, fotoBarangRetur:null }] };
-      }
-      if (tf.docType === "TUG5") {
-        return { ...tf, stockItems: [...tf.stockItems, { katalogId:"", pemakaianBulan:0, sisaPersediaan:0, permintaan:1, keterangan:"" }] };
-      }
-      if (tf.docType === "TUG3") {
-        return { ...tf, stockItems: [...tf.stockItems, { katalogMode:"existing", katalogId:"", namaBaru:"", katalogBaru:"", categoryBaru:"Lainnya", satuanBaru:"unit", qty:1, harga:0 }] };
-      }
-      return { ...tf, stockItems: [...tf.stockItems, { stockId:"", qty:1 }] };
-    });
-  }
-  function removeItemRow(i) { setTug10Collapsed({}); setTxnForm(tf => ({ ...tf, stockItems: tf.stockItems.filter((_,idx)=>idx!==i) })); }
-  function updateItemRow(i, key, val) {
-    setTxnForm(tf => {
-      const items=[...tf.stockItems];
-      items[i] = {...items[i], [key]: val};
-      // TUG-5 dari ULTG: begitu pilih katalog, auto-isi Sisa Persediaan dari total stok aktual UPT
-      // (dijumlah lintas gudang/lokasi) — ULTG tidak punya stok sendiri untuk diketik manual.
-      if (tf.docType==="TUG5" && tf.sourceType==="ULTG" && key==="katalogId") {
-        const totalQty = enrichedStocks.filter(s=>s.katalogId===val).reduce((a,s)=>a+(s.qty||0),0);
-        items[i].sisaPersediaan = totalQty;
-      }
-      return {...tf, stockItems: items};
-    });
-  }
-
-  // Daftar syarat TUG-10 yang belum terpenuhi (dipakai checklist live + validasi submit).
-  // Tiap entri punya scrollKey (anchor di tug10Refs) supaya bisa di-scroll & di-highlight.
-  function tug10Missing(tf) {
-    if (!tf) return [];
-    const m = [];
-    if (!tf.namaPekerjaan?.trim()) m.push({ scrollKey:"namaPekerjaan", label:"Nama Pekerjaan" });
-    if (!tf.lokasiPekerjaan?.trim()) m.push({ scrollKey:"lokasiPekerjaan", label:"Lokasi Pekerjaan" });
-    if (!tf.menyerahkanNama?.trim()) m.push({ scrollKey:"menyerahkanNama", label:"Yang Menyerahkan" });
-    if (!tf.lokasiTujuanId) m.push({ scrollKey:"lokasiTujuanId", label:"Lokasi Penyimpanan (Blok)" });
-    (tf.stockItems||[]).forEach((si,idx)=>{
-      const n = idx+1;
-      const barangOk = si.katalogMode==="existing" ? !!si.katalogId : !!si.namaBaru?.trim();
-      if (!barangOk) m.push({ scrollKey:`item-${idx}`, label:`Barang #${n}: pilih/nama barang` });
-      if (!(si.qty>0)) m.push({ scrollKey:`item-${idx}`, label:`Barang #${n}: jumlah` });
-      if (!si.fotoBarangRetur) m.push({ scrollKey:`item-${idx}`, label:`Barang #${n}: foto barang` });
-      if (si.statusMaterial==="Bongkaran ATTB (MTU)") {
-        if (!si.noSeri?.trim()) m.push({ scrollKey:`item-${idx}`, label:`Barang #${n}: nomor seri (ATTB)` });
-        if (!si.fotoNameplate) m.push({ scrollKey:`item-${idx}`, label:`Barang #${n}: foto nameplate (ATTB)` });
-      }
-    });
-    if ((tf.stockItems||[]).some(si=>si.statusMaterial==="Bongkaran ATTB (MTU)") && !tf.fotoBAPengembalian) {
-      m.push({ scrollKey:"fotoBAPengembalian", label:"Foto Surat BA Pengembalian (ada item ATTB)" });
-    }
-    return m;
-  }
-  function flagTug10Invalid(key) {
-    if (!key) return;
-    if (key.startsWith("item-")) { const idx = Number(key.split("-")[1]); setTug10Collapsed(c=>({...c,[idx]:false})); }
-    setTug10Highlight(key);
-    setTimeout(()=>{ tug10Refs.current[key]?.scrollIntoView({ behavior:"smooth", block:"center" }); }, 60);
-    setTimeout(()=> setTug10Highlight(h=> h===key?null:h), 3000);
-  }
-
-  async function saveTxn() {
-    if (savingTxn) { showToast("Sedang menyimpan, tunggu sebentar...","info"); return; }
-    const canCreateULTG = hasRole(currentUser, "ADMIN_ULTG") && txnForm?.docType==="TUG5";
-    if (!can(currentUser, "aksi.buatTransaksi", rolePerms) && !canCreateULTG && !editingDraftTxnId) { showToast("Role kamu tidak dapat mengajukan transaksi!","error"); return; }
-    const docType = txnForm.docType;
-
-    if (docType !== "TUG3" && docType !== "TUG10") {
-      if (!txnForm.namaPekerjaan.trim()) { showToast("Nama Pekerjaan wajib diisi!","error"); return; }
-      if (!txnForm.lokasiPekerjaan.trim()) { showToast("Lokasi Pekerjaan wajib diisi!","error"); return; }
-    }
-
-    if (docType === "TUG9" || docType === "TUG8") {
-      // Canonical TUG8/9 (tugCanonical.js) selalu menulis ke RPC server sungguhan,
-      // tidak ada jalur simulasi mode demo untuk dokumen resmi ini — blokir di sini
-      // (pola sama dengan larangan mode demo lain di file ini) daripada diam-diam
-      // menulis data uji ke server produksi.
-      if (isDemoMode()) { showToast("Mode demo: TUG-8/TUG-9 (dokumen resmi) tidak bisa dibuat di sini — akan menulis ke server sungguhan. Nonaktifkan mode demo untuk transaksi ini.","error"); return; }
-      if (!txnForm.penerimaNama.trim()) { showToast("Nama Penerima wajib diisi!","error"); return; }
-      if (docType === "TUG8" && !txnForm.unitTujuan?.trim()) { showToast("Unit/Sektor Tujuan wajib diisi untuk TUG-8!","error"); return; }
-      const submittedItems = txnForm.stockItems || [];
-      if (submittedItems.some(si => !si.stockId || !(Number(si.qty) > 0))) {
-        showToast("Setiap baris material wajib memiliki stok dan jumlah lebih dari nol.","error"); return;
-      }
-      const validItems = submittedItems.filter(si => si.stockId && Number(si.qty) > 0);
-      if (validItems.length === 0) { showToast("Minimal 1 barang harus dipilih!","error"); return; }
-      for (const si of validItems) {
-        const stock = enrichedStocks.find(s=>s.id===si.stockId);
-        if (!stock) { showToast("Referensi stok tidak ditemukan. Pilih ulang material dari daftar stok.","error"); return; }
-        if (stock && stock.jenisBarang !== "Non-Stock" && stock.qty < si.qty) {
-          showToast(`Stok ${stock.name} di ${stock.lokasi} tidak cukup! Tersedia: ${stock.qty} ${stock.unit}`,"error"); return;
-        }
-      }
-      if (editingDraftTxnId) { await submitDraftTug9({ ...txnForm, stockItems: validItems }); return; }
-      await commitNewTxn(docType, { ...txnForm, stockItems: validItems });
-      return;
-    }
-
-    if (docType === "TUG10") {
-      const missing = tug10Missing(txnForm);
-      if (missing.length) {
-        flagTug10Invalid(missing[0].scrollKey);
-        showToast(`Belum lengkap — ${missing[0].label}${missing.length>1?` (dan ${missing.length-1} lainnya)`:""}`,"error");
-        return;
-      }
-      const validItems = txnForm.stockItems.filter(si => si.qty > 0 && (si.katalogMode==="existing" ? si.katalogId : si.namaBaru?.trim()));
-      await commitNewTxn(docType, { ...txnForm, stockItems: validItems });
-      return;
-    }
-
-    if (docType === "TUG3") {
-      if (!txnForm.dariSupplier?.trim()) { showToast("Field 'Dari' (Supplier) wajib diisi!","error"); return; }
-      if (!txnForm.tanggalDiterima) { showToast("Tanggal Diterima wajib diisi!","error"); return; }
-      const validItems = txnForm.stockItems.filter(si => si.qty > 0 && (si.katalogMode==="existing" ? si.katalogId : si.namaBaru?.trim()));
-      if (validItems.length === 0) { showToast("Minimal 1 barang harus diisi!","error"); return; }
-      await commitNewTxn(docType, { ...txnForm, stockItems: validItems, namaPekerjaan: txnForm.namaPekerjaan || txnForm.dariSupplier, lokasiPekerjaan: txnForm.lokasiPekerjaan || "Gudang Ketintang" });
-      return;
-    }
-
-    if (docType === "TUG5" && txnForm.sourceType === "ULTG") {
-      if (!txnForm.ultgId) { showToast("Unit ULTG kamu tidak terdeteksi. Hubungi Admin.","error"); return; }
-      const validItems = txnForm.stockItems.filter(si => si.katalogId && si.permintaan > 0);
-      if (validItems.length === 0) { showToast("Minimal 1 material harus diisi!","error"); return; }
-      await commitNewTxn(docType, { ...txnForm, stockItems: validItems, keteranganUmum: txnForm.namaPekerjaan });
-      return;
-    }
-
-    if (docType === "TUG5") {
-      if (!txnForm.uitId) { showToast("Pilih UIT tujuan (Kepada)!","error"); return; }
-      const validItems = txnForm.stockItems.filter(si => si.katalogId && si.permintaan > 0);
-      if (validItems.length === 0) { showToast("Minimal 1 material harus diisi!","error"); return; }
-      await commitNewTxn(docType, { ...txnForm, stockItems: validItems, namaPekerjaan: txnForm.keteranganUmum || "Permintaan Material", lokasiPekerjaan: "UPT Surabaya" });
-      return;
-    }
-  }
-
-  async function commitNewTxn(docType, formData, { replaceDraftId = null } = {}) {
-    if (savingTxnRef.current) return;       // cegah double-submit saat upload foto berjalan
-    savingTxnRef.current = true;
-    setSavingTxn(true);
-    setSavingInfo({ label: "Menyiapkan data...", done: 0, total: 0 });
-    try {
-    // Local draft metadata must never become part of the official server document.
-    const { id:_draftId, docSeq:_draftSeq, docNumbers:_draftNumbers, status:_draftStatus,
-      stage:_draftStage, requiredApprover:_draftApprover, canonical:_draftCanonical,
-      canonicalId:_draftCanonicalId, canonicalVersion:_draftCanonicalVersion,
-      draftLabel:_draftLabel, ...submittedForm } = formData || {};
-    formData = submittedForm;
-    // Upload foto base64 ke Storage dulu → blob transaksi jadi ringan. Gagal upload
-    // (offline) → foto tetap base64 + _fotoPending; transaksi & dokumen tetap jadi,
-    // auto-sync menyusul saat online (syncPendingTxnPhotos).
-    let txnId = `${docType}-${uid().slice(-6)}`;
-    const _hasFoto = formData && ([formData.fotoKendaraan,formData.fotoSimKtp,formData.fotoSuratPengembalian,formData.fotoBAPengembalian,formData.fotoSuratJalanImg,formData.fotoKontrak].some(_isDataUrl) || (formData.fotoMaterial||[]).some(fm=>_isDataUrl(fm?.img)) || (formData.stockItems||[]).some(si=>_isDataUrl(si.fotoNameplate)||_isDataUrl(si.fotoBarangRetur)));
-    if (_hasFoto) setSavingInfo({ label: "Mengunggah foto...", done: 0, total: 0 });
-    const { data: _fd, pending: _pend } = await processTxnPhotos(formData, txnId, (done, total) => setSavingInfo({ label: "Mengunggah foto...", done, total }));
-    formData = _fd;
-    if (_pend.length && ["TUG8", "TUG9"].includes(docType)) {
-      throw new Error("Foto TUG-8/TUG-9 belum aman di Storage. Periksa koneksi lalu ajukan ulang; dokumen resmi belum dibuat.");
-    }
-    if (_pend.length) showToast(`⚠️ ${_pend.length} foto belum terunggah (sinyal?). Transaksi & dokumen tetap tersimpan; foto disinkron otomatis saat online.`, "info");
-
-    let seq = docSeq;
-    const docCode = (docType === "TUG10" || docType === "TUG3") ? "LOG.00.01" : "LOG.00.02";
-    const docKey = docType === "TUG9" ? "tug9" : docType === "TUG8" ? "tug8" : docType === "TUG10" ? "tug10" : docType === "TUG5" ? "tug5" : "tug3";
-    let docNumbers = generateDocNumbers(seq, Date.now(), docCode);
-    let canonicalSubmission = null;
-    // TUG-8/TUG-9 uses the canonical server record when its reviewed migration
-    // is available. A deployment before the migration retains the legacy path.
-    if (["TUG8", "TUG9"].includes(docType)) {
-      canonicalActionKeysRef.current ||= newCanonicalActionKeys();
-      canonicalSubmission = await createAndSubmitCanonicalTug({ docType, formData, currentUser, idempotencyKeys: canonicalActionKeysRef.current });
-      if (canonicalSubmission.unavailable && CANONICAL_TUG_REQUIRED) {
-        throw new Error("Penyimpanan transaksi TUG canonical belum tersedia. Dokumen resmi tidak dibuat.");
-      }
-      if (!canonicalSubmission.unavailable) {
-        txnId = canonicalSubmission.id;
-        seq = Number(canonicalSubmission.docSequence);
-        docNumbers = { ...docNumbers, [docKey]: canonicalSubmission.docNumber };
-      }
-    }
-
-    if (docType === "TUG5" && formData.sourceType === "ULTG") {
-      // TUG-5 dari ULTG: 1-stage approval oleh Manager ULTG unit yang sama.
-      // Setelah approve, jadi pengajuan yang bisa di-adopt Admin/TL UPT induk (bukan auto-chain TUG-7).
-      const nt5u = {
-        id: txnId,
-        docType, docSeq: seq, docNumbers,
-        ...formData,
-        stage: "PENDING_MGR_ULTG",
-        status: "PENDING",
-        requiredApprover: "MGR_ULTG",
-        approvedByMgrUltg: null, approvedAtMgrUltg: null,
-        adoptedBy: null, adoptedAt: null, adoptedTug9Id: null,
-        rejectedBy: null, rejectedAt: null, rejectReason: null,
-        createdBy: currentUser.id, createdAt: Date.now(),
-      };
-      const newTxnsU = [...txns, nt5u];
-      const newSeqU = seq + 1;
-      setTxns(newTxnsU); setDocSeq(newSeqU); setTxnModal(false);
-      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
-      await saveToCloud({txns: newTxnsU, docSeq: newSeqU});
-      logAudit(currentUser, "CREATE", "txns", nt5u.docNumbers.tug5, { docType, jumlahBarang: (formData.stockItems||[]).length });
-      showToast(`${nt5u.docNumbers.tug5} dibuat! Menunggu approval Manager ULTG. ⏳`);
-      return;
-    }
-
-    if (docType === "TUG5") {
-      // TUG-5: 2-stage approval: Asman → Manager UPT
-      // Then auto-generates: INTRACOMPANY → draft TUG-7, INTERCOMPANY → draft TUG-5 UIT
-      const nt5 = {
-        id: txnId,
-        docType, docSeq: seq, docNumbers,
-        ...formData,
-        stage: "PENDING_ASMAN",
-        status: "PENDING",
-        requiredApprover: "ASMAN",
-        approvedByAsman: null, approvedAtAsman: null,
-        approvedByManager: null, approvedAtManager: null,
-        tug7Id: null, // will be set when TUG-7 is auto-generated
-        rejectedBy: null, rejectedAt: null, rejectReason: null,
-        createdBy: currentUser.id, createdAt: Date.now(),
-      };
-      const newTxns5 = [...txns, nt5];
-      const newSeq5 = seq + 1;
-      setTxns(newTxns5); setDocSeq(newSeq5); setTxnModal(false);
-      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
-      await saveToCloud({txns: newTxns5, docSeq: newSeq5});
-      logAudit(currentUser, "CREATE", "txns", nt5.docNumbers.tug5, { docType, jumlahBarang: (formData.stockItems||[]).length });
-      showToast(`${nt5.docNumbers.tug5} dibuat! Menunggu approval Asman Konstruksi. ⏳`);
-      return;
-    }
-
-    if (docType === "TUG3") {
-      // TUG-3/4 is a 3-stage approval chain on a single transaction:
-      // PENDING_TL -> (TL approves) -> MENUNGGU_TUG4 -> (TUG-4 filled + Manager approves)
-      // -> MENUNGGU_FINAL -> (lampiran final filled) -> PENDING_ASMAN -> (Asman approves) -> APPROVED
-      const nt3 = {
-        id: txnId,
-        docType, docSeq: seq, docNumbers,
-        ...formData,
-        stage: "PENDING_TL",
-        status: "PENDING", // kept for compatibility with generic PENDING/APPROVED/REJECTED filters
-        requiredApprover: "TL",
-        approvedByTL: null, approvedAtTL: null,
-        approvedByManager: null, approvedAtManager: null,
-        approvedByAsman: null, approvedAtAsman: null,
-        rejectedBy: null, rejectedAt: null, rejectReason: null,
-        createdBy: currentUser.id, createdAt: Date.now(),
-      };
-      const newTxns3 = [...txns, nt3];
-      const newSeq3 = seq + 1;
-      setTxns(newTxns3); setDocSeq(newSeq3); setTxnModal(false);
-      setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
-      await saveToCloud({txns: newTxns3, docSeq: newSeq3});
-      logAudit(currentUser, "CREATE", "txns", nt3.docNumbers.tug3, { docType, jumlahBarang: (formData.stockItems||[]).length });
-      showToast(`Transaksi ${nt3.docNumbers.tug3} dibuat! Menunggu approval TL Logistik (TUG-3 Karantina). ⏳`);
-      return;
-    }
-
-    const requiredApprover = canonicalSubmission && !canonicalSubmission.unavailable
-      ? (canonicalSubmission.stage === "PENDING_TL" ? "TL" : "ASMAN")
-      : (hasRole(currentUser, "ADMIN") ? "TL" : "ASMAN");
-    const replacedDraft = replaceDraftId ? txns.find(t => t.id === replaceDraftId) : null;
-    const { draftLabel:_localDraftLabel, ...draftBase } = replacedDraft || {};
-    const nt = {
-      ...draftBase,
-      id: txnId,
-      docType, docSeq: seq, docNumbers,
-      ...formData,
-      status: "PENDING",
-      canonical: !!canonicalSubmission && !canonicalSubmission.unavailable,
-      canonicalId: canonicalSubmission?.id || null,
-      canonicalVersion: canonicalSubmission?.version || null,
-      identitySnapshot: canonicalSubmission?.identitySnapshot || null,
-      stage: canonicalSubmission?.stage || undefined,
-      requiredApprover,
-      approvedBy: null, approvedAt: null,
-      asmanAutoApproved: false,
-      rejectedBy: null, rejectedAt: null, rejectReason: null,
-      createdBy: currentUser.id, createdAt: Date.now(),
-    };
-    const draftReplaced = replaceDraftId
-      ? txns.map(t => t.id === replaceDraftId ? nt : t)
-      : [...txns, nt];
-    // Source transactions must point at the canonical record, never a local
-    // draft id. This preserves both TUG-5 -> TUG-9 and TUG-7 -> TUG-8 chains.
-    const newTxns = replaceDraftId
-      ? draftReplaced.map(t => t.adoptedTug9Id === replaceDraftId
-        ? { ...t, adoptedTug9Id:txnId }
-        : t.tug8DraftId === replaceDraftId ? { ...t, tug8DraftId:txnId } : t)
-      : draftReplaced;
-    const newSeq = canonicalSubmission && !canonicalSubmission.unavailable ? docSeq : seq + 1;
-    setTxns(newTxns); setDocSeq(newSeq); setTxnModal(false); setEditingDraftTxnId(null);
-    setSavingInfo({ label: "Menyimpan data transaksi...", done: 0, total: 0 });
-    await saveToCloud({txns: newTxns, docSeq: newSeq});
-    logAudit(currentUser, "CREATE", "txns", nt.docNumbers[docKey], { docType, jumlahBarang: (formData.stockItems||[]).length });
-    canonicalActionKeysRef.current = null;
-    showToast(`Transaksi ${nt.docNumbers[docKey]} dibuat! Menunggu approval ${ROLES[requiredApprover]}. ⏳`);
-    } catch (err) {
-      console.error("commitNewTxn gagal:", err);
-      showToast(`❌ Gagal menyimpan transaksi: ${err?.message||err}`, "error");
-    } finally { savingTxnRef.current = false; setSavingTxn(false); setSavingInfo(null); }
-  }
+  // ── Transaction (TUG-9) ── diekstrak ke src/hooks/useTugTransactions.js
+  // (openNewTxn, addItemRow, removeItemRow, updateItemRow, tug10Missing,
+  // flagTug10Invalid, saveTxn, commitNewTxn — lihat pemanggilan hook di atas).
 
   function docKeyOf(txn) {
     if (txn.docType==="TUG9") return "tug9";
@@ -4565,368 +2521,27 @@ export default function PLNWarehouse() {
     showToast(`❌ ${txn.docNumbers[docKeyOf(txn)]} DITOLAK.`, "error");
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // TUG-3 / TUG-4 — 3-stage approval chain on a single transaction:
-  //   Stage 1: PENDING_TL      -> TL Logistik approves      -> MENUNGGU_TUG4
-  //   Stage 2: PENDING_MANAGER -> Manager approves (TUG-4)  -> MENUNGGU_FINAL
-  //   Stage 3: PENDING_ASMAN   -> Asman approves (TUG-3 Final) -> APPROVED (stock increases)
-  // ══════════════════════════════════════════════════════════════════
-
-  // Stage 1: TL Logistik approves the TUG-3 Karantina submission
-  async function approveTUG3_TL(txn) {
-    if (!hasRole(currentUser, "TL")) { showToast("Hanya TL Logistik yang bisa menyetujui TUG-3 Karantina.","error"); return; }
-    if (txn.stage !== "PENDING_TL") { showToast("Transaksi ini tidak dalam tahap menunggu TL.","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? { ...t, stage:"MENUNGGU_TUG4", approvedByTL:currentUser.id, approvedAtTL:Date.now(), requiredApprover:"MANAGER" } : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug3, {stage:"MENUNGGU_TUG4"});
-    showToast(`✅ ${txn.docNumbers.tug3} disetujui TL Logistik! Lanjut ke tahap TUG-4 (Pemeriksaan Mutu).`);
-  }
-  async function rejectTUG3_TL(txn, reason) {
-    if (!hasRole(currentUser, "TL")) { showToast("Hanya TL Logistik yang bisa menolak TUG-3 Karantina.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug3, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug3} DITOLAK oleh TL Logistik.`, "error");
-  }
-
-  // Stage 2a: Admin/TL fills in the TUG-4 form (Tim Mutu, Lokasi Penyerahan, hasil pemeriksaan)
-  async function submitTUG4Form(txn, tug4Data) {
-    if (!tug4Data.timMutuId) { showToast("Pilih paket Tim Mutu!","error"); return; }
-    if (!tug4Data.lokasiPenyerahan?.trim()) { showToast("Lokasi Penyerahan wajib diisi!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? { ...t, ...tug4Data, stage:"PENDING_MANAGER" } : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    showToast(`📋 Form TUG-4 dilengkapi! Menunggu approval Manager.`);
-  }
-  // Stage 2b: Manager approves the TUG-4 pemeriksaan
-  async function approveTUG4_Manager(txn) {
-    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menyetujui TUG-4.","error"); return; }
-    if (txn.stage !== "PENDING_MANAGER") { showToast("Transaksi ini tidak dalam tahap menunggu Manager.","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? { ...t, stage:"MENUNGGU_FINAL", approvedByManager:currentUser.id, approvedAtManager:Date.now(), requiredApprover:"ASMAN" } : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug4, {stage:"MENUNGGU_FINAL"});
-    showToast(`✅ ${txn.docNumbers.tug4} disetujui Manager! Lanjut ke tahap finalisasi TUG-3.`);
-  }
-  async function rejectTUG4_Manager(txn, reason) {
-    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menolak TUG-4.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug4, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug4} DITOLAK oleh Manager.`, "error");
-  }
-
-  // Stage 3a: Admin/TL completes the TUG-3 Final lampiran (foto kendaraan, SIM/KTP, surat jalan, kontrak, per-material)
-  async function submitTUG3FinalLampiran(txn, lampiranData) {
-    const newTxns = txns.map(t => t.id===txn.id ? { ...t, ...lampiranData, stage:"PENDING_ASMAN" } : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    showToast(`📎 Lampiran TUG-3 Final dilengkapi! Menunggu approval Asman Konstruksi.`);
-  }
-  // Stage 3b: Asman Konstruksi approves the final receipt — THIS is when stock actually increases
-  async function approveTUG3Final_Asman(txn) {
-    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-3 Final.","error"); return; }
-    if (txn.stage !== "PENDING_ASMAN") { showToast("Transaksi ini tidak dalam tahap menunggu Asman.","error"); return; }
-
-    // Same incoming-material logic as TUG-10 approval: bump existing Data Stok
-    // row or auto-create new Master Katalog + Data Stok entry.
-    let newKatalog = [...katalogList];
-    let newStocks = [...stocks];
-    let nextKatNum = newKatalog.length + 1;
-    let nextStkNum = newStocks.length + 1;
-    // Lacak baris stok & katalog yang benar-benar berubah/ditambah (pola sama TUG-10) —
-    // sync ke Supabase cuma mengirim baris itu, bukan seluruh tabel `stocks`.
-    const touchedStockIds = new Set();
-    const touchedKatalogIds = new Set();
-
-    txn.stockItems.forEach(si => {
-      const lokasiId = si.lokasiTujuanId || txn.stockItems[0]?.lokasiTujuanId;
-      if (!lokasiId) return;
-      if (si.katalogMode === "existing" && si.katalogId) {
-        const existingRow = newStocks.find(s => s.katalogId===si.katalogId && s.lokasiId===lokasiId);
-        if (existingRow) {
-          newStocks = newStocks.map(s => s.id===existingRow.id ? { ...s, qty: s.qty + si.qty } : s);
-          touchedStockIds.add(existingRow.id);
-        } else {
-          const newId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
-          newStocks.push({ id:newId, katalogId:si.katalogId, lokasiId, qty:si.qty, minQty:0, price:si.harga||0, jenisBarang:"Persediaan", img:null, createdAt:Date.now() });
-          touchedStockIds.add(newId);
-        }
-      } else {
-        const newKatId = `KAT-${String(nextKatNum++).padStart(3,"0")}-${uid().slice(-6)}`;
-        newKatalog.push({ id:newKatId, katalog:si.katalogBaru||"", name:si.namaBaru, category:si.categoryBaru||"Lainnya", satuan:si.satuanBaru||"unit", createdAt:Date.now() });
-        touchedKatalogIds.add(newKatId);
-        const newStkId = `STK-${String(nextStkNum++).padStart(3,"0")}-${uid().slice(-6)}`;
-        newStocks.push({ id:newStkId, katalogId:newKatId, lokasiId, qty:si.qty, minQty:0, price:si.harga||0, jenisBarang:"Persediaan", img:null, createdAt:Date.now() });
-        touchedStockIds.add(newStkId);
-      }
-    });
-
-    const newTxns = txns.map(t => t.id===txn.id ? { ...t, stage:"APPROVED", status:"APPROVED", approvedByAsman:currentUser.id, approvedAtAsman:Date.now() } : t);
-    setTxns(newTxns); setStocks(newStocks); setKatalogList(newKatalog);
-    await saveToCloud({txns: newTxns, stocks: newStocks, katalogList: newKatalog}, {
-      stocksChangedRows: newStocks.filter(s => touchedStockIds.has(s.id)),
-      katalogChangedRows: newKatalog.filter(k => touchedKatalogIds.has(k.id)),
-    });
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug3, {stage:"APPROVED"});
-    showToast(`✅ ${txn.docNumbers.tug3} DISETUJUI FINAL! Stok bertambah ke gudang.`);
-  }
-  async function rejectTUG3Final_Asman(txn, reason) {
-    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-3 Final.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug3, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug3} DITOLAK oleh Asman Konstruksi (tahap final).`, "error");
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // TUG-5 APPROVAL CHAIN: Asman → Manager UPT
-  // Setelah Manager approve → auto-generate TUG-7 (Intracompany)
-  //                        atau draft TUG-5 UIT (Intercompany)
-  // ══════════════════════════════════════════════════════════════════
-
-  async function approveTUG5_Asman(txn) {
-    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
-    if (txn.stage !== "PENDING_ASMAN") { showToast("TUG-5 ini tidak dalam tahap menunggu Asman.","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"PENDING_MANAGER", requiredApprover:"MANAGER", approvedByAsman:currentUser.id, approvedAtAsman:Date.now()} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug5, {stage:"PENDING_MANAGER"});
-    showToast(`✅ ${txn.docNumbers.tug5} disetujui Asman! Menunggu approval Manager.`);
-  }
-  async function rejectTUG5_Asman(txn, reason) {
-    if (!hasRole(currentUser, "ASMAN")) { showToast("Hanya Asman Konstruksi yang bisa menolak TUG-5.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns); await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug5, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug5} DITOLAK oleh Asman.`, "error");
-  }
-
-  async function approveTUG5_Manager(txn) {
-    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menyetujui TUG-5 tahap ini.","error"); return; }
-    if (txn.stage !== "PENDING_MANAGER") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager.","error"); return; }
-
-    if (txn.jenisTransfer === "INTRACOMPANY") {
-      // Auto-generate draft TUG-7 di level UIT
-      const seq = docSeq;
-      const docNumbers = generateDocNumbers(seq, Date.now());
-      const newTug7 = {
-        id: `TUG7-` + uid().slice(-6),
-        docType: "TUG7",
-        docSeq: seq, docNumbers,
-        tug5Id: txn.id,
-        tug5DocNo: txn.docNumbers.tug5,
-        uitId: txn.uitId,
-        uptPengirimId: "", // diisi Admin UIT
-        atasBebanRekening: "",
-        perintahKerja: txn.perintahKerja||"", kodeAkun: txn.kodePerkiraan||"", fungsi: txn.fungsi||"",
-        stockItems: txn.stockItems.map(si=>({...si, qty: si.permintaan||si.qty||0})),
-        stage: "DRAFT_UIT",
-        status: "PENDING",
-        requiredApprover: "ADMIN_UIT",
-        approvedByAdminUIT: null, approvedAtAdminUIT: null,
-        approvedByMgrLogistik: null, approvedAtMgrLogistik: null,
-        rejectedBy: null, rejectedAt: null, rejectReason: null,
-        createdAt: Date.now(),
-        unitPenerima: "UPT Surabaya",
-      };
-      const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED", status:"APPROVED", approvedByManager:currentUser.id, approvedAtManager:Date.now(), tug7Id:newTug7.id} : t);
-      const allTxns = [...newTxns, newTug7];
-      const newSeq = seq + 1;
-      setTxns(allTxns); setDocSeq(newSeq);
-      await saveToCloud({txns: allTxns, docSeq: newSeq});
-      logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug5, {stage:"APPROVED", generated:newTug7.docNumbers.tug7});
-      showToast(`✅ ${txn.docNumbers.tug5} DISETUJUI! Draft TUG-7 otomatis dibuat untuk UIT. 📋`);
-    } else {
-      // INTERCOMPANY — generate draft TUG-5 UIT (untuk dikirim ke UIT lain)
-      const seq = docSeq;
-      const docNumbers = generateDocNumbers(seq, Date.now());
-      const draftTug5UIT = {
-        id: `TUG5UIT-` + uid().slice(-6),
-        docType: "TUG5",
-        docSubType: "UIT_INTERCOMPANY",
-        docSeq: seq, docNumbers,
-        tug5UptId: txn.id, // referensi ke TUG-5 UPT asal
-        uitId: txn.uitId,
-        jenisTransfer: "INTERCOMPANY",
-        keteranganUmum: txn.keteranganUmum,
-        perintahKerja: txn.perintahKerja||"", kodePerkiraan: txn.kodePerkiraan||"", fungsi: txn.fungsi||"",
-        stockItems: txn.stockItems.map(si=>({...si})),
-        stage: "DRAFT_UIT",
-        status: "PENDING",
-        createdAt: Date.now(),
-        namaPekerjaan: txn.keteranganUmum||"Permintaan Intercompany",
-        lokasiPekerjaan: "UIT-JBM",
-      };
-      const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED", status:"APPROVED", approvedByManager:currentUser.id, approvedAtManager:Date.now(), draftTug5UITId:draftTug5UIT.id} : t);
-      const allTxns = [...newTxns, draftTug5UIT];
-      const newSeq = seq + 1;
-      setTxns(allTxns); setDocSeq(newSeq);
-      await saveToCloud({txns: allTxns, docSeq: newSeq});
-      logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug5, {stage:"APPROVED", generated:draftTug5UIT.docNumbers.tug5});
-      showToast(`✅ ${txn.docNumbers.tug5} DISETUJUI! Draft TUG-5 UIT (Intercompany) dibuat — cetak & kirim manual ke UIT tujuan. 📄`);
-    }
-  }
-  async function rejectTUG5_Manager(txn, reason) {
-    if (!hasRole(currentUser, "MANAGER")) { showToast("Hanya Manager yang bisa menolak TUG-5.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns); await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug5, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug5} DITOLAK oleh Manager.`, "error");
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // TUG-5 DARI ULTG: Manager ULTG approve (1 tahap) → jadi pengajuan siap di-adopt
-  // Admin/TL UPT induk ULTG tersebut. Adopt = auto-create draft TUG-9 (editable).
-  // ══════════════════════════════════════════════════════════════════
-
-  async function approveTUG5_MgrULTG(txn) {
-    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menyetujui TUG-5 ini.","error"); return; }
-    if (currentUser.role !== "SUPERADMIN") {
-      if (!currentUser.ultgId) { showToast("Akun kamu belum terhubung ke unit ULTG manapun. Hubungi Admin untuk melengkapi profil.","error"); return; }
-      if (txn.ultgId !== currentUser.ultgId) { showToast("TUG-5 ini bukan dari unit ULTG kamu.","error"); return; }
-    }
-    if (txn.stage !== "PENDING_MGR_ULTG") { showToast("TUG-5 ini tidak dalam tahap menunggu Manager ULTG.","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED_ULTG", status:"APPROVED", approvedByMgrUltg:currentUser.id, approvedAtMgrUltg:Date.now()} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug5, {stage:"APPROVED_ULTG"});
-    showToast(`✅ ${txn.docNumbers.tug5} disetujui! Menunggu di-adopt oleh Admin/TL UPT.`);
-  }
-  async function rejectTUG5_MgrULTG(txn, reason) {
-    if (!hasRole(currentUser, "MGR_ULTG")) { showToast("Hanya Manager ULTG yang bisa menolak TUG-5 ini.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns); await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug5, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ ${txn.docNumbers.tug5} DITOLAK oleh Manager ULTG.`, "error");
-  }
-  // Admin/TL UPT induk "mengadopsi" pengajuan ULTG → auto-create draft TUG-9 (editable, stok dipilih sendiri)
-  async function adoptTUG5ULTG(txn) {
-    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin/TL UPT yang bisa mengadopsi pengajuan ini.","error"); return; }
-    if (txn.adoptedBy) { showToast("Pengajuan ini sudah di-adopt UPT lain.","error"); return; }
-    const ultg = ultgList.find(u=>u.id===txn.ultgId);
-    // Cocokkan katalogId dari pengajuan TUG-5 ULTG ke baris stok aktual (pilih stok dengan
-    // qty terbesar untuk katalog tsb) — supaya list material TIDAK hilang saat masuk draft TUG-9,
-    // karena form TUG-9 me-render item lewat stocks.find(s=>s.id===si.stockId), bukan katalogId.
-    const draftTug9 = {
-      id: `DRAFT-TUG9-` + uid().slice(-6),
-      docType: "TUG9", draftLabel:"DRAFT — nomor resmi saat diajukan",
-      uptId: currentUserUptId || currentUser?.uptId || "",
-      tug5Id: txn.id, tug5DocNo: txn.docNumbers.tug5,
-      namaPekerjaan: txn.keteranganUmum || "Permintaan Material ULTG",
-      lokasiPekerjaan: ultg?.nama || "ULTG",
-      perkiraanPembebanan: "", kodePerkiraan: txn.kodePerkiraan||"",
-      keteranganBarang: txn.namaPekerjaan || txn.keteranganUmum || `Adopsi dari pengajuan ${ultg?.nama||""} — ${txn.docNumbers.tug5}`,
-      stockItems: txn.stockItems.map(si=>{
-        const matches = stocks.filter(s=>s.katalogId===si.katalogId).sort((a,b)=>(b.qty||0)-(a.qty||0));
-        return { stockId: matches[0]?.id || "", qty: si.permintaan||si.qty||1, _katalogHint: si.katalogId };
-      }),
-      noNodin: "", noPersetujuan: "",
-      nopol: "", simKtp: "", namaPengemudi: "",
-      penerimaNama: "", penerimaJabatan: "", penerimaUnit: ultg?.nama||"",
-      satpamId: "",
-      fotoKendaraan: null, fotoSimKtp: null, fotoSuratPengembalian: null, fotoMaterial: [],
-      status: "DRAFT",
-      createdBy: currentUser.id, createdAt: Date.now(),
-    };
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, adoptedBy:currentUser.id, adoptedAt:Date.now(), adoptedTug9Id:draftTug9.id} : t);
-    const allTxns = [...newTxns, draftTug9];
-    setTxns(allTxns);
-    await saveToCloud({txns: allTxns});
-    showToast(`📋 Diadopsi! Draft TUG-9 dibuat — lengkapi & edit materialnya sebelum submit.`);
-    return draftTug9;
-  }
-  // Buka draft TUG-8/9 di form biasa. Nomor resmi hanya dibuat oleh RPC canonical
-  // setelah seluruh data, stok, dan lampiran lolos validasi.
-  function openDraftTug9(txn) {
-    canonicalActionKeysRef.current = null;
-    setTxnForm({ ...txn, uptId:txn.uptId || currentUserUptId || currentUser?.uptId || "", stockItems: txn.stockItems.length ? txn.stockItems : [{stockId:"",qty:1}] });
-    setEditingDraftTxnId(txn.id);
-    setTxnModal(true);
-  }
-  // Submit draft turunan mengganti satu baris local draft dengan record canonical.
-  async function submitDraftTug9(formData) {
-    if (!editingDraftTxnId) throw new Error("Draft transaksi tidak ditemukan.");
-    await commitNewTxn(formData.docType, formData, { replaceDraftId:editingDraftTxnId });
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  // TUG-7 APPROVAL CHAIN: Admin UIT (lengkapi) → Manager Logistik UIT (approve)
-  // Setelah Manager Logistik approve → auto-generate draft TUG-8 di UPT Pengirim
-  // ══════════════════════════════════════════════════════════════════
-
-  async function submitTUG7_AdminUIT(txn, tug7Data) {
-    if (!hasRole(currentUser, "ADMIN_UIT")) { showToast("Hanya Admin UIT yang bisa melengkapi TUG-7.","error"); return; }
-    if (!tug7Data.uptPengirimId) { showToast("Pilih UPT Pengirim terlebih dahulu!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, ...tug7Data, stage:"PENDING_MGR_LOGISTIK", requiredApprover:"MGR_LOGISTIK_UIT", approvedByAdminUIT:currentUser.id, approvedAtAdminUIT:Date.now()} : t);
-    setTxns(newTxns);
-    await saveToCloud({txns: newTxns});
-    showToast(`📋 TUG-7 ${txn.docNumbers.tug7} dilengkapi! Menunggu approval Manager Logistik UIT.`);
-  }
-  async function approveTUG7_MgrLogistik(txn) {
-    if (!hasRole(currentUser, "MGR_LOGISTIK_UIT")) { showToast("Hanya Manager Logistik UIT yang bisa menyetujui TUG-7.","error"); return; }
-    if (txn.stage !== "PENDING_MGR_LOGISTIK") { showToast("TUG-7 ini tidak dalam tahap menunggu Manager Logistik.","error"); return; }
-
-    // Auto-generate local draft TUG-8 in the sending UPT. It intentionally has
-    // no official number/sequence; the canonical RPC allocates those on submit.
-    const uptPengirim = uptList.find(u=>u.id===txn.uptPengirimId);
-    const tug5Ref = txns.find(t=>t.id===txn.tug5Id);
-    const newTug8Draft = {
-      id: `DRAFT-TUG8-` + uid().slice(-6),
-      docType: "TUG8",
-      draftLabel:"DRAFT — nomor resmi saat diajukan",
-      tug7Id: txn.id,
-      tug5Id: txn.tug5Id,
-      noReferensiTug7: txn.docNumbers.tug7,
-      noReferensiTug5: tug5Ref?.docNumbers?.tug5 || "",
-      unitTujuan: txn.unitPenerima || "UPT Surabaya",
-      uptPengirimId: txn.uptPengirimId,
-      uptId: txn.uptPengirimId,
-      namaPekerjaan: `Berdasarkan TUG-7 ${txn.docNumbers.tug7}`,
-      lokasiPekerjaan: uptPengirim?.nama || "-",
-      perkiraanPembebanan: "", kodePerkiraan: txn.kodeAkun||"",
-      stockItems: txn.stockItems.map(si=>({stockId:"", katalogId:si.katalogId, qty:si.qty||si.permintaan||0})),
-      keteranganBarang: `Berdasarkan TUG-5 ${tug5Ref?.docNumbers?.tug5||""} dan TUG-7 ${txn.docNumbers.tug7}`,
-      stage: "DRAFT_TUG8", // Admin UPT Pengirim harus konfirmasi dulu
-      status: "DRAFT",
-      penerimaNama:"", penerimaJabatan:"", penerimaUnit:"",
-      nopol:"", namaPengemudi:"", simKtp:"", satpamId:"",
-      fotoKendaraan:null, fotoSimKtp:null, fotoSuratPengembalian:null, fotoMaterial:[],
-      createdAt: Date.now(),
-    };
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, stage:"APPROVED", status:"APPROVED", approvedByMgrLogistik:currentUser.id, approvedAtMgrLogistik:Date.now(), tug8DraftId:newTug8Draft.id} : t);
-    const allTxns = [...newTxns, newTug8Draft];
-    setTxns(allTxns);
-    await saveToCloud({txns: allTxns});
-    logAudit(currentUser, "APPROVE", txn.docType, txn.docNumbers.tug7, {stage:"APPROVED", generated:"DRAFT_TUG8"});
-    showToast(`✅ TUG-7 DISETUJUI! Draft TUG-8 otomatis muncul di UPT ${uptPengirim?.nama||"Pengirim"}. 📦`);
-  }
-  async function rejectTUG7_MgrLogistik(txn, reason) {
-    if (!hasRole(currentUser, "MGR_LOGISTIK_UIT")) { showToast("Hanya Manager Logistik UIT yang bisa menolak TUG-7.","error"); return; }
-    if (!reason.trim()) { showToast("Masukkan alasan penolakan!","error"); return; }
-    const newTxns = txns.map(t => t.id===txn.id ? {...t, status:"REJECTED", stage:"REJECTED", rejectedBy:currentUser.id, rejectedAt:Date.now(), rejectReason:reason} : t);
-    setTxns(newTxns); await saveToCloud({txns: newTxns});
-    logAudit(currentUser, "REJECT", txn.docType, txn.docNumbers.tug7, {stage:"REJECTED", alasan:reason});
-    showToast(`❌ TUG-7 DITOLAK oleh Manager Logistik UIT.`, "error");
-  }
-
-  // Draft TUG-8 must be completed in the form; it may not bypass canonical
-  // create+submit or browser-side stock handling through a direct confirmation.
-  async function konfirmasiDraftTUG8(txn) {
-    if (!hasRole(currentUser, "ADMIN","TL")) { showToast("Hanya Admin Gudang / TL yang bisa mengkonfirmasi draft TUG-8.","error"); return; }
-    openDraftTug9(txn);
-    showToast("Lengkapi TUG-8, pilih stok dan jumlah, lalu ajukan untuk membuat nomor resmi canonical.");
-  }
+  const {
+    approveTUG3_TL, rejectTUG3_TL,
+    submitTUG4Form, approveTUG4_Manager, rejectTUG4_Manager,
+    submitTUG3FinalLampiran, approveTUG3Final_Asman, rejectTUG3Final_Asman,
+    approveTUG5_Asman, rejectTUG5_Asman,
+    approveTUG5_Manager, rejectTUG5_Manager,
+    approveTUG5_MgrULTG, rejectTUG5_MgrULTG, adoptTUG5ULTG,
+    openDraftTug9, submitDraftTug9,
+    submitTUG7_AdminUIT, approveTUG7_MgrLogistik, rejectTUG7_MgrLogistik,
+    konfirmasiDraftTUG8,
+  } = useTugApprovals({
+    currentUser, showToast,
+    txns, setTxns, saveToCloud,
+    stocks, setStocks, katalogList, setKatalogList,
+    docSeq, setDocSeq,
+    uptList, ultgList, currentUserUptId,
+    canonicalActionKeysRef,
+    setTxnForm, setEditingDraftTxnId, setTxnModal, editingDraftTxnId,
+    commitNewTxn,
+  });
+  stateRef.current.submitDraftTug9 = submitDraftTug9;
 
   // Bangun ulang knowledge base RAG (tabel rag_chunks di Supabase) dari
   // Master Katalog + transaksi TUG yang approved. Dipicu MANUAL lewat tombol
@@ -4940,28 +2555,44 @@ export default function PLNWarehouse() {
     try {
       const enam_bulan_lalu = Date.now() - 180*24*60*60*1000;
       const txnRelevant = txns.filter(t=>t.status==="APPROVED" && t.createdAt>=enam_bulan_lalu);
-      // Agregasi qty+harga per katalogId (jumlah semua lokasi/blok untuk katalog yang sama)
-      // supaya chunk RAG-nya bawa angka real-time, bukan cuma deskripsi statis.
-      const stockByKatalog = {};
+      // Agregasi qty+harga per (uptId, katalogId) — chunk katalog kini per-UPT (RAG 3-tier,
+      // supaya akun UPT tidak melihat angka stok UPT lain). Katalog tanpa stok di UPT
+      // manapun dapat 1 chunk global (upt_id null, deskripsi tanpa angka).
+      const stockByUptKatalog = {}; // key `${uptId}::${katalogId}`
       enrichedStocks.forEach(s=>{
         if (!s.katalogId) return;
-        if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty:0, price:s.price||0, locations:[] };
-        stockByKatalog[s.katalogId].qty += s.qty||0;
-        if (s.qty>0) {
-          const lok = lokasiList.find(l=>l.id===s.lokasiId);
-          const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
-          stockByKatalog[s.katalogId].locations.push({ gudang: gdg?.nama||"", blok: lok?.kode||s.lokasi||"", qty: s.qty||0 });
-        }
+        const lok = lokasiList.find(l=>l.id===s.lokasiId);
+        const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : null;
+        const uptId = gdg?.uptId;
+        if (!uptId) return;
+        const key = `${uptId}::${s.katalogId}`;
+        if (!stockByUptKatalog[key]) stockByUptKatalog[key] = { uptId, katalogId: s.katalogId, qty:0, price:s.price||0, locations:[] };
+        stockByUptKatalog[key].qty += s.qty||0;
+        if (s.qty>0) stockByUptKatalog[key].locations.push({ gudang: gdg?.nama||"", blok: lok?.kode||s.lokasi||"", qty: s.qty||0 });
       });
+      const katalogIdsWithStock = new Set(Object.values(stockByUptKatalog).map(v=>v.katalogId));
+      const katalogChunks = [
+        ...Object.values(stockByUptKatalog).map(v=>{
+          const k = katalogList.find(kk=>kk.id===v.katalogId);
+          if (!k) return null;
+          const uptNama = uptList.find(u=>u.id===v.uptId)?.nama || v.uptId;
+          return { id:`katalog_${v.uptId}_${v.katalogId}`, source_type:"katalog", source_id:v.katalogId, upt_id:v.uptId, content:`UPT ${uptNama}: ${buildKatalogRagContent(k, v)}` };
+        }).filter(Boolean),
+        // Chunk global "katalog tanpa stok" (upt_id null, tampil ke semua) hanya dibuat
+        // oleh akun NASIONAL (Pusat/SUPERADMIN) / nightly_sync yang membaca stok semua UPT.
+        // Akun scoped hanya melihat stok UPT-nya, jadi "tanpa stok" versinya keliru untuk
+        // katalog yang sebenarnya bersaldo di UPT lain — biarkan global dikelola nasional.
+        ...(dataScope === null ? katalogList.filter(k=>!katalogIdsWithStock.has(k.id)).map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, upt_id:null, content:buildKatalogRagContent(k, null) })) : []),
+      ];
       // "Buku pintar" hasil kurasi Admin dari pertanyaan nyata yang dijawab buruk oleh bot —
       // diprioritaskan tinggi karena isinya jawaban resmi untuk pertanyaan yang benar-benar
       // pernah ditanyakan, bukan cuma deskripsi umum.
       const { data: faqRows } = await supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true);
 
       const chunks = [
-        ...katalogList.map(k=>({ id:`katalog_${k.id}`, source_type:"katalog", source_id:k.id, content:buildKatalogRagContent(k, stockByKatalog[k.id]) })),
-        ...txnRelevant.map(t=>({ id:`txn_${t.id}`, source_type:"txn", source_id:t.id, content:buildTxnRagContent(t) })),
-        ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
+        ...katalogChunks,
+        ...txnRelevant.map(t=>({ id:`txn_${t.id}`, source_type:"txn", source_id:t.id, upt_id: t.uptId || users.find(u=>u.id===t.createdBy)?.uptId || null, content:buildTxnRagContent(t) })),
+        ...(faqRows||[]).map(f=>({ id:`faq_${f.id}`, source_type:"faq", source_id:String(f.id), upt_id:null, content:`Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}` })),
       ];
       if (chunks.length===0) { if (!silent) showToast("Tidak ada data untuk di-index.", "error"); if (!silent) setRagSyncing(false); return; }
       // Skip chunk yang kontennya identik dengan yang sudah tersimpan — hemat kuota Cohere
@@ -4982,8 +2613,15 @@ export default function PLNWarehouse() {
       // Hapus hanya chunk lama milik sinkron browser (katalog/txn/FAQ). Chunk
       // `mutasi` dibuat nightly_sync.mjs dan tidak boleh ikut terhapus di sini.
       const currentIds = new Set(chunks.map(c=>c.id));
-      const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "txn", "faq"]);
-      const toDelete = (existing||[]).filter(r=>!currentIds.has(r.id)).map(r=>r.id);
+      const { data: existing } = await supabase.from("rag_chunks").select("id, upt_id").in("source_type", ["katalog", "txn", "faq"]);
+      // Akun scoped (UPT/UIT) HANYA boleh menghapus chunk orphan milik UPT dalam cakupannya.
+      // Tanpa guard ini, sync Admin UPT-A menghapus chunk UPT-B (tampak "orphan" dari sisi A,
+      // karena client A cuma memuat data UPT-A). Chunk shared (upt_id null, mis. FAQ/global)
+      // & chunk UPT di luar cakupan dibiarkan — itu domain akun nasional / nightly_sync.
+      const toDelete = (existing||[])
+        .filter(r=>!currentIds.has(r.id))
+        .filter(r=> dataScope === null || (r.upt_id && dataScope.includes(r.upt_id)))
+        .map(r=>r.id);
       if (toDelete.length) await supabase.from("rag_chunks").delete().in("id", toDelete);
       setRagLastSync(Date.now());
       if (!silent) showToast(`✅ Knowledge Base RAG disinkron: ${toEmbed.length}/${chunks.length} item di-embed ulang (${chunks.length - toEmbed.length} tidak berubah, di-skip), ${katalogList.length} katalog, ${txnRelevant.length} transaksi, ${(faqRows||[]).length} FAQ.`);
@@ -5094,21 +2732,42 @@ export default function PLNWarehouse() {
     setChatHistory(h=>[...h,{role:"user",text:msg}]);
     setChatLoading(true);
 
+    // Pak War memakai scope akun yang sama dengan layar operasional. Dulu UIT dianggap
+    // "global" (nasional) — sekarang dataScope (getScopeUptIds) membatasi ke semua UPT
+    // di UIT-nya, sama seperti layar operasional lain (fix Gelombang 2 multi-UPT).
+    const assistantGlobal = dataScope === null;
+    const assistantStocks = assistantGlobal ? enrichedStocks : enrichedStocks.filter(s => {
+      const lokasi = lokasiList.find(l => l.id === s.lokasiId);
+      const gudang = lokasi?.gudangId ? gudangList.find(g => g.id === lokasi.gudangId) : null;
+      return inScopeUpt(gudang?.uptId || null, dataScope);
+    });
+    const assistantStockIds = new Set(assistantStocks.map(s => s.id));
+    const assistantTxns = assistantGlobal ? txns : txns.filter(t => {
+      if ((t.stockItems || []).some(si => assistantStockIds.has(si.stockId))) return true;
+      return inScopeUpt(t.uptId || users.find(u => u.id === t.createdBy)?.uptId || null, dataScope);
+    });
+    const scopedEnrichedStocks = assistantStocks;
+    const scopedTxns = assistantTxns;
+
     // Build rich context from live system data
     const now = new Date();
     const tiga_bulan_lalu = Date.now() - 90*24*60*60*1000;
-    const txnRecent = txns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
+    const txnRecent = scopedTxns.filter(t=>t.createdAt>=tiga_bulan_lalu && t.status==="APPROVED");
 
     // Top 20 material by nilai
-    const top20 = [...enrichedStocks]
+    const top20 = [...scopedEnrichedStocks]
       .sort((a,b)=>(b.qty*b.price)-(a.qty*a.price))
       .slice(0,20);
 
+    // Top material by qty, per satuan (beda satuan tak bisa dibanding) — utk "stok paling banyak"
+    const topByQtyPerSatuan = getTopStockByQty(scopedEnrichedStocks, katalogList, 15);
+    const totalPerSatuan = getTotalPerSatuan(scopedEnrichedStocks);
+
     // Stok kritis
-    const kritis = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
+    const kritis = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
 
     // Pending approvals
-    const pending = txns.filter(t=>t.status==="PENDING");
+    const pending = scopedTxns.filter(t=>t.status==="PENDING");
     const pendingDetailText = pending.length===0 ? "Tidak ada transaksi pending." : pending
       .map(t=>{
         const creator = users.find(u=>u.id===t.createdBy);
@@ -5132,7 +2791,7 @@ export default function PLNWarehouse() {
     const usageSummary = {};
     txnRecent.forEach(t=>{
       (t.stockItems||[]).forEach(si=>{
-        const s = enrichedStocks.find(x=>x.id===si.stockId);
+        const s = scopedEnrichedStocks.find(x=>x.id===si.stockId);
         if(!s) return;
         if(!usageSummary[s.name]) usageSummary[s.name]={total:0,count:0};
         usageSummary[s.name].total += si.qty||0;
@@ -5141,16 +2800,23 @@ export default function PLNWarehouse() {
     });
     const topPakai = Object.entries(usageSummary).sort((a,b)=>b[1].total-a[1].total).slice(0,10);
 
+    // Proyeksi / stok akan habis (top 10 paling mendesak)
+    const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 10);
+    const forecastSoonText = forecastSoon.length===0 ? "Tidak ada proyeksi (belum cukup histori pemakaian)." : forecastSoon
+      .map(f=>`- ${f.nama} [${f.katalog||"-"}]: stok ${fmtNum(f.totalQty)} ${f.satuan}, rata-rata ${fmtNum(f.avgPerBulan)}/bln, estimasi habis ~${fmtNum(f.estimasiHari)} hari${f.isKritis?" (KRITIS)":""}`).join('\n');
+
     // ── RAG: cari chunk (katalog/transaksi) yang paling relevan secara makna
     // dengan pertanyaan user — pelengkap snapshot di atas yang cuma top-N
     // hardcoded. Kalau Cohere/knowledge base belum siap, lewati saja (tetap
     // jawab pakai snapshot biasa) — RAG di sini bersifat tambahan, bukan
     // syarat AI Agent bisa jalan.
+    // RAG chunks (rag_chunks) sekarang ter-tag per-UPT (upt_id) — match_rag_chunks
+    // menerima p_upts (null=nasional, array=UPT/UIT) jadi RAG jalan untuk semua akun.
     let ragContextText = "Belum ada hasil pencarian (Knowledge Base RAG belum disinkron atau belum terkonfigurasi).";
     try {
       if (supabase && import.meta.env.VITE_COHERE_API_KEY) {
         const [queryVector] = await cohereEmbed([msg], "search_query");
-        const { data: matches, error } = await supabase.rpc("match_rag_chunks", { query_embedding: queryVector, match_count: 8 });
+        const { data: matches, error } = await supabase.rpc("match_rag_chunks", { query_embedding: queryVector, match_count: 8, p_upts: dataScope });
         if (error) throw error;
         if (matches && matches.length>0) {
           ragContextText = matches.map(m=>`- (relevansi ${(m.similarity*100).toFixed(0)}%) ${m.content}`).join("\n");
@@ -5162,7 +2828,7 @@ export default function PLNWarehouse() {
       ragContextText = `(Pencarian Knowledge Base gagal: ${e.message})`;
     }
 
-    const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk ${WAREHOUSE}.
+    const systemPrompt = `Kamu adalah asisten operasional sistem manajemen gudang PLN bernama Pak War untuk Gudang ${currentUptNama}.
 
 PERSONA & GAYA JAWABAN:
 Kamu Pak War, staf senior gudang PLN yang menjawab pertanyaan rekan kerja. Pakai
@@ -5170,14 +2836,29 @@ Bahasa Indonesia korporat yang natural dan ramah — bukan template kaku, bukan
 robotik.
 
 ATURAN JAWABAN:
-- Jawab HANYA apa yang ditanya. JANGAN menambahkan analisis, interpretasi, atau
-  rekomendasi kecuali user memintanya secara eksplisit.
-- Buka dengan satu kalimat pengantar singkat, lalu langsung ke data. Boleh tutup
-  dengan satu kalimat penawaran bantuan singkat.
+- Bahasa Indonesia sopan, formal, jelas, dan informatif — hangat profesional,
+  bukan kaku robotik.
+- Mulai dengan JAWABAN INTI dulu (1-2 kalimat), baru rincian bila perlu. Boleh
+  menambahkan rincian/informasi pendukung yang membantu (tidak lagi harus jawab
+  sesempit pertanyaan), tetap fokus dan jangan melenceng ke topik lain.
+- Format Markdown sederhana: judul pendek, bullet, angka. JANGAN pakai tabel
+  teks lebar. JANGAN paragraf panjang.
 - Saat menyebut material/stok, WAJIB satu bullet per item, satu baris per item,
   dengan format persis:
   - **Nama Material** [kode katalog] — stok X unit · Lokasi: Y
   Selalu cantumkan lokasi bila tersedia di data; kalau tidak ada tulis "Lokasi: -".
+- Untuk pertanyaan "stok terbanyak/paling banyak" pakai daftar TOP MATERIAL BY QTY
+  (per satuan) — sebutkan per satuan, JANGAN membandingkan qty antar satuan yang
+  berbeda. Untuk "termahal/nilai terbesar" pakai daftar by nilai.
+- Untuk pertanyaan spesifik soal stok/qty/ranking/kritis/proyeksi/lokasi material,
+  WAJIB jawab berdasarkan data SNAPSHOT DATA SISTEM di bawah (TOP MATERIAL BY QTY,
+  MATERIAL KRITIS, PROYEKSI/STOK AKAN HABIS, dst) — JANGAN mengarang angka.
+- Kalau data tidak cukup untuk menjawab, katakan data apa yang belum tersedia,
+  lalu ajukan SATU pertanyaan klarifikasi.
+- Tutup dengan langkah lanjut atau pertanyaan singkat bila relevan. Sesekali saja
+  (tidak setiap jawaban, biar tidak mengganggu), boleh tambahkan ajakan singkat
+  di penutup: "Kalau jawaban ini kurang tepat atau ada yang bisa saya perbaiki,
+  beri tahu saya — masukan Anda membantu meningkatkan layanan WARNOTO."
 
 Sumber: Data WARNOTO per ${now.toLocaleDateString("id-ID")}
 
@@ -5191,10 +2872,16 @@ ${MATERIAL_GLOSSARY}
 ---
 SNAPSHOT DATA SISTEM SAAT INI:
 
-INVENTORI (${enrichedStocks.length} item total):
-Nilai total: Rp ${fmtNum(Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
+INVENTORI (${scopedEnrichedStocks.length} item total):
+Nilai total: Rp ${fmtNum(Math.round(scopedEnrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)))}
 Top 20 material by nilai:
 ${top20.map(s=>`- ${s.name} [${s.katalog}]: ${fmtNum(s.qty)} ${s.unit} | Rp ${fmtNum(Math.round(s.qty*s.price))} | lokasi: ${s.lokasi||"-"}`).join('\n')}
+
+TOP MATERIAL BY QTY (per satuan — JANGAN bandingkan qty antar satuan berbeda):
+${topByQtyPerSatuan.map(g=>`Satuan ${g.satuan}:\n${g.items.map(i=>`- ${i.nama} [${i.katalog}]: ${fmtNum(i.totalQty)} ${g.satuan}`).join('\n')}`).join('\n')}
+
+TOTAL QTY PER SATUAN:
+${Object.entries(totalPerSatuan).map(([satuan,qty])=>`- ${satuan}: ${fmtNum(qty)}`).join('\n')}
 
 MATERIAL KRITIS (stok ≤ minimum):
 ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok ${s.qty} ${s.unit}, min ${s.minQty}`).join('\n')}
@@ -5202,7 +2889,10 @@ ${kritis.length===0?"Tidak ada material kritis":kritis.map(s=>`- ${s.name}: stok
 PEMAKAIAN 3 BULAN TERAKHIR (top 10):
 ${topPakai.map(([nama,d])=>`- ${nama}: ${d.total} unit (${d.count}x transaksi)`).join('\n')}
 
-${formatStockStatsText(enrichedStocks)}
+PROYEKSI / STOK AKAN HABIS (top 10 paling mendesak):
+${forecastSoonText}
+
+${formatStockStatsText(scopedEnrichedStocks)}
 
 TUG PENDING APPROVAL (${pending.length} transaksi):
 ${pendingDetailText}
@@ -5222,11 +2912,11 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
         .replace(/[^a-z0-9\s-]/g," ")
         .split(/\s+/)
         .filter(word=>word.length>=3 && !["berapa","material","gudang","stoknya","tolong","pak","war","yang","untuk","dengan","dari","saat","sekarang","hari","ini"].includes(word));
-      const matchedStocks = enrichedStocks.filter(stock=>{
+      const matchedStocks = scopedEnrichedStocks.filter(stock=>{
         const haystack = `${stock.name||""} ${stock.katalog||""} ${stock.jenisBarang||""}`.toLowerCase();
         return keywords.length>0 && keywords.some(keyword=>haystack.includes(keyword));
       }).slice(0,8);
-      const totalValue = enrichedStocks.reduce((sum,stock)=>sum+(stock.qty*stock.price),0);
+      const totalValue = scopedEnrichedStocks.reduce((sum,stock)=>sum+(stock.qty*stock.price),0);
       const localNotice = "Layanan AI sedang tidak tersedia, jadi informasi berikut saya bacakan langsung dari data WARNOTO.";
 
       if (/pending|approval|persetujuan|dokumen|tug/.test(normalized)) {
@@ -5238,34 +2928,46 @@ Jawab pertanyaan user berdasarkan data di atas (gabungkan snapshot dan hasil pen
           : kritis.slice(0,12).map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · minimum ${fmtNum(stock.minQty)}`).join("\n");
         return `${localNotice}\n\nIni daftar material yang stoknya sudah menyentuh batas minimum:\n${criticalText}\n\nSaya siap bantu kalau perlu data lain.`;
       }
+      if (/paling banyak|terbanyak|stok terbesar|qty terbanyak/.test(normalized)) {
+        const qtyText = topByQtyPerSatuan.length===0 ? "Belum ada data stok." : topByQtyPerSatuan
+          .map(g=>`Satuan ${g.satuan}:\n${g.items.slice(0,10).map(i=>`- **${i.nama}** [${i.katalog||"-"}] — ${fmtNum(i.totalQty)} ${g.satuan}`).join("\n")}`).join("\n\n");
+        return `${localNotice}\n\nIni material dengan stok terbanyak (dikelompokkan per satuan, tidak bisa dibandingkan lintas satuan):\n\n${qtyText}\n\nSebutkan saja bila mau lihat satuan lain.`;
+      }
       if (matchedStocks.length>0) {
         const materialText = matchedStocks.map(stock=>`- **${stock.name}** [${stock.katalog||"-"}] — stok ${fmtNum(stock.qty)} ${stock.unit} · Lokasi: ${stock.lokasi||"-"}`).join("\n");
         return `${localNotice}\n\nBerikut material yang cocok dengan yang Anda tanyakan:\n${materialText}\n\nSebutkan saja bila ada material lain yang mau dicek.`;
       }
       if (/forecast|proyeksi|prediksi|bulan|pemakaian/.test(normalized)) {
-        const usageText = topPakai.length===0 ? "Belum ada transaksi pemakaian yang cukup." : topPakai.map(([name,data])=>`- **${name}** — ${fmtNum(data.total)} unit dalam ${data.count} transaksi`).join("\n");
-        return `${localNotice}\n\nIni pemakaian material tertinggi dalam 3 bulan terakhir:\n${usageText}\n\nKalau perlu proyeksi lebih rinci, silakan buka menu Forecast Stok.`;
+        const forecastList = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 8);
+        const forecastText = forecastList.length===0 ? "Belum ada proyeksi (belum cukup histori pemakaian)." : forecastList
+          .map(f=>`- **${f.nama}** [${f.katalog||"-"}] — stok ${fmtNum(f.totalQty)} ${f.satuan}, rata-rata ${fmtNum(f.avgPerBulan)}/bln, estimasi habis ~${fmtNum(f.estimasiHari)} hari${f.isKritis?" (KRITIS)":""}`).join("\n");
+        return `${localNotice}\n\nIni material yang paling mendesak berdasarkan proyeksi pemakaian:\n${forecastText}\n\nSebutkan saja bila mau lihat material lain.`;
       }
-      return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(enrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
+      return `${localNotice}\n\nBerikut ringkasan kondisi gudang saat ini:\n- Total item inventori: ${fmtNum(scopedEnrichedStocks.length)}\n- Nilai inventori: Rp ${fmtNum(Math.round(totalValue))}\n- Material kritis: ${fmtNum(kritis.length)}\n- Dokumen pending: ${fmtNum(pending.length)}\n- Rencana kedatangan 30 hari: ${fmtNum(rencana30.length)} item\n\nSebutkan nama atau kode katalog material bila ingin saya tampilkan stok yang lebih spesifik.`;
     }
 
     try {
       const groqKey = (import.meta.env.VITE_GROQ_API_KEY || "").trim();
       if (!groqKey) throw new Error("Konfigurasi layanan AI belum tersedia.");
+      const messages = [
+        {role:"system",content:systemPrompt},
+        ...chatHistory.filter(m=>m.role!=="ai"||chatHistory.indexOf(m)>0).slice(-8).map(m=>({
+          role:m.role==="user"?"user":"assistant",
+          content:m.text
+        })),
+        {role:"user",content:msg}
+      ];
+
+      // Single-call ke Groq (bukan tool-loop): tool-use bikin 3-4 panggilan/pertanyaan
+      // yang menjebol limit free tier 12k token/menit. Akurasi tetap dijaga lewat
+      // snapshot data yang diperkaya di systemPrompt di atas (top qty, proyeksi, dst).
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions",{
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
         body:JSON.stringify({
           model:"llama-3.3-70b-versatile",
           max_tokens:1500,
-          messages:[
-            {role:"system",content:systemPrompt},
-            ...chatHistory.filter(m=>m.role!=="ai"||chatHistory.indexOf(m)>0).slice(-8).map(m=>({
-              role:m.role==="user"?"user":"assistant",
-              content:m.text
-            })),
-            {role:"user",content:msg}
-          ]
+          messages,
         })
       });
       const data = await resp.json();
@@ -5429,12 +3131,30 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // stock record so the rest of the UI/PDF/forecast code can use familiar
   // fields (name, katalog, category, unit, lokasi) without modification.
   const enrichedStocks = enrichStocks(stocks, katalogList, lokasiList);
+  stateRef.current.enrichedStocks = enrichedStocks;
+  // Cakupan UPT 3-tier (UPT sendiri | semua UPT di UIT | nasional) untuk SEMUA layar
+  // operasional — sumber tunggal getScopeUptIds/inScopeUpt (src/lib/roles.js, Gelombang 2
+  // multi-UPT). Data mentah (stocks/txns/attbList) tetap utuh untuk mutasi/approval lintas-UPT;
+  // yang discope hanya turunan yang di-oper ke tab DISPLAY.
+  const dataScope = getScopeUptIds(currentUser, uptList);
+  const scopedEnrichedStocks = dataScope === null ? enrichedStocks : enrichedStocks.filter(s => {
+    const gid = lokasiList.find(l => l.id === s.lokasiId)?.gudangId || s.gudangId || null;
+    const uptId = gid ? gudangList.find(g => g.id === gid)?.uptId : null;
+    return inScopeUpt(uptId, dataScope);
+  });
+  const scopedStockIds = dataScope === null ? null : new Set(scopedEnrichedStocks.map(s => s.id));
+  // Junction rows mentah, versi scoped — dipakai layar yang butuh bentuk pra-enrich (mis. Forecast).
+  const scopedStocks = dataScope === null ? stocks : stocks.filter(s => scopedStockIds.has(s.id));
+  const scopedTxns = dataScope === null ? txns : txns.filter(t => inScopeUpt(t.uptId || users.find(u => u.id === t.createdBy)?.uptId || null, dataScope));
+  const scopedAttbUptNames = dataScope === null ? null : new Set(
+    uptList.filter(u => dataScope.includes(u.id)).map(u => (u.nama || "").replace(/^UPT\s+/i, "").trim())
+  );
+  const scopedAttbList = scopedAttbUptNames === null ? attbList : attbList.filter(a => !a.upt || scopedAttbUptNames.has(a.upt));
+  // Opname & Stock Count discope lewat UPT pembuat/pengunggah (tak ada field uptId di sesi).
+  const scopedOpnameList = dataScope === null ? opnameList : opnameList.filter(o => inScopeUpt(users.find(u => u.id === o.dibuatOleh)?.uptId || null, dataScope));
+  const scopedStockCountList = dataScope === null ? stockCountList : stockCountList.filter(sc => inScopeUpt(users.find(u => u.id === sc.uploadedBy)?.uptId || null, dataScope));
   // UPT adalah pagar pertama; gudang_ids hanya mempersempit scope itu.
   // SUPERADMIN tetap global, sedangkan akun UIT/ULTG mengikuti hierarki unitnya.
-  const appUptShortForAdopt = (typeof UPT !== "undefined" ? UPT : "").replace(/^UPT\s+/i, "").trim();
-  const currentUserUptId = currentUser?.uptId
-    || (ultgList.find(u => u.id === currentUser?.ultgId)?.parentUptId)
-    || (uptList.find(u => String(u.nama || "").toUpperCase().includes(appUptShortForAdopt.toUpperCase()))?.id);
   const gudangAccessLimited = currentUser?.role !== "SUPERADMIN";
   const visibleGudangList = useMemo(() => getVisibleGudangForInspection({
     currentUser,
@@ -5474,14 +3194,24 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   ) : [];
   const pendingTxns = txns.filter(t=>t.status==="PENDING");
   const stockCountPendingCount = stockCountList.reduce((a,s)=>a+s.items.filter(i=>i.approval==="PENDING").length, 0);
-  const heavyEquipmentPendingCount = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)).length;
+  const heavyEquipmentPendingCount = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l, uptList)).length;
   // Overdue reminder discope ke UPT user sendiri (pemilik ATAU peminjam alat) — sebelumnya
   // dihitung global tanpa filter sama sekali, jadi 1 alat overdue di UPT lain pun ikut muncul
   // sebagai badge di menu Alat Berat untuk SEMUA login, termasuk yang tidak ada urusan sama sekali.
-  const myUptForHeavyEquipment = getUserUptScope(currentUser);
+  const myUptForHeavyEquipment = getUserUptScope(currentUser, uptList);
+  // Nama UPT untuk brand sidebar/header — ikut UPT user login, bukan konstanta hardcoded UPT (Surabaya).
+  // Label unit untuk brand/header/Pak War, sesuai tier: nasional (Pusat/SUPERADMIN,
+  // dataScope null) → "Semua UPT"; akun UIT (uitId ada, uptId kosong) → nama UIT-nya;
+  // akun UPT → nama UPT. Dulu selalu fallback konstanta UPT ("UPT Surabaya") untuk akun
+  // tanpa uptId, jadi nasional/UIT keliru menampilkan "UPT Surabaya".
+  const currentUptNama =
+    dataScope === null ? "PLN Pusat"
+    : (currentUser?.uitId && !currentUser?.uptId)
+      ? (((uitList.length ? uitList : []).find(u => u.id === currentUser.uitId)?.kode || "UIT").replace(/-/g, " "))
+      : ((uptList.length ? uptList : DEFAULT_UPT_LIST).find(u => u.id === currentUser?.uptId)?.nama || UPT);
   const heavyEquipmentOverdueCount = heavyEquipmentLoans.filter(l=>getHeavyEquipmentLoanRuntimeStatus(l)==="OVERDUE" &&
     (getHeavyEquipmentLoanOwnerUpt(l)===myUptForHeavyEquipment || getHeavyEquipmentLoanRequesterUpt(l)===myUptForHeavyEquipment)).length;
-  const attbPendingCount = attbList.filter(a=>isPendingAttbApproval(a) && canApproveAttb(currentUser, a)).length;
+  const attbPendingCount = attbList.filter(a=>isPendingAttbApproval(a) && canApproveAttb(currentUser, a, uptList)).length;
   const attbBelumLanjutCount = attbList.filter(a=>a.lanjutBelumLanjut && (a.upt===myUptForHeavyEquipment || hasRole(currentUser,"MSB","Manager UIT"))).length;
   // Pool material Bongkaran ATTB (MTU) dari TUG-10 — sumber kandidat ATTB sebelum
   // tahap AE.1. Diturunkan dari transaksi TUG-10 (retur) yang punya stockItem
@@ -5514,10 +3244,30 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     return items.sort((a,b)=>(b.tanggal||0)-(a.tanggal||0));
   }, [txns, katalogList]);
   // Material kritis AGREGAT per katalog (total semua lokasi ≤ minimum) — dipakai seluruh dashboard.
-  const lowStocks = getKritisAgg(enrichedStocks, buildMonthlySeriesByKatalog(txns, enrichedStocks));
-  const forecastSoon = getMaterialAkanHabis(enrichedStocks, katalogList, txns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
-  const totalVal = enrichedStocks.reduce((a,s)=>a+s.qty*s.price,0);
-  const filteredStocks = enrichedStocks.filter(s=>{
+  // Discope per UPT (Gelombang 2 multi-UPT): dashboard/forecast bukan lagi agregat nasional
+  // untuk akun UPT/UIT.
+  const lowStocks = getKritisAgg(scopedEnrichedStocks, buildMonthlySeriesByKatalog(scopedTxns, scopedEnrichedStocks));
+  const forecastSoon = getMaterialAkanHabis(scopedEnrichedStocks, katalogList, scopedTxns, 9999).filter(r=>!r.isKritis && r.estimasiHari!==Infinity && r.estimasiHari<=30);
+  // Ringkasan Rekomendasi Pengadaan untuk kartu Dashboard — rumus sama persis dgn tab
+  // Rekomendasi Pengadaan di Forecast Stok (computeProcurementList, src/lib/analytics.js).
+  const procurementResult = computeProcurementList({
+    katalogList, stocks: scopedEnrichedStocks, txns: scopedTxns, materialCadangHealthData,
+  });
+  const procurementSummary = {
+    totalCount: procurementResult.list.length,
+    totalQty: procurementResult.totalQty,
+    totalValue: procurementResult.totalValue,
+    criticalCount: procurementResult.criticalCount,
+    top: procurementResult.list.slice(0,5),
+  };
+  // Guard NaN: satu baris dgn qty/price undefined atau string non-numerik akan
+  // meracuni seluruh Σ jadi NaN (fmtRp(NaN) tampil "Rp 0"). Number(...)||0 menetralkan per-baris.
+  const totalVal = scopedEnrichedStocks.reduce((a,s)=>a+(Number(s.qty)*Number(s.price)||0),0);
+  // Filter UPT untuk Data Stok — HANYA viewer multi-UPT: Pusat/SUPERADMIN (dataScope null) lihat
+  // semua UPT; UIT (dataScope >1) lihat UPT di UIT-nya. Akun 1 UPT tak dapat dropdown (kosong).
+  const stockUptFilterOptions = dataScope === null ? uptList
+    : (Array.isArray(dataScope) && dataScope.length > 1 ? uptList.filter(u => dataScope.includes(u.id)) : []);
+  const filteredStocks = scopedEnrichedStocks.filter(s=>{
     const lokForSearch = lokasiList.find(l=>l.id===s.lokasiId);
     const gdgForSearch = (lokForSearch?.gudangId || s.gudangId)
       ? gudangList.find(g=>g.id===(lokForSearch?.gudangId || s.gudangId))
@@ -5532,8 +3282,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     // Stok tanpa gudang (belum di-assign) tetap tampil. No-op utk user unrestricted.
     const gid = lokasiList.find(l=>l.id===s.lokasiId)?.gudangId || s.gudangId || null;
     const mg = canAccessGudang(currentUser, gid);
-    return ms && mj && mg;
+    const mu = !stockUptFilter || (gudangList.find(g=>g.id===gid)?.uptId === stockUptFilter);
+    return ms && mj && mg && mu;
   });
+  // Opsi filter UPT generik dipakai TUG (identik pola stockUptFilterOptions).
+  const multiUptFilterOptions = stockUptFilterOptions;
   const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
   const pagedStocks = filteredStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
@@ -5541,8 +3294,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
   const pagedKatalog = filteredKatalog.slice((katalogPageClamped-1)*katalogPageSize, katalogPageClamped*katalogPageSize);
-  const filteredTxns = txns.filter(t=> filterStatus==="ALL" || t.status===filterStatus).sort((a,b)=>b.createdAt-a.createdAt);
-  const activeTugTxns = tugSubTab==="TUG15" ? [] : txns.filter(t=>t.docType===tugSubTab);
+  const filteredTxns = scopedTxns.filter(t=> (filterStatus==="ALL" || t.status===filterStatus) &&
+    (!tugUptFilter || (t.uptId || users.find(u=>u.id===t.createdBy)?.uptId) === tugUptFilter)
+  ).sort((a,b)=>b.createdAt-a.createdAt);
+  const activeTugTxns = tugSubTab==="TUG15" ? [] : scopedTxns.filter(t=>t.docType===tugSubTab);
   const activeTugSummary = [
     {label:"Total Dokumen",val:activeTugTxns.length},
     {label:"Menunggu",val:activeTugTxns.filter(t=>t.status==="PENDING").length,cls:"is-alert"},
@@ -5584,7 +3339,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <div style={{width:76,height:76,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:22,boxShadow:"0 8px 24px rgba(0,0,0,0.25)",padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
           <div style={{fontSize:34,fontWeight:900,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
           <div style={{fontSize:12,color:"rgba(255,255,255,0.75)",fontWeight:600,letterSpacing:1.5,textTransform:"uppercase",margin:"14px 0 6px"}}>{COMPANY}</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.5}}>{UPT} · {WAREHOUSE}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.5}}>Sistem Manajemen Gudang</div>
         </div>
         {/* KANAN — form login */}
         <div style={{flex:1,padding:isMobile?32:40,minWidth:0,background:"#fff"}}>
@@ -5592,7 +3347,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             <div style={{textAlign:"center",marginBottom:24}}>
               <div style={{width:72,height:72,background:"white",borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",boxShadow:"0 8px 24px rgba(0,0,0,0.10)",border:`1px solid ${C_LIGHT.border}`,padding:12}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
               <div style={{fontSize:26,fontWeight:900,color:C_LIGHT.accent,letterSpacing:"1px",lineHeight:1}}>WARNOTO</div>
-              <div style={{fontSize:12,color:C_LIGHT.muted,marginTop:6}}>{UPT} · {WAREHOUSE}</div>
+              <div style={{fontSize:12,color:C_LIGHT.muted,marginTop:6}}>Sistem Manajemen Gudang</div>
             </div>
           )}
           <div style={{fontSize:20,fontWeight:800,color:C_LIGHT.text,marginBottom:4}}>Selamat Datang</div>
@@ -5624,6 +3379,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   const isPengadaan = currentUser?.role === "PENGADAAN";
   // Role ULTG (Admin/Manager ULTG): sidebar terbatas — semua view-only kecuali TUG-5 & Approval TUG-5
   const isUltgRole = ULTG_ROLES.includes(currentUser?.role);
+  const tugUiForUser = isUltgRole ? { ...TUG_UI, TUG5: { title:"Slip Reservasi Material", code:"RSV", chip:"Reservasi", buat:"Buat Slip Reservasi", desc:"Ajukan slip reservasi material — Admin ULTG ajukan → Manager ULTG approve → diadopsi UPT jadi TUG-9." } } : TUG_UI;
+  const tugGroupUiForUser = isUltgRole ? { ...TUG_GROUP_UI, permintaan: { icon:"📋", label:"Reservasi", hint:"Slip reservasi material dari ULTG ke UPT" } } : TUG_GROUP_UI;
   const navItems = (isPengadaan ? [
     {id:"dashboard",icon:<SidebarIcon name="dashboard"/>,label:"Dashboard"},
     {id:"rencana",icon:<SidebarIcon name="calendar"/>,label:"Rencana Kedatangan"},
@@ -5660,7 +3417,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     dashboard: {eyebrow:"Operations Overview",title:hasRole(currentUser,"MANAGER")?"Dashboard Eksekutif":hasRole(currentUser,"ASMAN")?"Dashboard Operasional":"Dashboard Gudang"},
     stock: {eyebrow:"Inventory Control",title:"Data Stok Gudang"},
     master: {eyebrow:"Master Data",title:masterPageTitle},
-    transaction: {eyebrow:(TUG_UI[tugSubTab]||{}).code||"TUG",title:(TUG_UI[tugSubTab]||{}).title||"Transaksi TUG"},
+    transaction: {eyebrow:(tugUiForUser[tugSubTab]||{}).code||"TUG",title:(tugUiForUser[tugSubTab]||{}).title||"Transaksi TUG"},
     approval: {eyebrow:"Decision Center",title:"Approval"},
     heavyEquipment: {eyebrow:"Fleet Operations",title:"Alat Berat & Peminjaman"},
     attb: {eyebrow:"Asset Disposal Governance",title:"ATTB — Penghapusan Aset"},
@@ -5672,6 +3429,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     inspeksiMaterial: {eyebrow:"Material Assurance",title:"Inspeksi Material Cadang"},
     ai: {eyebrow:"Decision Support",title:"Pak War — Asisten Gudang"},
   }[tab] || {eyebrow:"WARNOTO",title:"Dashboard"};
+  const tug5UptKode = txnForm?.docType === "TUG5" && txnForm?.sourceType === "ULTG"
+    ? uptList.find(u => u.id === (ultgList.find(x => x.id === txnForm.ultgId)?.parentUptId || currentUser?.uptId))?.kode || "UPT-SBY"
+    : null;
 
   return (
     <div className="app-shell" data-current-tab={tab} style={{display:"flex",minHeight:"100vh",fontFamily:"'Inter',system-ui,sans-serif",background:C.bg,color:C.text}}>
@@ -5689,7 +3449,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         tugExpanded={tugExpanded} setTugExpanded={setTugExpanded} tugGroup={tugGroup} setTugGroup={setTugGroup} setTugSubTab={setTugSubTab} isUltgRole={isUltgRole}
         masterExpanded={masterExpanded} setMasterExpanded={setMasterExpanded} stockSubTab={stockSubTab} setStockSubTab={setStockSubTab}
         opnameExpanded={opnameExpanded} setOpnameExpanded={setOpnameExpanded} opnameSubTab={opnameSubTab} setOpnameSubTab={setOpnameSubTab} stockCountPendingCount={stockCountPendingCount}
-        currentUser={currentUser} rolePerms={rolePerms}
+        currentUser={currentUser} rolePerms={rolePerms} uptNama={currentUptNama}
         cloudSaving={cloudSaving} dataRefreshing={dataRefreshing} lastSaved={lastSaved}
       />
       {/* MAIN */}
@@ -5698,7 +3458,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
             setMobileMenuOpen={setMobileMenuOpen} pageMeta={pageMeta} accountMenuRef={accountMenuRef}
             theme={theme} setTheme={setTheme} accountMenuOpen={accountMenuOpen} setAccountMenuOpen={setAccountMenuOpen}
-            UPT={UPT} openGantiPassword={openGantiPassword} loggingOut={loggingOut} handleLogout={handleLogout}
+            UPT={currentUptNama} openGantiPassword={openGantiPassword} loggingOut={loggingOut} handleLogout={handleLogout}
           />
 
         <div className="app-content" style={{padding:isMobile?16:"clamp(18px, 2vw, 30px)"}}>
@@ -5711,12 +3471,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             setMaturityForm={setMaturityForm} setMaturityModal={setMaturityModal}
             dashTab={dashTab} setDashTab={setDashTab}
             totalVal={totalVal} lowStocks={lowStocks} forecastSoon={forecastSoon} myPendingApprovals={myPendingApprovals}
-            stockCountPendingCount={stockCountPendingCount} attbPendingCount={attbPendingCount} attbBelumLanjutCount={attbBelumLanjutCount} stockCountList={stockCountList}
+            stockCountPendingCount={stockCountPendingCount} attbPendingCount={attbPendingCount} attbBelumLanjutCount={attbBelumLanjutCount} stockCountList={scopedStockCountList}
             setTab={setTab} setOpnameSubTab={setOpnameSubTab}
-            enrichedStocks={enrichedStocks} txns={txns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
+            enrichedStocks={scopedEnrichedStocks} txns={scopedTxns} katalogList={katalogList} uptList={uptList} lokasiList={lokasiList} rencanaKedatanganList={rencanaKedatanganList}
             topN={topN} setTopN={setTopN} pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
-            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={attbList} attbBongkaranPool={attbBongkaranPool}
+            heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans} attbList={scopedAttbList} attbBongkaranPool={attbBongkaranPool}
             materialCadangData={materialCadangData} gudangList={gudangList} petaWilayahDivRef={petaWilayahDivRef}
+            procurementSummary={procurementSummary}
           />
         )}
 
@@ -5730,7 +3491,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             </div>
             {opnameSubTab==="opname" ? (
               <StockOpnameTab
-                opnameList={opnameList}
+                opnameList={scopedOpnameList}
                 stocks={stocks}
                 katalogList={katalogList}
                 currentUser={currentUser}
@@ -5744,6 +3505,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
                 deleteOpname={deleteOpname}
                 openScanner={openScanner}
                 showToast={showToast}
+                uptList={uptList}
                 gudangList={gudangList}
                 lokasiList={lokasiList}
                 addNonStockFoundItem={addNonStockFoundItem}
@@ -5751,7 +3513,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
               />
             ) : (
               <StockCountTab
-                stockCountList={stockCountList}
+                stockCountList={scopedStockCountList}
                 currentUser={currentUser}
                 sty={sty} C={C}
                 previewStockCount={previewStockCount}
@@ -5770,6 +3532,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             gudangCapacityList={visibleCapacityList}
             gudangCapacityImports={gudangCapacityImports}
             gudangList={visibleGudangList}
+            uptList={uptList}
             subGudangList={subGudangList}
             lokasiList={lokasiList}
             stocks={enrichedStocks}
@@ -5800,10 +3563,11 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             search={search} setSearch={setSearch}
             setPhotoSearchImg={setPhotoSearchImg} setPhotoSearchOpen={setPhotoSearchOpen}
             filterJenis={filterJenis} setFilterJenis={setFilterJenis}
+            stockUptFilter={stockUptFilter} setStockUptFilter={setStockUptFilter} stockUptFilterOptions={stockUptFilterOptions}
             filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
             photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}
             photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
-            enrichedStocks={enrichedStocks} pagedStocks={pagedStocks}
+            enrichedStocks={scopedEnrichedStocks} pagedStocks={pagedStocks}
             setStockDetailId={setStockDetailId}
             katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList}
             subGudangList={subGudangList} visibleGudangList={visibleGudangList}
@@ -5822,12 +3586,13 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="transaction" && (
           <TransactionHubTab
             C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
-            TUG_UI={TUG_UI} TUG_GROUP_UI={TUG_GROUP_UI}
+            TUG_UI={tugUiForUser} TUG_GROUP_UI={tugGroupUiForUser}
             tugGroup={tugGroup} tugSubTab={tugSubTab} setTugSubTab={setTugSubTab}
             activeTugSummary={activeTugSummary} rolePerms={rolePerms}
             filterStatus={filterStatus} setFilterStatus={setFilterStatus}
+            tugUptFilter={tugUptFilter} setTugUptFilter={setTugUptFilter} tugUptFilterOptions={multiUptFilterOptions}
             openNewTxn={openNewTxn}
-            txns={txns} filteredTxns={filteredTxns} users={users} enrichedStocks={enrichedStocks} stocks={stocks}
+            txns={scopedTxns} filteredTxns={filteredTxns} users={users} enrichedStocks={scopedEnrichedStocks} stocks={stocks}
             katalogList={katalogList} lokasiList={lokasiList} gudangList={gudangList} timMutuList={timMutuList} uitList={uitList} uptList={uptList} ultgList={ultgList}
             tug15Filter={tug15Filter} setTug15Filter={setTug15Filter}
             setDocPreview={setDocPreview} handleImg={handleImg}
@@ -5846,6 +3611,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             equipmentList={heavyEquipmentList}
             loans={heavyEquipmentLoans}
             currentUser={currentUser}
+            uptList={uptList}
             users={users}
             sty={sty}
             C={C}
@@ -5862,8 +3628,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
         {tab==="attb" && (
           <AttbTab
-            attbList={attbList}
+            attbList={scopedAttbList}
             currentUser={currentUser}
+            uptList={uptList}
             users={users}
             sty={sty}
             C={C}
@@ -5984,10 +3751,10 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {/* AI AGENT — chat AI murni, terpisah dari Forecast Stok */}
         {tab==="ai" && (
           <AIAgentPage
-            enrichedStocks={enrichedStocks}
+            enrichedStocks={scopedEnrichedStocks}
             katalogList={katalogList}
-            stocks={stocks}
-            txns={txns}
+            stocks={scopedStocks}
+            txns={scopedTxns}
             rencanaKedatanganList={rencanaKedatanganList}
             chatHistory={chatHistory}
             setChatHistory={setChatHistory}
@@ -6002,7 +3769,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             ragSyncing={ragSyncing}
             ragLastSync={ragLastSync}
             currentUser={currentUser}
-            C={C} sty={sty}
+            uptList={uptList}
+            C={C} sty={sty} uptNama={currentUptNama}
           />
         )}
 
@@ -6011,8 +3779,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           <ForecastStokPage
             katalogList={katalogList}
             setKatalogList={setKatalogList}
-            stocks={stocks}
-            txns={txns}
+            stocks={scopedStocks}
+            allStocks={stocks}
+            setStocks={setStocks}
+            gudangList={gudangList}
+            lokasiList={lokasiList}
+            txns={scopedTxns}
             forecastDetail={forecastDetail}
             setForecastDetail={setForecastDetail}
             forecastDetailResult={forecastDetailResult}
@@ -6034,6 +3806,9 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             saveToCloud={saveToCloud}
             showToast={showToast}
             currentUser={currentUser}
+            uptList={uptList}
+            uptScopeOptions={stockUptFilterOptions}
+            users={users}
             C={C} sty={sty}
           />
         )}
@@ -6172,7 +3947,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         <KartuGantungModal
           katalog={kartuGantungDetail}
           stocks={stocks} txns={txns} lokasiList={lokasiList} gudangList={gudangList} subGudangList={subGudangList}
-          sty={sty} C={C}
+          sty={sty} C={C} uptNama={currentUptNama}
           onClose={()=>setKartuGantungDetail(null)}
         />
       )}
@@ -6218,7 +3993,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       {gantiPasswordModal && <GantiPasswordModal setGantiPasswordModal={setGantiPasswordModal} gantiPasswordForm={gantiPasswordForm} setGantiPasswordForm={setGantiPasswordForm} gantiPasswordBusy={gantiPasswordBusy} submitGantiPassword={submitGantiPassword} sty={sty} />}
 
       {/* TXN MODAL - TUG5 FORM */}
-      {txnModal && txnForm && txnForm.docType==="TUG5" && <Tug5FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} uitList={uitList} ultgList={ultgList} katalogList={katalogList} tug5MaterialPage={tug5MaterialPage} setTug5MaterialPage={setTug5MaterialPage} tug5ExpandedIdx={tug5ExpandedIdx} setTug5ExpandedIdx={setTug5ExpandedIdx} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} />}
+      {txnModal && txnForm && txnForm.docType==="TUG5" && <Tug5FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} uitList={uitList} ultgList={ultgList} katalogList={katalogList} tug5MaterialPage={tug5MaterialPage} setTug5MaterialPage={setTug5MaterialPage} tug5ExpandedIdx={tug5ExpandedIdx} setTug5ExpandedIdx={setTug5ExpandedIdx} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} uptKode={tug5UptKode} />}
 
       {/* TXN MODAL - TUG9 / TUG8 FORM (outgoing material) */}
       {txnModal && txnForm && (txnForm.docType==="TUG9" || txnForm.docType==="TUG8") && <Tug98FormModal txnForm={txnForm} setTxnForm={setTxnForm} setTxnModal={setTxnModal} docSeq={docSeq} gudangList={gudangList} satpamList={satpamList} enrichedStocks={enrichedStocks} addItemRow={addItemRow} removeItemRow={removeItemRow} updateItemRow={updateItemRow} openScanner={openScanner} handleImg={handleImg} handleMaterialImg={handleMaterialImg} editingDraftTxnId={editingDraftTxnId} setEditingDraftTxnId={setEditingDraftTxnId} saveTxn={saveTxn} isMobile={isMobile} sty={sty} C={C} />}
@@ -6280,41 +4055,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
 // Normalisasi nomor katalog (hapus leading zero)
 
-// Normalisasi nama Gudang untuk pencocokan import Kapasitas Gudang -> Master Gudang.
-// Sebelumnya cuma trim+uppercase persis (String(a).trim().toUpperCase()===...) — variasi
-// kecil penulisan di Excel (titik/strip/underscore, spasi ganda) bikin gudang yang SAMA
-// gagal cocok dan ke-duplikat sebagai Gudang baru (ditemukan user 2026-07-06, ini juga
-// alasan tombol "Gabungkan Gudang Duplikat" harus ada sebagai perbaikan berulang).
-// Diperketat: hilangkan tanda baca umum, rapatkan spasi — TIDAK mengubah data asli,
-// cuma dipakai saat membandingkan.
-function normalizeGudangName(s) {
-  return String(s || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[.\-_/]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Saran Gudang existing yang "mirip" (token overlap nama) di UPT yang sama — dipakai di
-// panel konfirmasi Admin saat import Kapasitas Gudang mendeteksi kandidat Gudang baru,
-// supaya Admin bisa pilih "ini sebenarnya Gudang yang sudah ada" kalau normalisasi di
-// atas masih belum berhasil mencocokkan (mis. singkatan berbeda: "GD" vs "GUDANG").
-function suggestSimilarGudang(name, uptId, gudangList) {
-  const targetWords = normalizeGudangName(name).split(" ").filter(Boolean);
-  if (!targetWords.length) return [];
-  return gudangList
-    .filter(g => g.uptId === uptId)
-    .map(g => {
-      const words = normalizeGudangName(g.nama).split(" ").filter(Boolean);
-      const overlap = targetWords.filter(w => words.includes(w)).length;
-      return { g, overlap };
-    })
-    .filter(x => x.overlap > 0)
-    .sort((a, b) => b.overlap - a.overlap)
-    .slice(0, 5)
-    .map(x => x.g);
-}
+// normalizeGudangName/suggestSimilarGudang dipindah ke src/hooks/useWarehouseConfig.jsx (2026-08-09).
 
 // ════════════════════════════════════════════════════════════════════
 // KAPASITAS GUDANG TAB

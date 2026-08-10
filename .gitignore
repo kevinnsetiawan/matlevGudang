@@ -28,3 +28,12 @@ playwright-report/
 graphify-out/
 
 __pycache__/
+
+# Spec Kit — dipakai sebagai tool GLOBAL (skill di ~/.claude/skills & ~/.codex/skills,
+# CLI di ~/.local/bin/specify), seperti caveman/ponytail. Jangan simpan jejaknya di repo.
+.specify/
+.claude/skills/speckit-*/
+.agents/skills/speckit-*/
+
+# Headroom penanda sesi lokal (spesifik mesin) — jangan commit.
+.claude/.headroom_wrap_marker.json

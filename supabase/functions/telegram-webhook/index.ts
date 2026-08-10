@@ -158,10 +158,11 @@ Deno.serve(async (req) => {
     // 1. Cek whitelist
     const { data: allowed } = await supabase
       .from("tg_allowed_users")
-      .select("display_name, is_active")
+      .select("display_name, is_active, upt_id")
       .eq("telegram_user_id", userId)
       .maybeSingle();
 
+    const callerUptId = allowed?.upt_id ?? null;
     const isWhitelisted = !!(allowed?.is_active);
     logEntry.is_whitelisted = isWhitelisted;
     if (allowed?.display_name) logEntry.display_name = allowed.display_name;
@@ -192,7 +193,7 @@ Deno.serve(async (req) => {
     } else {
       // 3. RAG query
       await sendTypingAction(chatId);
-      const { text, chunksUsed } = await generateReply(question, userId);
+      const { text, chunksUsed } = await generateReply(question, userId, callerUptId);
       reply  = text;
       logEntry.rag_chunks_used = chunksUsed;
       intent = "rag_query";
@@ -271,12 +272,13 @@ async function cohereEmbed(texts: string[], inputType: "search_document" | "sear
   return data.embeddings as number[][];
 }
 
-async function buildRagContext(question: string): Promise<{ context: string; chunksUsed: number }> {
+async function buildRagContext(question: string, callerUptId: string | null): Promise<{ context: string; chunksUsed: number }> {
   try {
     const [queryVector] = await cohereEmbed([question], "search_query");
     const { data: matches, error } = await supabase.rpc("match_rag_chunks", {
       query_embedding: queryVector,
       match_count: 12,
+      p_upts: callerUptId ? [callerUptId] : null,
     });
     if (error) throw error;
     if (!matches || matches.length === 0) return { context: "(tidak ditemukan referensi yang relevan untuk pertanyaan ini)", chunksUsed: 0 };
@@ -300,7 +302,7 @@ async function buildWarnotoStateContext(): Promise<string> {
     if (!data) return "";
     const s = data.state_data as Record<string, unknown>;
     const since = new Date(data.updated_at as string).toLocaleString("id-ID", { timeZone:"Asia/Jakarta" });
-    return `\nDATA KONDISI GUDANG (update: ${since}):\n` + JSON.stringify(s, null, 2).slice(0, 8000);
+    return `\nDATA KONDISI GUDANG (update: ${since}):\n` + JSON.stringify(s, null, 2).slice(0, 4000);
   } catch {
     return "";
   }
@@ -352,9 +354,13 @@ async function isRateLimited(userId: string): Promise<boolean> {
   }
 }
 
-async function generateReply(question: string, userId: string): Promise<{ text: string; chunksUsed: number }> {
+async function generateReply(question: string, userId: string, callerUptId: string | null): Promise<{ text: string; chunksUsed: number }> {
   const [{ context: ragContext, chunksUsed }, stateContext, conversationHistory] = await Promise.all([
-    buildRagContext(question),
+    buildRagContext(question, callerUptId),
+    // ponytail: warnoto_state context masih nasional utk user scoped — item blob (top20ByValue,
+    // materialKritis, dst.) tidak punya penanda upt_id sama sekali, filter per-UPT butuh
+    // merestruktur buildWarnotoStateSnapshot() di App.jsx (blob nasional). Perlu keputusan
+    // restrukturisasi terpisah, bukan diperbaiki di sini.
     buildWarnotoStateContext(),
     buildConversationHistory(userId),
   ]);
@@ -366,7 +372,9 @@ ATURAN BICARA — WAJIB DIIKUTI:
 2. Kalau datanya ADA di bawah (baik di bagian referensi katalog/riwayat maupun data kondisi gudang), jawab dengan percaya diri pakai angka/fakta itu — jangan ragu-ragu kalau datanya jelas tersedia.
 3. Kalau data yang ada mirip tapi tidak persis sama dengan pertanyaan (misal user tanya "trafo 100kva", yang ada "Trafo Distribusi 100 kVA"), tetap pakai data itu, sebutkan secara natural kalau itu yang paling mendekati.
 4. Kalau BENAR-BENAR tidak ada info relevan sama sekali: JANGAN cuma bilang "tidak tahu" dan berhenti di situ. Akui dengan sopan dan hangat, lalu SELALU kasih langkah lanjutan konkret — sarankan cek menu tertentu di aplikasi WARNOTO, hubungi Admin Gudang, atau minta user kasih detail tambahan (nomor katalog/lokasi/nama lengkap material). Tindak lanjut itu wajib ada, bukan opsional.
-5. Format Markdown Telegram sederhana (bold pakai *teks*), hindari tabel panjang. Bahasa Indonesia profesional tapi hangat dan manusiawi, seperti CS senior menjawab kolega — bukan seperti asisten yang membaca skrip. Maksimal 600 kata.
+5. Bahasa Indonesia sopan, formal, jelas, informatif — hangat profesional, seperti CS senior menjawab kolega, bukan kaku robotik atau membaca skrip. Mulai dengan JAWABAN INTI dulu (1-2 kalimat), baru rincian. Format Markdown Telegram sederhana (bold pakai *teks*), judul pendek/bullet/angka, hindari tabel panjang dan paragraf bertele-tele. Maksimal 600 kata.
+5b. Kalau data yang tersedia tidak cukup menjawab, sebutkan data apa yang belum ada lalu ajukan SATU pertanyaan klarifikasi — jangan mengarang angka, lokasi, status, atau kebijakan.
+5c. Sesekali saja (tidak setiap jawaban, di akhir sesi atau saat relevan), boleh tutup dengan ajakan singkat minta masukan, mis. "Kalau jawaban ini kurang tepat atau ada yang bisa diperbaiki, kirim saja masukan Anda — bisa juga mulai dengan kata *feedback:* biar mudah saya kenali. Masukan Anda membantu meningkatkan layanan WARNOTO." Jangan tampilkan ajakan ini di setiap balasan.
 6. Kalau jawabanmu menyebut LEBIH DARI SATU material/barang (misal user tanya daftar stok, hasil pencarian nama yang mirip, atau ringkasan beberapa item), JANGAN digabung jadi satu paragraf panjang. WAJIB pakai list bernomor, satu material per nomor, dengan baris rincian di bawah nama (bukan disambung koma), dan baris kosong sebagai pemisah antar nomor. Contoh format yang benar:
 
 1. *Trafo Distribusi 100 kVA* [4180023]
@@ -394,8 +402,11 @@ ${ragContext}
 Data kondisi gudang terkini (qty, satuan, harga satuan, nilai Rupiah, material kritis):
 ${stateContext}
 
-Kalau ditanya jumlah/qty/harga/nilai material, cek dulu "Data kondisi gudang terkini" di atas — itu angka real-time. Kalau ditanya lokasi/di gudang mana/di blok mana suatu material, atau status SAP/Non-SAP-nya, cek juga referensi katalog (biasanya bawa field "Lokasi fisik" dan "Status").`;
+Kalau ditanya jumlah/qty/harga/nilai material, cek dulu "Data kondisi gudang terkini" di atas — itu angka real-time. Kalau ditanya lokasi/di gudang mana/di blok mana suatu material, atau status SAP/Non-SAP-nya, cek juga referensi katalog (biasanya bawa field "Lokasi fisik" dan "Status"). Untuk pertanyaan "stok terbanyak/paling banyak" pakai field topByQtyPerSatuan (jangan bandingkan qty antar satuan beda), untuk "akan habis/proyeksi" pakai field proyeksiStokHabis.`;
 
+  // Single-call ke Groq (bukan tool-loop): tool-use bikin 3-4 panggilan/pertanyaan
+  // yang menjebol limit free tier 12k token/menit. Akurasi dijaga lewat stateContext
+  // yang diperkaya (topByQtyPerSatuan, proyeksiStokHabis) di nightly_sync.mjs.
   const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${GROQ_API_KEY}` },

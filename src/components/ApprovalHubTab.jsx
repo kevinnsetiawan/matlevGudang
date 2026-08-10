@@ -2,7 +2,7 @@
 // dipindah dari App.jsx (refactor batch 2e). Membungkus pemanggilan <ApprovalTab/>.
 import { fmtDate } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
-import { ROLES, hasRole } from "../lib/roles.js";
+import { ROLES, hasRole, getScopeUptIds, inScopeUpt } from "../lib/roles.js";
 import {
   getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt,
   getHeavyEquipmentLoanStartDate, getHeavyEquipmentLoanReturnDate, getHeavyEquipmentLoanJobName,
@@ -31,6 +31,13 @@ export function ApprovalHubTab({
   stockCountList, approvalStockCountPage, setApprovalStockCountPage, approveStockCountItem, rejectStockCountItem,
   txns, approvalHistoryList, approvalHistoryPage, setApprovalHistoryPage,
 }) {
+  // UIT dulu dianggap "global" (nasional) — sekarang dibatasi ke semua UPT di UIT-nya lewat
+  // getScopeUptIds/inScopeUpt (sumber tunggal 3-tier, lihat src/lib/roles.js).
+  const historyScope = getScopeUptIds(currentUser, uptList);
+  const userUptById = new Map((users || []).map(u => [u.id, u.uptId]));
+  const scopedApprovalHistory = historyScope === null
+    ? approvalHistoryList
+    : approvalHistoryList.filter(h => inScopeUpt(userUptById.get(h.decidedBy), historyScope) || inScopeUpt(userUptById.get(h.requestedBy), historyScope) || inScopeUpt(h.uptId, historyScope));
   const tugCount = myPendingApprovals.length;
   const capCount = hasRole(currentUser, "TL","ASMAN") ? gudangCapacityImports.filter(i=>i.status==="PENDING_ASMAN").length : 0;
   const lokasiCount = hasRole(currentUser, "TL") ? lokasiList.filter(l=>l.status==="PENDING").length : 0;
@@ -79,7 +86,7 @@ export function ApprovalHubTab({
             </div>
             <div className="approval-pagesize">
               Tampilkan
-              <select style={{...sty.select,width:"auto",padding:"3px 6px",minHeight:"unset",fontSize:12}} value={approvalPageSize} onChange={e=>setApprovalPageSize(Number(e.target.value))}>
+              <select style={{...sty.select,width:"auto",paddingTop:3,paddingBottom:3,paddingLeft:6,paddingRight:6,minHeight:"unset",fontSize:12}} value={approvalPageSize} onChange={e=>setApprovalPageSize(Number(e.target.value))}>
                 {[10,20,50].map(n=><option key={n} value={n}>{n}</option>)}
               </select>
               <span>item</span>
@@ -232,8 +239,8 @@ export function ApprovalHubTab({
       })()}
 
       {/* ── BAGIAN: Peminjaman Alat Berat — khusus ASMAN ── */}
-      {(approvalTypeFilter==="ALL"||approvalTypeFilter==="ALAT_BERAT") && hasRole(currentUser, "ASMAN") && heavyEquipmentLoans.some(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l)) && (()=>{
-        const list = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l));
+      {(approvalTypeFilter==="ALL"||approvalTypeFilter==="ALAT_BERAT") && hasRole(currentUser, "ASMAN") && heavyEquipmentLoans.some(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l, uptList)) && (()=>{
+        const list = heavyEquipmentLoans.filter(l=>isPendingHeavyEquipmentLoan(l) && canApproveHeavyEquipmentLoan(currentUser, l, uptList));
         const paged = list.slice((approvalAlatBeratPage-1)*approvalPageSize, approvalAlatBeratPage*approvalPageSize);
         return (
           <div style={{...sty.card,marginBottom:16,borderLeft:`4px solid ${C.yellow}`}}>
@@ -338,7 +345,8 @@ export function ApprovalHubTab({
           decidedBy: t.status==="REJECTED" ? t.rejectedBy : t.approvedBy,
           decidedAt: t.status==="REJECTED" ? t.rejectedAt : t.approvedAt,
         }));
-        const combinedAll = [...approvalHistoryList, ...histTUG].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
+        const scopedHistTug = historyScope === null ? histTUG : histTUG.filter(h => inScopeUpt(userUptById.get(h.decidedBy), historyScope) || inScopeUpt(userUptById.get(h.requestedBy), historyScope) || inScopeUpt(h.uptId, historyScope));
+        const combinedAll = [...scopedApprovalHistory, ...scopedHistTug].filter(h=>h.decidedAt).sort((a,b)=>b.decidedAt-a.decidedAt);
         const combined = combinedAll.slice((approvalHistoryPage-1)*approvalPageSize, approvalHistoryPage*approvalPageSize);
         const typeLabel = {LOKASI:"📍 Lokasi/Blok", STOCK_MOVE:"📦 Pemindahan Stok", STOCK_EDIT:"✏️ Edit Stok", STOCK_DELETE:"🗑️ Hapus Stok", HEAVY_EQUIPMENT_LOAN:"🚜 Peminjaman Alat", TUG:"🔄 TUG", OPNAME:"📋 Stock Opname", STOCK_COUNT:"📊 Stock Count"};
         const typeOrder = ["TUG","HEAVY_EQUIPMENT_LOAN","OPNAME","STOCK_COUNT","LOKASI","STOCK_MOVE","STOCK_EDIT","STOCK_DELETE"];

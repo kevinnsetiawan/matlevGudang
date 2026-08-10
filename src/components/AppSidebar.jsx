@@ -1,4 +1,3 @@
-import { UPT } from "../constants.js";
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
 import { hasRole } from "../lib/roles.js";
 import { can } from "../lib/perms.js";
@@ -13,7 +12,7 @@ export function AppSidebar({
   tugExpanded, setTugExpanded, tugGroup, setTugGroup, setTugSubTab, isUltgRole,
   masterExpanded, setMasterExpanded, stockSubTab, setStockSubTab,
   opnameExpanded, setOpnameExpanded, opnameSubTab, setOpnameSubTab, stockCountPendingCount,
-  currentUser, rolePerms,
+  currentUser, rolePerms, uptNama,
   cloudSaving, dataRefreshing, lastSaved,
 }) {
   return (
@@ -43,7 +42,7 @@ export function AppSidebar({
             <div className="app-sidebar__brand-mark" style={{width:38,height:38,background:"white",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,padding:5,boxShadow:"0 2px 8px rgba(0,0,0,0.22)"}}><img src={PLN_LOGO_DATA_URI} alt="Logo PLN" style={{maxWidth:"100%",maxHeight:"100%",objectFit:"contain"}}/></div>
             <div style={{minWidth:0,lineHeight:1.15,flex:1}}>
               <div style={{color:"white",fontWeight:800,fontSize:17,letterSpacing:".5px"}}>WARNOTO</div>
-              <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,letterSpacing:".5px",textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{UPT}</div>
+              <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,letterSpacing:".5px",textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{uptNama}</div>
             </div>
             {isMobile && (
             <button
@@ -77,7 +76,7 @@ export function AppSidebar({
                   {tugExpanded && !sidebarCompact && (
                     <div className="sidebar-subnav" style={{marginBottom:4}}>
                       {(isUltgRole ? [
-                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Minta Barang",defaultSub:"TUG5"},
+                        {id:"permintaan",icon:<SidebarIcon name="request" size={16}/>,label:"Reservasi",defaultSub:"TUG5"},
                       ] : [
                         {id:"penerimaan",icon:<SidebarIcon name="inbound" size={16}/>,label:"Barang Masuk",defaultSub:"TUG3"},
                         {id:"pengeluaran",icon:<SidebarIcon name="outbound" size={16}/>,label:"Barang Keluar",defaultSub:"TUG9"},
@@ -125,7 +124,8 @@ export function AppSidebar({
                         {id:"organisasi",icon:<SidebarIcon name="organization" size={16}/>,label:"Struktur Organisasi"},
                         {id:"gudang",icon:<SidebarIcon name="warehouse" size={16}/>,label:"Master Gudang"},
                         ...(can(currentUser, "aksi.kelolaAkun", rolePerms) ? [{id:"akun",icon:<SidebarIcon name="user" size={16}/>,label:"Kelola Akun"}] : []),
-                        ...(hasRole(currentUser, "ADMIN") ? [{id:"migrasi",icon:<SidebarIcon name="migrate" size={16}/>,label:"Migrasi Data"},{id:"auditLog",icon:<SidebarIcon name="shield" size={16}/>,label:"Audit Log"},{id:"perms",icon:<SidebarIcon name="shield" size={16}/>,label:"Matrix Izin"}] : []),
+                        ...(hasRole(currentUser, "ADMIN") ? [{id:"migrasi",icon:<SidebarIcon name="migrate" size={16}/>,label:"Migrasi Data"},{id:"auditLog",icon:<SidebarIcon name="shield" size={16}/>,label:"Audit Log"}] : []),
+                        ...(currentUser?.role === "SUPERADMIN" ? [{id:"perms",icon:<SidebarIcon name="shield" size={16}/>,label:"Matrix Izin"}] : []),
                       ].map(sub=>{
                         const subActive = isActive && stockSubTab===sub.id;
                         return (

@@ -87,7 +87,9 @@ export function MaturityDashboardTab({
                 </div>
 
                 {canSwitchMaturityUpt && (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  // width:100% memaksa switcher ke barisnya sendiri (baris atas tetap [UPT | Level],
+                  // space-between pin kotak Level ke kanan — posisi tak bergeser saat ganti UPT).
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", width: "100%" }}>
                     {DEFAULT_UPT_LIST.map(u => {
                       const isSelected = selectedMaturityUpt === u.nama;
                       return (

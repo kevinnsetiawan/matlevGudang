@@ -2,12 +2,13 @@
 import { useState } from "react";
 import { KAPASITAS_LABEL, UIT, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
-import { hasRole } from "../lib/roles.js";
+import { hasRole, getScopeUptIds } from "../lib/roles.js";
 import { PetaGudangTab } from "./PetaGudangTab.jsx";
 
-export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, sty, C, setTab, setStockSubTab }) {
+export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
+  const [petaUptFilter, setPetaUptFilter] = useState(""); // "" = semua; peta pakai uptId (gudang.uptId)
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
 
@@ -21,6 +22,13 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
     (filterUPT==="ALL" || r.upt===filterUPT) &&
     (filterStatus==="ALL" || r.statusKapasitas===filterStatus)
   );
+  // Peta Utilisasi filter per-UPT untuk viewer multi-UPT (UIT/Pusat). Opsi dari SCOPE viewer
+  // (getScopeUptIds) bukan dari data kapasitas yang ada — supaya UPT tanpa data kapasitas tetap
+  // bisa dipilih (konsisten pola stockUptFilterOptions). Filter gudang peta by gudang.uptId.
+  const petaScope = getScopeUptIds(currentUser, uptList);
+  const petaUptOptions = petaScope === null ? uptList
+    : (Array.isArray(petaScope) && petaScope.length > 1 ? uptList.filter(u => petaScope.includes(u.id)) : []);
+  const petaGudangList = petaUptFilter ? gudangList.filter(g => g.uptId === petaUptFilter) : gudangList;
 
   // KPI aggregat
   const totalLahan = gudangCapacityList.reduce((s,r)=>s+r.luasLahanM2,0);
@@ -198,13 +206,15 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
       {/* SUB-TAB PETA GUDANG */}
       {subTab==="peta" && (
         <PetaGudangTab
-          gudangList={gudangList}
+          gudangList={petaGudangList}
           subGudangList={subGudangList}
           lokasiList={lokasiList}
           stocks={stocks||[]}
           sty={sty} C={C}
-          currentUser={currentUser}
           gudangCapacityList={gudangCapacityList}
+          uptOptions={petaUptOptions}
+          uptFilter={petaUptFilter}
+          setUptFilter={setPetaUptFilter}
         />
       )}
 

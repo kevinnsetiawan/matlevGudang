@@ -38,6 +38,7 @@ export function parseMaterialCadangRows(rows, katalogList) {
     ttf: ["Time To Failure Hari","TIME TO FAILURE HARI"],
     breakdown: ["Breakdown","BREAKDOWN"],
     harga: ["Harga Satuan","HARGA SATUAN"],
+    merk: ["Merk","MERK","merk"],
   };
   function findCol(row, keys) {
     for (const k of keys) { if (row[k] !== undefined) return row[k]; }
@@ -47,6 +48,7 @@ export function parseMaterialCadangRows(rows, katalogList) {
     const noKat = normalizeKatalog(findCol(row, COL.noKatalog));
     const namaMaterial = String(findCol(row, COL.namaMaterial)||"").trim();
     const cluster = String(findCol(row, COL.equipmentCluster)||"").trim();
+    const merk = String(findCol(row, COL.merk)||"").trim();
     // Semua field numerik pakai parseIndoNumber (standarisasi titik/koma, lihat definisinya) —
     // sebelumnya beda-beda tempat pakai regex ad-hoc yang tidak konsisten (bug dilaporkan user
     // 2026-07-07: qty "103,5" bisa kebaca "1.035" kalau titik-desimal diperlakukan sebagai ribuan).
@@ -60,10 +62,10 @@ export function parseMaterialCadangRows(rows, katalogList) {
     const breakdown = ["YA","Y","YES","TRUE","1"].includes(breakdownRaw);
     const hargaInput = parseIndoNumber(findCol(row, COL.harga));
 
-    if (!noKat) return { _idx:idx, status:"INVALID", error:"No Katalog kosong", noKat:"", namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (populasi <= 0) return { _idx:idx, status:"INVALID", error:"Populasi harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (leadTime <= 0) return { _idx:idx, status:"INVALID", error:"Lead Time harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
-    if (ttf <= 0) return { _idx:idx, status:"INVALID", error:"Time To Failure harus > 0", noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (!noKat) return { _idx:idx, status:"INVALID", error:"No Katalog kosong", noKat:"", namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (populasi <= 0) return { _idx:idx, status:"INVALID", error:"Populasi harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (leadTime <= 0) return { _idx:idx, status:"INVALID", error:"Lead Time harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
+    if (ttf <= 0) return { _idx:idx, status:"INVALID", error:"Time To Failure harus > 0", noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput };
 
     const katalogMatch = katalogList.find(k => normalizeKatalog(k.katalog) === noKat);
     let status = "UNMATCHED";
@@ -75,15 +77,16 @@ export function parseMaterialCadangRows(rows, katalogList) {
         warnings.push(`Nama beda: file="${namaMaterial}", sistem="${katalogMatch.name}"`);
       }
     }
-    return { _idx:idx, status, noKat, namaMaterial, cluster, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput, katalogId: katalogMatch?.id, katalogName: katalogMatch?.name, katalogSatuan: katalogMatch?.satuan, katalogHarga: katalogMatch ? (hargaInput || 0) : 0, warnings };
+    return { _idx:idx, status, noKat, namaMaterial, cluster, merk, populasi, failure5y, penggantian5y, emergency5y, leadTime, ttf, breakdown, hargaInput, katalogId: katalogMatch?.id, katalogName: katalogMatch?.name, katalogSatuan: katalogMatch?.satuan, katalogHarga: katalogMatch ? (hargaInput || 0) : 0, warnings };
   });
 
-  // Dedup: gabung baris dengan No Katalog + Equipment Cluster yang sama
+  // Dedup: gabung baris dengan No Katalog + Equipment Cluster + Merk yang sama
+  // (Merk beda = material berbeda meski No Katalog sama, jadi TIDAK di-merge — permintaan user 2026-08-09)
   const merged = [];
   const seen = {};
   for (const r of parsed) {
     if (r.status === "INVALID") { merged.push(r); continue; }
-    const key = `${r.noKat}||${r.cluster}`;
+    const key = `${r.noKat}||${r.cluster}||${r.merk||""}`;
     if (seen[key] !== undefined) {
       const ex = merged[seen[key]];
       ex.populasi = Math.max(ex.populasi, r.populasi);
@@ -267,6 +270,30 @@ function buildMaterialCadangAiContext(run, results, stocks, katalogList, txns) {
     acc[st] = (acc[st]||0)+1;
     return acc;
   }, {});
+  const clusterBreakdown = material.reduce((acc,r)=>{
+    const key = r.cluster || "Tanpa Cluster";
+    if (!acc[key]) acc[key] = { count:0, gapQty:0, gapValue:0 };
+    acc[key].count += 1;
+    acc[key].gapQty += (r.gapQty||0);
+    acc[key].gapValue += (r.gapQty||0)*(r.harga||0);
+    return acc;
+  }, {});
+  const abcBreakdown = material.reduce((acc,r)=>{
+    const key = r.abcClass || "Unclassified";
+    if (!acc[key]) acc[key] = { count:0, gapQty:0, gapValue:0 };
+    acc[key].count += 1;
+    acc[key].gapQty += (r.gapQty||0);
+    acc[key].gapValue += (r.gapQty||0)*(r.harga||0);
+    return acc;
+  }, {});
+  const procurementPriority = material
+    .filter(r => (r.gapQty||0) > 0)
+    .sort((a,b) => ((b.gapQty||0)*(b.harga||0)) - ((a.gapQty||0)*(a.harga||0)))
+    .slice(0,10)
+    .map(r => ({
+      noKatalog:r.noKat, nama:r.katalogName||r.namaMaterial, qty:r.gapQty,
+      estimasiNilai:(r.gapQty||0)*(r.harga||0), abcClass:r.abcClass, healthStatus:r.healthStatus,
+    }));
   return {
     runId: run?.id,
     createdAt: run?.createdAt,
@@ -276,6 +303,9 @@ function buildMaterialCadangAiContext(run, results, stocks, katalogList, txns) {
     avgDataConfidence: results.length ? Math.round(results.reduce((a,r)=>a+(r.dataConfidence||0),0)/results.length) : 0,
     totalGapQty: material.reduce((a,r)=>a+(r.gapQty||0),0),
     totalGapValue: material.reduce((a,r)=>a+((r.gapQty||0)*(r.harga||0)),0),
+    clusterBreakdown,
+    abcBreakdown,
+    procurementPriority,
     topRisks: topRisks.map(r=>({
       katalogId:r.katalogId, noKatalog:r.noKat, nama:r.katalogName||r.namaMaterial, cluster:r.cluster,
       healthIndex:r.healthIndex, healthStatus:r.healthStatus, dataConfidence:r.dataConfidence,
@@ -287,6 +317,8 @@ function buildMaterialCadangAiContext(run, results, stocks, katalogList, txns) {
   };
 }
 
+const MATERIAL_CADANG_METHODOLOGY_TEXT = "Health Index dihitung 100 dikurangi skor risiko tiap material: makin sering gagal/emergency, makin panjang lead time, dan makin besar kekurangan stok terhadap kebutuhan, makin rendah nilainya (0-100). Kelas ABC membagi material berdasarkan nilai risiko (gapQty x harga) - kelas A adalah kontributor nilai risiko terbesar yang paling perlu diprioritaskan, C paling kecil. Service level pakai distribusi Poisson: dari rata-rata pemakaian per periode dihitung peluang kebutuhan terpenuhi pada berbagai level stok, lalu dipilih qty minimum yang memenuhi target service level kebijakan (policy) material tersebut.";
+
 export async function generateMaterialCadangAiInsights(run, results, stocks, katalogList, txns) {
   const context = buildMaterialCadangAiContext(run, results, stocks, katalogList, txns);
   const fallback = {
@@ -295,13 +327,23 @@ export async function generateMaterialCadangAiInsights(run, results, stocks, kat
     status: import.meta.env.VITE_GROQ_API_KEY ? "UNAVAILABLE" : "NO_API_KEY",
     model: "llama-3.3-70b-versatile",
     createdAt: Date.now(),
-    executiveSummary: import.meta.env.VITE_GROQ_API_KEY ? "AI insight belum tersedia. Perhitungan Health Index lokal tetap dapat digunakan." : "AI insight belum tersedia karena VITE_GROQ_API_KEY belum diisi. Perhitungan Health Index lokal tetap dapat digunakan.",
+    executiveSummary: (import.meta.env.VITE_GROQ_API_KEY ? "AI insight belum tersedia (Groq gagal/kosong). " : "AI insight belum tersedia karena VITE_GROQ_API_KEY belum diisi. ") + `Ringkasan lokal: total gap ${context.totalGapQty} unit senilai Rp${(context.totalGapValue||0).toLocaleString("id-ID")} pada ${context.totalItems} material. Cek tabel Health Index untuk detail.`,
     topRisks: context.topRisks.slice(0,5).map(r => `${r.nama} (${r.noKatalog}) - ${r.healthStatus}, HI ${r.healthIndex}`),
     dataQualityFindings: ["Gunakan tabel Health Index untuk melihat flag kualitas data per material."],
     recommendedActions: ["Review material Critical/High Risk dan ajukan apply minQty melalui approval Asman."],
-    procurementPriority: context.topRisks.slice(0,5).map(r => r.noKatalog),
+    procurementPriority: context.procurementPriority.map(r => ({
+      noKatalog:r.noKatalog, nama:r.nama, qty:r.qty, estimasiNilai:r.estimasiNilai,
+      alasan:`Kelas ABC ${r.abcClass||"-"}, status ${r.healthStatus||"-"}`,
+    })),
     validationNeeded: context.topRisks.filter(r => (r.dataConfidence||100) < 70).map(r => r.noKatalog),
-    materialInsights: [],
+    materialInsights: context.topRisks.slice(0,8).map(r => ({
+      noKatalog:r.noKatalog, nama:r.nama,
+      diagnosis:`Health Index ${r.healthIndex} (${r.healthStatus}), gap ${r.gapQty||0} unit.`,
+      penyebab:`Failure ${r.failure5y||0}x/5th, emergency ${r.emergency5y||0}x, lead time ${r.leadTime||0} hari.`,
+      rekomendasi:(r.gapQty||0)>0 ? "Ajukan penambahan stok minimum melalui apply." : "Pantau, belum ada gap stok mendesak.",
+      confidence:r.dataConfidence,
+    })),
+    methodology: MATERIAL_CADANG_METHODOLOGY_TEXT,
   };
   if (!import.meta.env.VITE_GROQ_API_KEY) return fallback;
   try {
@@ -313,8 +355,14 @@ export async function generateMaterialCadangAiInsights(run, results, stocks, kat
         temperature:0.2,
         max_tokens:1800,
         messages:[
-          { role:"system", content:`Kamu adalah AI analis manajemen Material Cadang WARNOTO PLN. Jawab hanya JSON valid. Jangan mengubah angka resmi. Beri insight manajemen singkat, audit-friendly, dan rekomendasi read-only.` },
-          { role:"user", content:`Buat AI insight Health Index Material Cadang dari konteks berikut. Output JSON dengan key: executiveSummary, topRisks, dataQualityFindings, recommendedActions, procurementPriority, validationNeeded, materialInsights. materialInsights item: {noKatalog,nama,diagnosis,recommendation,confidence}. Konteks:\n${JSON.stringify(context).slice(0,14000)}` }
+          { role:"system", content:`Kamu adalah AI analis manajemen Material Cadang WARNOTO PLN. Jawab hanya JSON valid. Jangan mengubah angka resmi (pakai persis angka dari konteks). Beri insight manajemen detail, actionable, audit-friendly, dan rekomendasi read-only. Bahasa Indonesia, jelas untuk pembaca non-teknis.` },
+          { role:"user", content:`Buat AI insight Health Index Material Cadang dari konteks berikut, mencakup 4 aspek: (1) diagnosis per-material, (2) ringkasan eksekutif actionable, (3) prioritas pengadaan dengan estimasi nilai, (4) penjelasan metodologi bahasa awam. Output JSON dengan key persis berikut:
+- executiveSummary (string): total gap qty & nilai, cluster/kelas ABC paling kritis, 1-2 rekomendasi utama.
+- materialInsights (array of {noKatalog,nama,diagnosis,penyebab,rekomendasi,confidence}): diagnosis & penyebab spesifik kenapa material berisiko (failure/lead time/gap stok), untuk material di topRisks.
+- procurementPriority (array of {noKatalog,nama,qty,estimasiNilai,alasan}): urut prioritas pengadaan tertinggi dulu, ambil dari context.procurementPriority.
+- methodology (string): jelaskan awam cara hitung Poisson service level, ABC (by risk value), dan Health Index (100 dikurangi risk score) SESUAI konteks, jangan mengarang rumus lain.
+- dataQualityFindings (array of string), recommendedActions (array of string), validationNeeded (array of noKatalog string), topRisks (array of string ringkas).
+Konteks:\n${JSON.stringify(context).slice(0,14000)}` }
         ]
       })
     });

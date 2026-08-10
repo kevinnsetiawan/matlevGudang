@@ -41,6 +41,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     return selectedHistoryRows.filter(row => row.eventKind === historyTypeFilter);
   }, [selectedHistoryRows, historyTypeFilter]);
   const displayedHistoryRows = historyViewMode === "ROW" && historyItem ? [historyItem] : visibleHistoryRows;
+  const documentsByKey = useMemo(() => new Map(legacy.documents.map(doc => [`${doc.doc_type}|${doc.doc_id}`, doc])), [legacy.documents]);
   // rows dari buildMutasiRows() sengaja ascending (lama→baru) untuk perhitungan saldo
   // berjalan & export PDF/Excel (ledger kronologis). Tabel di layar dibalik supaya
   // transaksi terbaru tampil di atas, tanpa mengubah rows asli yang dipakai downloadTUG15.
@@ -55,7 +56,6 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     setPage(current => Math.min(current, maxPage));
   }, [rows.length, pageSize]);
 
-  const documentsByKey = useMemo(() => new Map(legacy.documents.map(doc => [`${doc.doc_type}|${doc.doc_id}`, doc])), [legacy.documents]);
 
   function openHistoryForRow(row, mode = "ROW") {
     setHistoryItem(row);
@@ -66,22 +66,13 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
   async function openAttachment(url) {
     if (!url) return;
     setAttachmentState({ loading:true, error:"" });
-    try {
-      const resolved = await resolveLegacyPrivateUrl(url);
-      if (!resolved) throw new Error("Lampiran tidak tersedia.");
-      window.open(resolved, "_blank", "noopener,noreferrer");
-      setAttachmentState({ loading:false, error:"" });
-    } catch (err) {
-      setAttachmentState({ loading:false, error:err.message || "Lampiran tidak dapat dibuka." });
-    }
+    try { const resolved = await resolveLegacyPrivateUrl(url); if (!resolved) throw new Error("Lampiran tidak tersedia."); window.open(resolved, "_blank", "noopener,noreferrer"); setAttachmentState({ loading:false, error:"" }); }
+    catch (err) { setAttachmentState({ loading:false, error:err.message || "Lampiran tidak dapat dibuka." }); }
   }
 
   async function handleSyncSupabase() {
     try {
-      // Arsip legacy bersifat read-only dan tidak boleh masuk ke histori transaksi live.
-      // Pakai allHistoryRows (rentang & filter penuh), BUKAN rows (bisa dipersempit filter UI).
-      const liveRows = allHistoryRows.filter(row => row.source !== "LAMA");
-      await syncTUG15ToSupabase(liveRows, katalogList);
+      await syncTUG15ToSupabase(allHistoryRows.filter(row => row.source !== "LAMA" && row.affectsSaldo !== false), katalogList);
       await syncStockQtyToSupabase(stocks, katalogList);
       await syncFotoMaterialToSupabase(stocks, katalogList);
     } catch (err) {
@@ -89,15 +80,14 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
     }
   }
 
-  // Sync otomatis diam-diam (background) begitu arsip legacy selesai dimuat — bukan lagi dipicu klik user.
+  // Sync otomatis diam-diam (background) dari data canonical.
   // Guard useRef supaya hanya jalan sekali per mount, tidak retry-loop kalau gagal.
   useEffect(() => {
     if (autoSyncedRef.current) return;
-    if (legacy.loading) return;
-    if (allHistoryRows.length === 0) return;
+    if (legacy.loading || allHistoryRows.length === 0) return;
     autoSyncedRef.current = true;
     handleSyncSupabase();
-  }, [legacy.loading, allHistoryRows]);
+  }, [allHistoryRows]);
 
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
@@ -246,7 +236,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
                     <td style={{padding:"5px 8px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:11,fontWeight:700,background:r.source==="LAMA"?"#fef3c7":"#dbeafe",color:r.source==="LAMA"?"#92400e":"#1d4ed8"}}>{r.sourceLabel||"Baru"}</span></td>
                     <td style={{padding:"5px 8px",fontFamily:"monospace",fontSize:12}}>{r.katalog}</td>
                     <td style={{padding:"5px 8px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.deskripsi}</td>
-                    <td style={{padding:"5px 8px"}}><span style={{padding:"2px 6px",borderRadius:20,fontSize:12,fontWeight:700,background:r.source==="LAMA"?"#f3f4f6":sapBs.bg,color:r.source==="LAMA"?"#4b5563":sapBs.fg}}>{r.sapStatus}</span></td>
+                    <td style={{padding:"5px 8px"}}><span style={{padding:"2px 6px",borderRadius:20,fontSize:12,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{r.sapStatus}</span></td>
                     <td style={{padding:"5px 8px",fontSize:12}}>{r.jenisBarang||"-"}</td>
                     <td style={{padding:"5px 8px",textAlign:"center"}}>{r.satuan}</td>
                     <td style={{padding:"5px 8px",textAlign:"center",color:C.muted}}>{r.affectsSaldo===false?"—":fmtNum(r.saldoAwal)}</td>
@@ -301,7 +291,7 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
             {attachmentState.loading && <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Menyiapkan lampiran…</div>}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {displayedHistoryRows.map((row,index)=>{
-                const doc = row.source === "LAMA" ? documentsByKey.get(`${row.docType}|${row.legacyDocId}`) : null;
+                const doc = row.source === "LAMA" ? documentsByKey.get(`${row.docType}|${row.legacyDocId || row.documentNo}`) : null;
                 const hasContractRef = row.contractRefs && row.contractRefs !== "-";
                 const contractText = hasContractRef
                   ? `${row.contractRefs}${row.docType==="TUG3"?" (referensi penerimaan, bukan penelusuran lot)":""}`
@@ -312,17 +302,15 @@ export function TUG15Tab({ txns, katalogList, stocks, sty, C, filter, setFilter,
                     && candidate.contractRefs
                     && candidate.contractRefs !== "-")
                   : null;
-                const attachments = row.source === "LAMA" ? [
-                  ["Foto barang",row.fotoBarangUrl], ["Surat jalan",doc?.foto_surat_jalan_url], ["SIM/KTP",doc?.foto_sim_ktp_url],
-                  ["Foto kendaraan",doc?.foto_kendaraan_url], ["PDF",doc?.pdf_url], ["Berita acara",doc?.berita_acara_url], ["Lampiran",doc?.lampiran_url],
-                ].filter(([,url])=>url) : [];
+                const legacyDoc = row.source === "LAMA" ? documentsByKey.get(`${row.docType}|${row.legacyDocId || row.documentNo}`) : null;
+                const attachments = legacyDoc ? [["Surat Jalan", legacyDoc.foto_surat_jalan_url], ["SIM/KTP", legacyDoc.foto_sim_ktp_url], ["Kendaraan", legacyDoc.foto_kendaraan_url], ["PDF", legacyDoc.pdf_url], ["Berita Acara", legacyDoc.berita_acara_url], ["Lampiran", legacyDoc.lampiran_url]].filter(([,url]) => url) : (row.fotoBarangUrl ? [["Foto Barang", row.fotoBarangUrl]] : []);
                 const isInbound = row.eventKind === "MASUK";
                 const isOutbound = row.eventKind === "KELUAR";
                 const eventColor = isInbound ? (C.green || "#16a34a") : isOutbound ? (C.red || "#dc2626") : C.border;
-                return <div key={`${row.source}-${row.legacyId||row.no}-${index}`} style={{padding:12,border:`1px solid ${C.border}`,borderRadius:8}}>
+                return <div key={`${row.source}-${row.no}-${index}`} style={{padding:12,border:`1px solid ${C.border}`,borderRadius:8}}>
                   <div className="tug15-history-event-header" data-history-direction={isInbound?"MASUK":isOutbound?"KELUAR":"LAINNYA"} style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"stretch",borderLeft:`5px solid ${eventColor}`,background:(isInbound||isOutbound)?`${eventColor}18`:"transparent",padding:"7px 8px 7px 10px",margin:"-4px -4px 0 -4px",borderRadius:"0 6px 6px 0"}}>
                     <span style={{fontSize:12,fontWeight:800,color:eventColor}}>{row.eventKind || "EVENT"}</span>
-                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}><span style={{fontSize:12,color:C.muted}}>{row.tanggalMutasi}</span>{row.source === "LAMA" && <span style={{fontSize:11,fontWeight:800,color:"#92400e",background:"#fef3c7",padding:"2px 7px",borderRadius:20}}>Lama</span>}</div>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}><span style={{fontSize:12,color:C.muted}}>{row.tanggalMutasi}</span></div>
                   </div>
                   <div style={{fontSize:13,fontWeight:700,marginTop:4}}>{row.eventKind || (row.docType === "TUG5" ? "PERMINTAAN" : "EVENT")} · {row.tugBaDoc}</div>
                   <div style={{fontSize:12,color:C.muted,marginTop:3}}>{row.keterangan}</div>

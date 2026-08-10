@@ -11,9 +11,9 @@ import { RencanaWidget } from "./RencanaWidget.jsx";
 import { HeavyEquipmentDashboardSummary } from "./HeavyEquipmentDashboardSummary.jsx";
 import { AttbDashboardSummary } from "./AttbDashboardSummary.jsx";
 import { DashboardAnalitikSection } from "./DashboardAnalitikSection.jsx";
-import { Package, Money, Warning, Hourglass, Tractor, ClockCounterClockwise, ChartLineUp, CalendarBlank, MapPin, Buildings, Nut, CheckCircle, Circle, X } from "@phosphor-icons/react";
+import { Package, Money, Warning, Hourglass, Tractor, ClockCounterClockwise, ChartLineUp, CalendarBlank, MapPin, Buildings, Nut, CheckCircle, Circle, X, ShoppingCartSimple } from "@phosphor-icons/react";
 
-export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool, isMobile = false }) {
+export function DashboardDefault({ stocks, txns, katalogList, lokasiList, uptList, rencanaKedatanganList, myPendingApprovals, lowStocks, totalVal, topN, setTopN, pemakaianMode, setPemakaianMode, C, sty, setTab, currentUser, heavyEquipmentList, heavyEquipmentLoans, materialCadangData, attbList, attbBongkaranPool, isMobile = false, procurementSummary }) {
   const [dashModal, setDashModal] = useState(null); // null | "totalItem" | "nilai" | "kritis" | "tindakan"
 
   const jenisBreakdown = JENIS_BARANG.map(jb => ({
@@ -52,12 +52,12 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
       <div className="dashboard-default-saldo"><KPISaldoCards stocks={stocks} C={C} sty={sty}/></div>
       {(heavyEquipmentList?.length>0 || heavyEquipmentLoans?.length>0) && (
         <CollapsibleSection id={isMobile ? "default-mobile-alatberat" : "alatberat"} title="Alat Berat" icon={<Tractor weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
-          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <HeavyEquipmentDashboardSummary equipmentList={heavyEquipmentList} loans={heavyEquipmentLoans} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
       {(attbList?.length>0 || attbBongkaranPool?.length>0) && (
         <CollapsibleSection id={isMobile ? "default-mobile-attb" : "attb"} title="Aset ATTB (Penghapusan)" icon={<Buildings weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
-          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser}/>
+          <AttbDashboardSummary attbList={attbList} bongkaranPool={attbBongkaranPool} C={C} sty={sty} setTab={setTab} currentUser={currentUser} uptList={uptList}/>
         </CollapsibleSection>
       )}
       {(()=>{
@@ -95,6 +95,27 @@ export function DashboardDefault({ stocks, txns, katalogList, lokasiList, rencan
           </div>
         );
       })()}
+      {procurementSummary && procurementSummary.top?.length>0 && (
+        <div className="dashboard-overview__analysis" style={{...sty.card}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontWeight:800,fontSize:13,color:"#0369a1"}}><ShoppingCartSimple weight="fill" size={14} style={{verticalAlign:"-0.15em",marginRight:4}}/>Rekomendasi Pengadaan</div>
+            <button style={{...sty.btn("ghost","sm"),fontSize:12}} onClick={()=>setTab("forecastStok")}>Lihat detail →</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:12}}>
+            {[
+              {id:"item",label:"Butuh Tindakan",val:procurementSummary.totalCount,color:C.accent},
+              {id:"kritis",label:(<>Kritis <Warning weight="fill" size={12} color={C.red} style={{verticalAlign:"-0.15em"}}/></>),val:procurementSummary.criticalCount,color:C.red},
+              {id:"qty",label:"Total Usulan Qty",val:fmtNum(procurementSummary.totalQty),color:C.accent},
+              {id:"nilai",label:"Estimasi Nilai",val:procurementSummary.totalValue>0?"Rp "+fmtNum(procurementSummary.totalValue):"-",color:"#0369a1"},
+            ].map(k=>(
+              <div key={k.id}>
+                <div style={{fontSize:12,color:C.muted}}>{k.label}</div>
+                <div style={{fontSize:15,fontWeight:800,color:k.color,fontVariantNumeric:"tabular-nums"}}>{k.val}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <CollapsibleSection id={isMobile ? "default-mobile-aktivitas" : "aktivitas"} title="Aktivitas Terbaru & Rencana Kedatangan" icon={<ClockCounterClockwise weight="fill" size={16} style={{verticalAlign:"-0.15em"}}/>} defaultOpen={!isMobile} C={C}>
       <div className="dashboard-overview__activity">
         <div>

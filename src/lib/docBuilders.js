@@ -10,12 +10,20 @@ import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt } from
 import { buildKartuGantungHistory, resolveLokasiLengkap } from "./sap.js";
 import { resolveStockPhotoUrl } from "./stockCache.js";
 
+// Resolver id->nama UPT penerbit dokumen (mis. "UPT-SBY" -> "UPT Surabaya").
+// Dipakai di seluruh kop/PIC/sig-role dokumen supaya UPT selain Surabaya
+// tidak lagi mencetak "UPT Surabaya" hardcoded.
+function resolveUptNama(uptId, uptList, fallback) {
+  return (uptList || []).find(u => u.id === uptId)?.nama || fallback || UPT;
+}
+
 // ─── TUG-9 DOCUMENT HTML BUILDER (Surat Jalan + Bon TUG-9 + Lampiran Foto) ────
 // Returns a full standalone HTML string. Used for both in-app preview
 // (rendered in an iframe inside a modal) and for downloading as a
 // .html file the user can open in any browser and Print > Save as PDF.
-export function buildTUG9HTML(txn, stocks, users, satpamList) {
+export function buildTUG9HTML(txn, stocks, users, satpamList, uptList) {
   const docs = txn.docNumbers || {};
+  const uptNama = resolveUptNama(txn.uptId, uptList);
   const isTUG8 = txn.docType === "TUG8";
   const docKey = isTUG8 ? "tug8" : "tug9";
   const creator = users.find(u=>u.id===txn.createdBy) || {};
@@ -45,7 +53,8 @@ export function buildTUG9HTML(txn, stocks, users, satpamList) {
     };
   })();
 
-  const docNoSJ = docs.sj || `${txn.docSeq || "1"}.SJ/LOG.00.02/UPT-SBY/VII/2026`;
+  const uptKode = (uptList || []).find(u => u.id === txn.uptId)?.kode || "UPT-SBY";
+  const docNoSJ = docs.sj || `${txn.docSeq || "1"}.SJ/LOG.00.02/${uptKode}/VII/2026`;
   const docNoBA = docs.ba || docNoSJ.replace(".SJ/", ".BA/");
 
   const materialRowsTable = itemRows.map(({stock,qty}) => `
@@ -138,7 +147,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -157,7 +166,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
         <td class="lbl">No SIM / KTP Pengemudi</td><td>:</td><td>${txn.simKtp || "-"}</td>
       </tr>
       <tr>
-        <td class="lbl">PIC Gudang ${UPT}</td><td>:</td><td colspan="4">${creator.name || "-"}${creator.officialPhone ? ` (${creator.officialPhone})` : ""}</td>
+        <td class="lbl">PIC Gudang ${uptNama}</td><td>:</td><td colspan="4">${creator.name || "-"}${creator.officialPhone ? ` (${creator.officialPhone})` : ""}</td>
       </tr>
     </table>
 
@@ -209,8 +218,8 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
 
     <table class="meta-tbl" style="margin-bottom:4px">
       <tr><td class="lbl" style="width:70px">Nama</td><td style="width:10px">:</td><td>${menyerahkanUser.name || creator.name || "-"}</td></tr>
-      <tr><td class="lbl">Jabatan</td><td>:</td><td>${menyerahkanUser.jabatan || "TL LOG UPT SURABAYA"}</td></tr>
-      <tr><td class="lbl">Unit</td><td>:</td><td>${(txn.uptId || UPT).toUpperCase()}</td></tr>
+      <tr><td class="lbl">Jabatan</td><td>:</td><td>${menyerahkanUser.jabatan || `TL LOG ${uptNama.toUpperCase()}`}</td></tr>
+      <tr><td class="lbl">Unit</td><td>:</td><td>${uptNama.toUpperCase()}</td></tr>
       <tr><td colspan="3" style="font-weight:bold;padding-top:2px;padding-bottom:4px">Untuk selanjutnya disebut <u>PIHAK YANG MENYERAHKAN</u></td></tr>
       <tr><td class="lbl">Nama</td><td>:</td><td>${txn.penerimaNama || "-"}</td></tr>
       <tr><td class="lbl">Jabatan</td><td>:</td><td>${txn.penerimaJabatan || "-"}</td></tr>
@@ -250,7 +259,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
       </div>
       <div class="sig-col">
         <div><i>Yang menyerahkan,</i></div>
-        <div class="sig-role">${(menyerahkanUser.jabatan || "TL LOG UPT SURABAYA").toUpperCase()}</div>
+        <div class="sig-role">${(menyerahkanUser.jabatan || `TL LOG ${uptNama.toUpperCase()}`).toUpperCase()}</div>
         <div class="sig-space"></div>
         <div class="sig-name">${menyerahkanUser.name || "....................."}</div>
       </div>
@@ -268,7 +277,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -300,7 +309,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -324,7 +333,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -352,14 +361,16 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
 // Single-page document matching the uploaded format_TUG_10.pdf layout.
 // Signature roles are reversed vs TUG-9: external party hands material
 // back, internal SPV/TL Log receives it, Asman still signs "Mengetahui".
-export function buildTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList) {
+export function buildTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, uptList) {
   const docs = txn?.docNumbers || {};
+  const uptNama = resolveUptNama(txn.uptId, uptList);
+  const uptKode = (uptList || []).find(u => u.id === txn.uptId)?.kode || "UPT-SBY";
   const asmanUser = users.find(u => u.role === "ASMAN") || {};
   const actualApprover = users.find(u=>u.id===txn.approvedBy) || {};
   const penerimaUser = txn.requiredApprover === "TL" ? actualApprover : (users.find(u=>u.role==="TL")||{});
   const satpamUser = (satpamList||[]).find(sp => sp.id === txn.satpamId) || {};
 
-  const docNoTUG10 = docs.tug10 || (txn.docSeq ? `${txn.docSeq}.TUG-10/LOG.00.01/UPT-${(txn.uptId || UPT).toUpperCase()}/VII/2026` : `TUG10-${(txn.id||"").slice(-6)}`);
+  const docNoTUG10 = docs.tug10 || (txn.docSeq ? `${txn.docSeq}.TUG-10/LOG.00.01/${uptKode}/VII/2026` : `TUG10-${(txn.id||"").slice(-6)}`);
 
   const items = txn?.stockItems || [];
   const itemRows = items.map(si => {
@@ -454,7 +465,7 @@ table.bottom-bar-tbl td{border:1px solid #000;padding:4px 6px}
     <table class="meta-tbl">
       <tr>
         <td class="lbl">PEKERJAAN</td><td style="width:10px">:</td><td>${txn.pekerjaan || "-"}</td>
-        <td class="lbl" style="width:130px">UNIT / SEKTOR</td><td style="width:10px">:</td><td>UPT ${(txn.uptId || UPT).toUpperCase()}</td>
+        <td class="lbl" style="width:130px">UNIT / SEKTOR</td><td style="width:10px">:</td><td>${uptNama.toUpperCase()}</td>
       </tr>
       <tr>
         <td class="lbl">NAMA PEKERJAAN</td><td>:</td><td>${txn.namaPekerjaan || "-"}</td>
@@ -499,13 +510,13 @@ table.bottom-bar-tbl td{border:1px solid #000;padding:4px 6px}
     <div class="sig-row-3">
       <div class="sig-col">
         <div><i>Mengetahui,</i></div>
-        <div class="sig-role">MAN II KONS UPT ${(txn.uptId || UPT).toUpperCase()}</div>
+        <div class="sig-role">MAN II KONS ${uptNama.toUpperCase()}</div>
         <div class="sig-space"></div>
         <div class="sig-name">${asmanUser.name || "ASEP MOCH. YUSUP"}</div>
       </div>
       <div class="sig-col">
         <div><i>Yang Menerima,</i></div>
-        <div class="sig-role">SPV LOG UPT ${(txn.uptId || UPT).toUpperCase()}</div>
+        <div class="sig-role">SPV LOG ${uptNama.toUpperCase()}</div>
         <div class="sig-space"></div>
         <div class="sig-name">${penerimaUser.name || "WIDI FERDIAN R"}</div>
       </div>
@@ -528,7 +539,7 @@ table.bottom-bar-tbl td{border:1px solid #000;padding:4px 6px}
     <div class="kop-right">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -571,7 +582,7 @@ table.bottom-bar-tbl td{border:1px solid #000;padding:4px 6px}
     <div class="kop-right">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -586,8 +597,8 @@ table.bottom-bar-tbl td{border:1px solid #000;padding:4px 6px}
 </body></html>`;
 }
 
-export function downloadTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, showToast) {
-  const html = buildTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList);
+export function downloadTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, showToast, uptList) {
+  const html = buildTUG10HTML(txn, katalogList, lokasiList, users, satpamList, gudangList, subGudangList, uptList);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -604,22 +615,24 @@ export function downloadTUG10HTML(txn, katalogList, lokasiList, users, satpamLis
 // Combines all 3 stages into one printable document: TUG-3 Karantina (page 1),
 // TUG-4 Berita Acara Pemeriksaan (page 2), and Lampiran Foto Final (page 3+).
 // ─── TUG-5 DOCUMENT BUILDER ─────────────────────────────────────────────
-export function buildTUG5HTML(txn, katalogList, uitList, users, ultgList) {
+export function buildTUG5HTML(txn, katalogList, uitList, users, ultgList, uptList) {
   const docs = txn?.docNumbers || {};
   const isUltg = txn?.sourceType === "ULTG";
 
   if (isUltg) return buildTUG5ULTGHTML(txn, katalogList, users, ultgList);
 
+  const uptNama = resolveUptNama(txn.uptId, uptList);
+  const uptKode = (uptList || []).find(u => u.id === txn.uptId)?.kode || "UPT-SBY";
   const managerUser = users.find(u=>u.role==="MANAGER")||{};
   const asmanUser = users.find(u=>u.role==="ASMAN")||{};
   const uit = (uitList||[]).find(u=>u.id===txn.uitId)||{};
   const dateInfo = (() => {
     const d = txn.createdAt ? new Date(txn.createdAt) : new Date();
     const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-    return `${UPT}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    return `${uptNama}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
   })();
 
-  const docNoTUG5 = docs.tug5 || (txn.docSeq ? `${txn.docSeq}.TUG-5/LOG-UPT${UPT.replace(/\s+/g,"")}/VII/2026` : `TUG5-${(txn.id||"").slice(-6)}`);
+  const docNoTUG5 = docs.tug5 || (txn.docSeq ? `${txn.docSeq}.TUG-5/LOG-${uptKode}/VII/2026` : `TUG5-${(txn.id||"").slice(-6)}`);
 
   const itemRows = (txn.stockItems||[]).map((si)=>{
     const kat = (katalogList||[]).find(k=>k.id===si.katalogId)||{};
@@ -700,13 +713,13 @@ table.items-tbl td{border:1px solid #000;padding:5px 6px;font-size:9px}
     <div class="meta-left">
       <table>
         <tr><td class="lbl">Kepada</td><td style="width:10px">:</td><td>${uit.nama || "PT. PLN (PERSERO) UNIT INDUK TRANSMISI JAWA BAGIAN TIMUR DAN BALI"}</td></tr>
-        <tr><td class="lbl">Harap dikirim ke</td><td>:</td><td>PT. PLN (PERSERO) UNIT INDUK TRANSMISI JAWA BAGIAN TIMUR &amp; BALI - UPT ${(txn.uptId || UPT).toUpperCase()}</td></tr>
+        <tr><td class="lbl">Harap dikirim ke</td><td>:</td><td>PT. PLN (PERSERO) UNIT INDUK TRANSMISI JAWA BAGIAN TIMUR &amp; BALI - ${uptNama.toUpperCase()}</td></tr>
         <tr><td class="lbl">Alamat</td><td>:</td><td>JL. KETINTANG BARU NO. 9 SURABAYA KODE POS 60231</td></tr>
       </table>
     </div>
     <table class="meta-right-box">
       <tr><td style="width:50px">PLN</td><td>: ${uit.kode || "UIT-JBM"}</td></tr>
-      <tr><td>UPT</td><td>: ${UPT.toUpperCase()}</td></tr>
+      <tr><td>UPT</td><td>: ${uptNama.toUpperCase()}</td></tr>
     </table>
   </div>
 
@@ -746,7 +759,7 @@ table.items-tbl td{border:1px solid #000;padding:5px 6px;font-size:9px}
 
   <div class="sig-row-2">
     <div class="sig-col">
-      <div class="sig-role">MANAGER UPT ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="sig-role">MANAGER ${uptNama.toUpperCase()}</div>
       <div class="sig-space"></div>
       <div class="sig-name">${managerUser.name || "IVAN NUR PRATAMA"}</div>
     </div>
@@ -785,16 +798,16 @@ export function buildTUG5ULTGHTML(txn, katalogList, users, ultgList) {
     </tr>`;
   }).join("");
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TUG-5 ULTG ${txn.id}</title>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Slip Reservasi ULTG ${txn.id}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:10px;color:#111;background:#e5e7eb}.page{padding:24px;background:white;max-width:1000px;margin:0 auto 16px;min-height:100vh}.topbar{height:5px;background:linear-gradient(90deg,#00377a,#0098da);margin-bottom:4px}.doctitle{text-align:center;margin-bottom:10px}.doctitle h2{font-size:13px;font-weight:800;text-decoration:underline}.doctitle .docno{font-size:10px;font-style:italic;color:#0098da}table.meta{width:100%;margin-bottom:10px}table.meta td{padding:3px 4px;font-size:10px}table.meta td.label{width:110px}table.meta td.colon{width:8px}table.items{width:100%;border-collapse:collapse;margin-bottom:10px}table.items th{background:#003087;color:white;padding:6px 6px;font-size:9.5px;text-align:center;border:1px solid #ccc}table.items td{padding:6px 6px;border:1px solid #ccc;font-size:10px}.sig-row{display:flex;justify-content:center;margin-top:24px;text-align:center}.sig-col{width:280px;font-size:10px}.sig-space{height:40px;display:flex;align-items:center;justify-content:center}.sig-name{font-weight:700;text-decoration:underline;margin-top:2px}.digital-stamp{border:2px solid #16a34a;color:#16a34a;border-radius:6px;padding:6px 10px;font-size:9px;font-weight:700;display:inline-block;transform:rotate(-4deg)}.print-bar{position:sticky;top:0;background:#003087;color:white;padding:8px 14px;text-align:center;font-size:12px;font-weight:700;z-index:10}.print-bar button{background:#16a34a;color:white;border:none;border-radius:6px;padding:6px 16px;font-size:12px;cursor:pointer;margin-left:10px}@media print{.print-bar{display:none}body{background:white}}</style></head><body>
-<div class="print-bar">📄 TUG-5 ULTG siap cetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
+<div class="print-bar">📄 Slip Reservasi siap cetak <button onclick="window.print()">🖨️ Print / Save as PDF</button></div>
 <div class="page">
 <div class="topbar"></div>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
   <div><b>PT PLN (PERSERO)</b><br/>${ultg.nama||"ULTG"}</div>
-  <div style="font-weight:800;font-size:14px">TUG - 5</div>
+  <div style="font-weight:800;font-size:14px">RESERVASI</div>
 </div>
-<div class="doctitle"><h2>DAFTAR PERMINTAAN BARANG - BARANG (ULTG)</h2><div class="docno">${docs?.tug5||txn.id}</div></div>
+<div class="doctitle"><h2>SLIP RESERVASI BARANG (ULTG)</h2><div class="docno">${docs?.tug5||txn.id}</div></div>
 <table class="meta" style="border:1px solid #ccc;padding:6px;border-radius:4px;margin-bottom:10px">
   <tr><td class="label">Diajukan oleh</td><td class="colon">:</td><td>${ultg.nama||"-"} (${ultg.kode||"-"})</td></tr>
   <tr><td class="label">Nama Pekerjaan</td><td class="colon">:</td><td>${txn.namaPekerjaan||"-"}</td></tr>
@@ -883,12 +896,13 @@ export function buildTUG7HTML(txn, katalogList, uitList, uptList, users) {
 </div></body></html>`;
 }
 
-export function downloadTUG5HTML(txn, katalogList, uitList, users, showToast, ultgList) {
-  const html = buildTUG5HTML(txn, katalogList, uitList, users, ultgList);
+export function downloadTUG5HTML(txn, katalogList, uitList, users, showToast, ultgList, uptList) {
+  const html = buildTUG5HTML(txn, katalogList, uitList, users, ultgList, uptList);
   const blob = new Blob([html], {type:"text/html"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = `TUG5_${txn.docSeq}_${(txn.keteranganUmum||"").replace(/[^a-zA-Z0-9]/g,"_").slice(0,25)}.html`;
+  const downloadPrefix = txn.sourceType === "ULTG" ? "Reservasi" : "TUG5";
+  a.href = url; a.download = `${downloadPrefix}_${txn.docSeq}_${(txn.keteranganUmum||"").replace(/[^a-zA-Z0-9]/g,"_").slice(0,25)}.html`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),2000);
   showToast && showToast("📄 File diunduh! Buka di browser lalu Print → Save as PDF.", "success");
@@ -953,9 +967,10 @@ export function downloadHeavyEquipmentLoanHTML(loan, equipment, users, showToast
 // ─── BERITA ACARA STOCK OPNAME DOCUMENT BUILDER ──────────────────────────
 // Dipanggil downloadBeritaAcara() di StockOpnameTab. Sebelumnya tombol "Download
 // Berita Acara" pasti crash karena fungsi ini belum pernah dibuat (bug lama).
-export function buildBeritaAcaraHTML(opn, katalogList, users) {
+export function buildBeritaAcaraHTML(opn, katalogList, users, uptList) {
   const items = opn.items || [];
   const creator = (users||[]).find(u=>u.id===opn.dibuatOleh) || {};
+  const uptNama = resolveUptNama(creator.uptId, uptList, creator.upt);
   const asmanUser = (users||[]).find(u=>u.id===opn.approvedByAsman) || {};
   const mgrUser = (users||[]).find(u=>u.id===opn.approvedByManager) || {};
   const fmt = (v) => (v===null||v===undefined||v==="") ? "-" : v;
@@ -991,7 +1006,7 @@ export function buildBeritaAcaraHTML(opn, katalogList, users) {
 <div class="page">
 <div class="topbar"></div>
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-  <div><b>PT PLN (PERSERO)</b><br/>UPT ${(creator.upt||"Surabaya")}</div>
+  <div><b>PT PLN (PERSERO)</b><br/>${uptNama}</div>
   <div style="font-weight:800;font-size:13px">BERITA ACARA<br/>STOCK OPNAME</div>
 </div>
 <div class="doctitle"><h2>BERITA ACARA STOCK OPNAME (${opn.jenisAlur})</h2><div class="docno">No. : ${opn.id}</div></div>
@@ -1047,8 +1062,10 @@ export function downloadTUG7HTML(txn, katalogList, uitList, uptList, users, show
   showToast && showToast("📄 File diunduh! Buka di browser lalu Print → Save as PDF.", "success");
 }
 
-export function buildTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList) {
+export function buildTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList, uptList) {
   const docs = txn?.docNumbers || {};
+  const uptNama = resolveUptNama(txn.uptId, uptList);
+  const uptKode = (uptList || []).find(u => u.id === txn.uptId)?.kode || "UPT-SBY";
   const creator = users.find(u=>u.id===txn.createdBy) || {};
   const actualApprover = users.find(u=>u.id===txn.approvedBy) || {};
   const scopedTl = users.find(u => u.role === "TL" && (!txn.uptId || u.uptId === txn.uptId)) || {};
@@ -1068,7 +1085,7 @@ export function buildTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, 
     };
   })();
 
-  const docNoSJ = docs.sj || docs.tug3 || `${txn.docSeq || "1"}.SI/LOG.00.02/UPT-${(txn.uptId || UPT).toUpperCase()}/VII/2026`;
+  const docNoSJ = docs.sj || docs.tug3 || `${txn.docSeq || "1"}.SI/LOG.00.02/${uptKode}/VII/2026`;
   const docNoBA = docs.ba || docs.tug4 || docNoSJ.replace(".SI/", ".BA/").replace(".SJ/", ".BA/");
 
   const items = txn?.stockItems || [];
@@ -1168,7 +1185,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -1187,7 +1204,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
         <td class="lbl">No SIM / KTP Pengemudi</td><td>:</td><td>${txn.simKtp || "-"}</td>
       </tr>
       <tr>
-        <td class="lbl">PIC Gudang ${UPT}</td><td>:</td><td colspan="4">${creator.name || "-"}${creator.officialPhone ? ` (${creator.officialPhone})` : ""}</td>
+        <td class="lbl">PIC Gudang ${uptNama}</td><td>:</td><td colspan="4">${creator.name || "-"}${creator.officialPhone ? ` (${creator.officialPhone})` : ""}</td>
       </tr>
     </table>
 
@@ -1239,8 +1256,8 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
 
     <table class="meta-tbl" style="margin-bottom:4px">
       <tr><td class="lbl" style="width:70px">Nama</td><td style="width:10px">:</td><td>${menyerahkanUser.name || creator.name || "-"}</td></tr>
-      <tr><td class="lbl">Jabatan</td><td>:</td><td>${menyerahkanUser.jabatan || "TL LOG UPT SURABAYA"}</td></tr>
-      <tr><td class="lbl">Unit</td><td>:</td><td>UPT ${(txn.uptId || UPT).toUpperCase()}</td></tr>
+      <tr><td class="lbl">Jabatan</td><td>:</td><td>${menyerahkanUser.jabatan || `TL LOG ${uptNama.toUpperCase()}`}</td></tr>
+      <tr><td class="lbl">Unit</td><td>:</td><td>${uptNama.toUpperCase()}</td></tr>
     </table>
     <div style="font-size:9.5px;font-style:italic;margin-bottom:6px">Untuk selanjutnya disebut <b>PIHAK YANG MENYERAHKAN</b></div>
 
@@ -1283,7 +1300,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
       </div>
       <div class="sig-col">
         <div><i>Yang menyerahkan,</i></div>
-        <div class="sig-role">TL LOG UPT ${(txn.uptId || UPT).toUpperCase()}</div>
+        <div class="sig-role">TL LOG ${uptNama.toUpperCase()}</div>
         <div class="sig-space"></div>
         <div class="sig-name">${menyerahkanUser.name || creator.name || "....................."}</div>
       </div>
@@ -1300,7 +1317,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -1331,7 +1348,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -1354,7 +1371,7 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
     <div class="pln-info">
       <img class="pln-logo" src="${PLN_LOGO_DATA_URI}" alt="Logo PLN"/>
       <div class="kop-text">UNIT INDUK JAWA BAGIAN TIMUR &amp; BALI</div>
-      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${(txn.uptId || UPT).toUpperCase()}</div>
+      <div class="kop-sub">UNIT PELAKSANA TRANSMISI ${uptNama.toUpperCase()}</div>
     </div>
   </div>
 
@@ -1375,8 +1392,8 @@ table.photo-items-tbl td{border:1px solid #000;padding:6px}
 </body></html>`;
 }
 
-export function downloadTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList, showToast) {
-  const html = buildTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList);
+export function downloadTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList, showToast, uptList) {
+  const html = buildTUG3HTML(txn, katalogList, lokasiList, timMutuList, users, satpamList, uptList);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1389,8 +1406,8 @@ export function downloadTUG3HTML(txn, katalogList, lokasiList, timMutuList, user
   showToast && showToast("📄 File diunduh! Buka di browser HP/laptop, lalu Print > Save as PDF.", "success");
 }
 
-export function downloadTUG9HTML(txn, stocks, users, satpamList, showToast) {
-  const html = buildTUG9HTML(txn, stocks, users, satpamList);
+export function downloadTUG9HTML(txn, stocks, users, satpamList, showToast, uptList) {
+  const html = buildTUG9HTML(txn, stocks, users, satpamList, uptList);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1438,7 +1455,7 @@ export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
 // ─── TUG-2 DOCUMENT HTML BUILDERS (Kartu Gantung Barang TUG. 2 - Depan & Belakang) ────
 
 // Halaman 1 (Depan): Header + Metadata + Foto Barang + QR Code
-export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList) {
+export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList, uptNama) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
   const qrDataUrl = await QRCode.toDataURL(scanUrl, { margin: 1, width: 280 });
@@ -1477,7 +1494,7 @@ export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangL
       <td style="padding-left:10px">
         <div style="font-size:11px;font-weight:800;line-height:1.2">PT PLN (PERSERO)</div>
         <div style="font-size:10px;font-weight:700;line-height:1.2">TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
-        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${UPT.toUpperCase()}</div>
+        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${(uptNama || UPT).toUpperCase()}</div>
       </td>
       <td style="text-align:right">
         <div style="font-size:14px;font-weight:900;letter-spacing:1px">TUG. 2</div>
@@ -1524,7 +1541,7 @@ export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangL
 }
 
 // Halaman 2 (Belakang): Header + Metadata + Tabel Riwayat Keluar-Masuk (SISA PERSEDIAAN: RAK / PETI / JMLH)
-export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList) {
+export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGudangList, gudangList, uptNama) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const history = buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subGudangList, gudangList);
 
@@ -1589,7 +1606,7 @@ export async function buildTUG2BackHTML(katalog, stocks, txns, lokasiList, subGu
       <td style="padding-left:10px">
         <div style="font-size:11px;font-weight:800;line-height:1.2">PT PLN (PERSERO)</div>
         <div style="font-size:10px;font-weight:700;line-height:1.2">TRANSMISI JAWA BAGIAN TIMUR DAN BALI</div>
-        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${UPT.toUpperCase()}</div>
+        <div style="font-size:9.5px;font-weight:700;color:#334155;line-height:1.2">${(uptNama || UPT).toUpperCase()}</div>
       </td>
       <td style="text-align:right">
         <div style="font-size:14px;font-weight:900;letter-spacing:1px">TUG. 2</div>

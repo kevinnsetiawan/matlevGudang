@@ -2,12 +2,23 @@
 import { useState } from "react";
 import { UPT } from "../constants.js";
 import { supabase } from "../supabaseClient.js";
-import { fmtDateOnly, parseIndoNumber, uid } from "../lib/utils.js";
+import { fmtDateOnly, parseSAPNumber, uid } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { normalizeKatalog } from "../lib/sap.js";
 import { logAudit } from "../lib/audit.js";
 import { can } from "../lib/perms.js";
+import { keepRemoteStockPhoto } from "../lib/stockCache.js";
 import * as XLSX from "xlsx";
+
+// Jenis Barang enum persis dipakai template migrasi stok (lihat scripts/gen_template_migrasi_stok.mjs).
+const TPL_JENIS_ENUM = new Set(["Persediaan", "Persediaan Bursa", "Pre Memory", "Cadang"]);
+const tplNormUpt = v => String(v||"").trim().toLowerCase().replace(/^upt\s+/,"").replace(/\s+/g," ");
+const tplNormLoose = v => String(v||"").trim().toLowerCase().replace(/\s+/g," ");
+function tplNumOrNull(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(String(v).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
 
 // Jenis TUG di kolom "Jenis" template Import Transaksi TUG Lama → docType/docNumbers key.
 // Normalisasi terima "TUG-9"/"tug 9"/"TUG9" dsb (lihat normalizeJenis).
@@ -18,7 +29,7 @@ function normalizeJenis(v) { return String(v||"").replace(/[^A-Z0-9]/gi,"").toUp
 // ════════════════════════════════════════════════════════════════════
 // MIGRASI DATA TAB
 // ════════════════════════════════════════════════════════════════════
-export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, maraUploadLoading, maraUploadProgress, uploadMaraToDB, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast, rolePerms }) {
+export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudangList, subGudangList, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, currentUser, sty, C, saveToCloud, setStocks, setKatalogList, setTxns, showToast, rolePerms }) {
   const [step, setStep] = useState("upload"); // "upload" | "preview" | "backup" | "done"
   const [sapFile, setSapFile] = useState(null);
   const [sapRows, setSapRows] = useState([]);
@@ -35,11 +46,20 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
   const [parsedNonSAP, setParsedNonSAP] = useState([]);
   const [previewStats, setPreviewStats] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [maraLoading, setMaraLoading] = useState(false);
   // Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas.
   const [legacyTugRows, setLegacyTugRows] = useState(null); // null = belum upload; array grup per No Dokumen
   const [legacyTugChecked, setLegacyTugChecked] = useState(new Set());
   const [legacyTugBusy, setLegacyTugBusy] = useState(false);
+
+  // ── Import Template Migrasi Stok (WARNOTO, per-UPT) — state TERPISAH dari
+  // wizard SAP di atas supaya kedua alur tidak bentrok (lihat TUJUAN di spec). ──
+  const [tplFile, setTplFile] = useState(null);
+  const [tplRows, setTplRows] = useState(null); // null = belum upload; array hasil parse
+  const [tplPreview, setTplPreview] = useState(null); // ringkasan KPI
+  const [tplGuard, setTplGuard] = useState(null); // {ok, message, badRows}
+  const [tplTargetUpt, setTplTargetUpt] = useState(null);
+  const [tplBusy, setTplBusy] = useState(false);
+  const [lastTplImport, setLastTplImport] = useState(null); // {katalogIdsBaru,stockIds,at,uptLabel,file} — undo import terakhir saja (YAGNI)
 
   // Parse CSV SAP format PEMAT
   // Referensi format export SAP (diajarkan user 2026-07-02, lihat memory
@@ -61,18 +81,16 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
       const desc = String(row["Material Description"]||row["material description"]||"").trim();
       const satuan = String(row["Base Unit of Measure"]||"").trim() || "BH";
       // Dulu SELALU menghapus semua titik dulu baru konversi koma — kalau nilai aslinya pakai
-      // titik sebagai TANDA DESIMAL (mis. "103.5", bukan ribuan), titiknya ikut terhapus jadi
-      // "1035" (SANGAT BERBAHAYA, qty stok terdistorsi 10x). Sekarang pakai parseIndoNumber yang
-      // membedakan titik-ribuan vs titik-desimal berdasar polanya, bukan asumsi buta (bug
-      // dilaporkan user 2026-07-07).
-      const qty = parseIndoNumber(row["Unrestricted Use Stock"]||row["unrestricted use stock"]);
+      // SAP memakai koma sebagai desimal dan titik sebagai pemisah ribuan. Jangan pakai parser
+      // angka aplikasi di jalur ini: "2,627 M" harus menjadi 2.627, bukan 2627.
+      const qty = parseSAPNumber(row["Unrestricted Use Stock"]||row["unrestricted use stock"]);
       const valType = String(row["Valuation Type"]||"").trim().toUpperCase();
-      const harga = parseIndoNumber(row["Harga Satuan"]);
+      const harga = parseSAPNumber(row["Harga Satuan"]);
       const materialType = String(row["Material Type"]||"").trim().toUpperCase();
       const plant = String(row["Plant"]||"").trim();
-      const qiStock = parseIndoNumber(row["Quality Inspection Stock"]);
-      const blockedStock = parseIndoNumber(row["Blocked Stock"]);
-      const transitStock = parseIndoNumber(row["In Transit Stock"]);
+      const qiStock = parseSAPNumber(row["Quality Inspection Stock"]);
+      const blockedStock = parseSAPNumber(row["Blocked Stock"]);
+      const transitStock = parseSAPNumber(row["In Transit Stock"]);
 
       const kodePanjang10 = noKat.length === 10;
       let jenisBarang;
@@ -123,28 +141,6 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
       showToast(`SAP: ${parsed.length} baris berhasil diparse.`, "success");
     } catch(err) { showToast("Gagal parse SAP: " + err.message, "error"); }
     setBusy(false);
-    e.target.value = "";
-  }
-
-  async function handleLoadMara(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMaraLoading(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf);
-      const sheet1 = wb.Sheets["Sheet1"] || wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet1, {defval:""});
-      const ref = rows.map(r => ({
-        katalog: normalizeKatalog(String(r["Material"]||"").trim()),
-        description: String(r["Material Description"]||"").trim(),
-        satuan: String(r["Base Unit of Measure"]||"").trim(),
-        materialType: String(r["Material Type"]||"").trim(),
-      }));
-      setMaraReference(ref);
-      showToast(`MARA dimuat: ${ref.length} material (session-only).`, "success");
-    } catch(err) { showToast("Gagal load MARA: " + err.message, "error"); }
-    setMaraLoading(false);
     e.target.value = "";
   }
 
@@ -604,6 +600,265 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
     setLegacyTugBusy(false);
   }
 
+  // ── Import Template Migrasi Stok (WARNOTO) — admin per-UPT memuat stok
+  // mandiri via TEMPLATE_MIGRASI_STOK.xlsx (lihat scripts/gen_template_migrasi_stok.mjs). ──
+  function downloadTplTemplate() {
+    const headers = ["UPT","No Katalog","Nama Material","Satuan","Jenis Barang","Merk","Type","Kategori","Qty","Harga Satuan","Min Qty","Gudang","Blok/Lokasi","Foto Nameplate","Foto Keseluruhan"];
+    const contoh = ["UPT Gresik","1060011","TRF ACC;NGR 70kV 200 Ohm","U","Persediaan","","","HAR-Transformator",3,15000000,1,"Gudang Ketintang","Rak A-1","",""];
+    const ws = XLSX.utils.aoa_to_sheet([headers, contoh]);
+    ws["!cols"] = [{wch:14},{wch:12},{wch:36},{wch:8},{wch:16},{wch:12},{wch:12},{wch:22},{wch:8},{wch:14},{wch:8},{wch:20},{wch:14},{wch:42},{wch:42}];
+    const petunjuk = [
+      ["PETUNJUK PENGISIAN — TEMPLATE MIGRASI DATA STOK WARNOTO"],
+      [""],
+      ["1. Isi data di sheet \"Data Stok\". Satu baris = satu material di satu lokasi."],
+      ["2. Kolom WAJIB: UPT, No Katalog, Nama Material, Satuan, Jenis Barang, Qty."],
+      ["   SATU file = SATU UPT — jangan campur data antar-UPT dalam 1 file."],
+      ["3. Jenis Barang harus persis: Persediaan | Persediaan Bursa | Pre Memory | Cadang"],
+      ["4. Harga Satuan & Min Qty: angka saja, tanpa titik/koma/\"Rp\"."],
+      ["5. Gudang & Blok/Lokasi: harus cocok Master Lokasi UPT tujuan, atau kosongkan (isi manual setelahnya)."],
+      ["6. Foto: link URL https:// langsung tampil di aplikasi; boleh dikosongkan."],
+      ["7. Hapus baris CONTOH sebelum diisi data asli."],
+    ];
+    const wsInfo = XLSX.utils.aoa_to_sheet(petunjuk);
+    wsInfo["!cols"] = [{wch:100}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsInfo, "Petunjuk");
+    XLSX.utils.book_append_sheet(wb, ws, "Data Stok");
+    XLSX.writeFile(wb, "TEMPLATE_MIGRASI_STOK.xlsx");
+  }
+
+  async function handleTplFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setTplBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets["Data Stok"] || wb.Sheets[wb.SheetNames.find(n => n !== "Petunjuk")] || wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      if (raw.length === 0) { showToast("File kosong atau tidak ada baris data.", "error"); setTplBusy(false); return; }
+      const required = ["UPT","No Katalog","Nama Material","Satuan","Jenis Barang","Qty"];
+      if (!required.every(h => Object.prototype.hasOwnProperty.call(raw[0], h))) {
+        showToast("Kolom wajib tidak lengkap. Gunakan TEMPLATE_MIGRASI_STOK.xlsx.", "error"); setTplBusy(false); return;
+      }
+
+      // Guard UPT: file wajib 1 UPT, kosong/tercampur/tidak dikenal/bukan UPT admin -> blokir.
+      const byUpt = new Map();
+      const emptyRows = [];
+      raw.forEach((r, i) => {
+        const u = String(r["UPT"]||"").trim();
+        const excelRow = i + 2;
+        if (!u) { emptyRows.push(excelRow); return; }
+        const key = tplNormUpt(u);
+        if (!byUpt.has(key)) byUpt.set(key, { label: u, rows: [] });
+        byUpt.get(key).rows.push(excelRow);
+      });
+      const uptGroups = [...byUpt.values()].sort((a,b) => b.rows.length - a.rows.length);
+      let guard = { ok: true, message: "" };
+      if (emptyRows.length) {
+        guard = { ok: false, message: `Kolom UPT kosong di ${emptyRows.length} baris (Excel: ${emptyRows.slice(0,30).join(", ")}${emptyRows.length>30?", ...":""}).` };
+      } else if (uptGroups.length > 1) {
+        const [main, ...lain] = uptGroups;
+        guard = { ok: false, message: `File tercampur ${uptGroups.length} UPT. Mayoritas "${main.label}" (${main.rows.length} baris). UPT lain: ` +
+          lain.map(u => `"${u.label}" (baris Excel: ${u.rows.join(", ")})`).join("; ") + "." };
+      }
+      const targetUptLabel = uptGroups[0]?.label || "";
+      const targetUpt = (uptList||[]).find(u => tplNormUpt(u.nama) === tplNormUpt(targetUptLabel));
+      if (guard.ok && !targetUpt) {
+        guard = { ok: false, message: `UPT "${targetUptLabel}" tidak dikenal di Master UPT.` };
+      }
+      if (guard.ok && currentUser?.uptId && targetUpt && currentUser.uptId !== targetUpt.id) {
+        guard = { ok: false, message: `File ini untuk "${targetUptLabel}", bukan UPT Anda — tidak bisa diimpor.` };
+      }
+
+      const katalogKodeSet = new Set(katalogList.map(k => normalizeKatalog(k.katalog)));
+      let lokasiKosong = 0, fotoCount = 0, katalogBaru = 0, katalogExisting = 0;
+      const rows = raw.map((r, i) => {
+        const excelRow = i + 2;
+        const noKat = normalizeKatalog(String(r["No Katalog"]||"").trim());
+        const nama = String(r["Nama Material"]||"").trim();
+        const satuan = String(r["Satuan"]||"").trim();
+        const jenisBarang = String(r["Jenis Barang"]||"").trim();
+        const qty = tplNumOrNull(r["Qty"]);
+        const errors = [];
+        if (!noKat) errors.push("No Katalog kosong");
+        if (!nama) errors.push("Nama Material kosong");
+        if (!satuan) errors.push("Satuan kosong");
+        if (!TPL_JENIS_ENUM.has(jenisBarang)) errors.push("Jenis Barang tidak valid");
+        if (qty === null || qty < 0) errors.push("Qty tidak valid");
+
+        const gudangNama = String(r["Gudang"]||"").trim();
+        const blokKode = String(r["Blok/Lokasi"]||"").trim();
+        let lokasiId = null, lokasiLabel = "";
+        if (targetUpt && gudangNama) {
+          const gudang = (gudangList||[]).find(g => g.uptId === targetUpt.id && (tplNormLoose(g.nama) === tplNormLoose(gudangNama) || tplNormLoose(g.kode) === tplNormLoose(gudangNama)));
+          if (gudang && blokKode) {
+            const lokasi = (lokasiList||[]).find(l => l.gudangId === gudang.id && tplNormLoose(l.kode) === tplNormLoose(blokKode));
+            if (lokasi) { lokasiId = lokasi.id; lokasiLabel = `${gudang.nama} / ${lokasi.kode}`; }
+          }
+        }
+        if (!lokasiId) lokasiKosong++;
+
+        const fotoNameplate = keepRemoteStockPhoto(r["Foto Nameplate"]) || "";
+        const fotoKeseluruhan = keepRemoteStockPhoto(r["Foto Keseluruhan"]) || "";
+        if (fotoNameplate || fotoKeseluruhan) fotoCount++;
+
+        const isNew = errors.length === 0 && !katalogKodeSet.has(noKat);
+        if (errors.length === 0) { if (isNew) katalogBaru++; else katalogExisting++; }
+
+        return {
+          excelRow, noKat, nama, satuan, jenisBarang,
+          merk: String(r["Merk"]||"").trim(), type: String(r["Type"]||"").trim(), kategori: String(r["Kategori"]||"").trim(),
+          qty: qty || 0, harga: tplNumOrNull(r["Harga Satuan"]) || 0, minQty: tplNumOrNull(r["Min Qty"]) || 0,
+          gudangNama, blokKode, lokasiId, lokasiLabel,
+          fotoNameplate, fotoKeseluruhan,
+          errors, isNew,
+        };
+      });
+
+      setTplRows(rows);
+      setTplGuard(guard);
+      setTplTargetUpt(targetUpt || null);
+      setTplPreview({
+        total: rows.length,
+        valid: rows.filter(r => r.errors.length === 0).length,
+        invalid: rows.filter(r => r.errors.length > 0).length,
+        katalogBaru, katalogExisting, lokasiKosong, foto: fotoCount,
+      });
+      setTplFile(file.name);
+      showToast(`Template: ${rows.length} baris terbaca.`, guard.ok ? "success" : "error");
+    } catch (err) {
+      showToast("Gagal parse file: " + err.message, "error");
+    }
+    setTplBusy(false);
+  }
+
+  async function applyTplImport() {
+    if (!tplGuard?.ok || !tplRows?.length || !tplTargetUpt) return;
+    const validRows = tplRows.filter(r => r.errors.length === 0);
+    if (validRows.length === 0) { showToast("Tidak ada baris valid untuk diterapkan.", "error"); return; }
+    setTplBusy(true);
+    try {
+      // 1. Backup JSON dulu — jaring pengaman (mirror handleBackupAndApply di atas).
+      const backup = { stocks, katalogList, lokasiList, backupAt: Date.now(), by: currentUser.id, note: "Pre-import backup Template Migrasi Stok " + (tplFile||"") };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `warnoto_backup_pre_tpl_migrasi_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+
+      const now = Date.now();
+      // 2. Merge katalog — upsert per kode, MULAI dari list existing (non-destruktif ke UPT lain).
+      // katalogIdsTouched = baru+diupdate import ini (hint save ringan). katalogIdsBaru = HANYA
+      // yang benar-benar baru dibuat (dipakai tombol Batalkan Migrasi — jangan ikut hapus katalog
+      // existing yang cuma diupdate).
+      const katalogByKode = new Map(katalogList.map(k => [normalizeKatalog(k.katalog), k]));
+      const katalogIdsTouched = new Set();
+      const katalogIdsBaru = [];
+      validRows.forEach(r => {
+        const existing = katalogByKode.get(r.noKat);
+        if (existing) {
+          katalogByKode.set(r.noKat, { ...existing,
+            satuan: r.satuan || existing.satuan,
+            jenisBarang: r.jenisBarang || existing.jenisBarang,
+            merk: r.merk || existing.merk,
+            type: r.type || existing.type,
+            keterangan: r.kategori || existing.keterangan,
+          });
+          katalogIdsTouched.add(existing.id);
+        } else {
+          const katId = "KAT-" + r.noKat;
+          katalogByKode.set(r.noKat, {
+            id: katId, katalog: r.noKat, name: r.nama,
+            category: r.kategori || r.nama.split(";")[0].trim() || "Material",
+            jenisBarang: r.jenisBarang, satuan: r.satuan, merk: r.merk, type: r.type,
+            keterangan: r.kategori, createdAt: now,
+          });
+          katalogIdsTouched.add(katId);
+          katalogIdsBaru.push(katId);
+        }
+      });
+      const newKatalogList = Array.from(katalogByKode.values());
+
+      // 3. Merge stocks — key upsert uptId+katalogId+lokasiId, non-destruktif ke baris lain.
+      const stocksByKey = new Map(stocks.map(s => [`${s.uptId||""}|${s.katalogId}|${s.lokasiId||""}`, s]));
+      const stockIdsTouched = new Set();
+      validRows.forEach(r => {
+        const kat = katalogByKode.get(r.noKat);
+        const key = `${tplTargetUpt.id}|${kat.id}|${r.lokasiId||""}`;
+        const existing = stocksByKey.get(key);
+        const row = {
+          ...(existing||{}),
+          id: existing?.id || uid(),
+          katalogId: kat.id, lokasiId: r.lokasiId || null, uptId: tplTargetUpt.id,
+          qty: r.qty, price: r.harga || existing?.price || 0, minQty: r.minQty || existing?.minQty || 0,
+          unit: r.satuan, jenisBarang: r.jenisBarang, name: r.nama, katalog: r.noKat,
+          category: kat.category,
+          fotoNameplate: r.fotoNameplate || existing?.fotoNameplate,
+          fotoKeseluruhan: r.fotoKeseluruhan || existing?.fotoKeseluruhan,
+          sapBaselineQty: r.qty, sapBaselineAt: now,
+          createdAt: existing?.createdAt || now, updatedAt: now,
+        };
+        stocksByKey.set(key, row);
+        stockIdsTouched.add(row.id);
+      });
+      const newStocks = Array.from(stocksByKey.values());
+
+      setKatalogList(newKatalogList);
+      setStocks(newStocks);
+      // Katalog dulu supaya FK stocks.katalog_id valid sebelum stok di-upsert. Hint per baris
+      // touched → sync ringan (bukan full-sync tabel `stocks`, yang bisa berat karena foto base64).
+      await saveToCloud({ katalogList: newKatalogList }, { katalogChangedRows: newKatalogList.filter(k => katalogIdsTouched.has(k.id)) });
+      await saveToCloud({ stocks: newStocks }, { stocksChangedRows: newStocks.filter(s => stockIdsTouched.has(s.id)) });
+      logAudit(currentUser, "IMPORT", "migrasi_template", null, {
+        rows: validRows.length, uptId: tplTargetUpt.id,
+        katalogBaru: tplPreview?.katalogBaru||0, lokasiKosong: tplPreview?.lokasiKosong||0,
+      });
+
+      setLastTplImport({ katalogIdsBaru, stockIds: Array.from(stockIdsTouched), at: now, uptLabel: tplTargetUpt.nama, file: tplFile });
+
+      showToast(
+        `✅ Import selesai: ${tplPreview?.katalogBaru||0} katalog baru, ${validRows.length} baris stok diterapkan, ` +
+        `${tplPreview?.lokasiKosong||0} lokasi belum termapping (isi manual), ${tplPreview?.foto||0} baris ada foto.`,
+        "success"
+      );
+      setTplRows(null); setTplPreview(null); setTplGuard(null); setTplFile(null); setTplTargetUpt(null);
+    } catch (err) {
+      showToast("Import gagal: " + err.message, "error");
+    }
+    setTplBusy(false);
+  }
+
+  // Undo import template terakhir — hapus baris stok+katalog baru yang dibuat import ini,
+  // sync ke Supabase, lalu lupakan (cuma bisa undo yang TERAKHIR, bukan multi-level).
+  async function undoLastTplImport() {
+    if (!lastTplImport) return;
+    if (!confirm(`Batalkan migrasi terakhir (${lastTplImport.uptLabel||"-"}, file ${lastTplImport.file||"-"})?\n${lastTplImport.stockIds.length} baris stok dan ${lastTplImport.katalogIdsBaru.length} katalog baru akan dihapus.`)) return;
+    setTplBusy(true);
+    try {
+      const stockIdSet = new Set(lastTplImport.stockIds);
+      const katIdSet = new Set(lastTplImport.katalogIdsBaru);
+      const newStocks = stocks.filter(s => !stockIdSet.has(s.id));
+      const newKatalogList = katalogList.filter(k => !katIdSet.has(k.id));
+      setStocks(newStocks);
+      setKatalogList(newKatalogList);
+      // Tidak ada hint batch-delete di saveToCloud — hapus stok satu-satu (pola stocksDeletedId
+      // existing). Katalog: tanpa hint → full sync dengan reconciliation-delete (mendeteksi baris
+      // yang hilang), tabelnya jauh lebih kecil dari stocks jadi aman.
+      for (const id of lastTplImport.stockIds) {
+        await saveToCloud({ stocks: newStocks }, { stocksDeletedId: id });
+      }
+      if (katIdSet.size) await saveToCloud({ katalogList: newKatalogList });
+      logAudit(currentUser, "DELETE", "migrasi_template_undo", null, { stockIds: lastTplImport.stockIds.length, katalogBaru: katIdSet.size });
+      showToast(`↩️ Migrasi dibatalkan: ${lastTplImport.stockIds.length} baris stok dan ${katIdSet.size} katalog baru dihapus.`, "success");
+      setLastTplImport(null);
+    } catch (err) {
+      showToast("Gagal membatalkan migrasi: " + err.message, "error");
+    }
+    setTplBusy(false);
+  }
+
   return (
     <div className="admin-mobile-page migration-data-page">
       {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
@@ -645,9 +900,84 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
 
       {step==="upload" && (
         <div>
-          <div className="migration-upload-card migration-upload-card--sap" style={{...sty.card,marginBottom:12}}>
-            <div style={{fontWeight:700,marginBottom:8}}>1. Upload File SAP (PEMAT format)</div>
-            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Format CSV atau XLSX dengan kolom: Material, Material Description, Base Unit of Measure, Unrestricted Use Stock, Valuation Type, Harga Satuan.</p>
+          <div className="migration-upload-card migration-upload-card--tpl" style={{...sty.card,marginBottom:12,borderLeft:"4px solid #16a34a"}}>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:"#166534"}}>📦 Import Data Stok (Template WARNOTO)</div>
+            <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Migrasi stok per-UPT: katalog, qty, harga, foto, lokasi. Untuk semua UPT.</p>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <button style={sty.btn("ghost")} onClick={downloadTplTemplate}>⬇️ Download Template Kosong</button>
+              <label style={{...sty.btn("primary"),cursor:"pointer"}}>
+                {tplBusy?"⏳ Memproses...":"📂 Upload Template (.xlsx)"}
+                <input type="file" accept=".xlsx" style={{display:"none"}} onChange={handleTplFile} disabled={tplBusy}/>
+              </label>
+              {tplFile && <span style={{fontSize:12,color:C.green,fontWeight:700}}>✅ {tplFile} ({tplRows?.length||0} baris)</span>}
+              {lastTplImport && (
+                <button style={sty.btn("ghost","sm")} disabled={tplBusy} onClick={undoLastTplImport}>↩️ Batalkan Migrasi Terakhir</button>
+              )}
+            </div>
+
+            {tplPreview && (
+              <div style={{marginTop:14,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
+                {!tplGuard?.ok ? (
+                  <div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:12,marginBottom:12,fontSize:12,color:"#991b1b"}}>
+                    <strong>⚠️ Import diblokir:</strong> {tplGuard?.message}
+                  </div>
+                ) : (
+                  <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:12,marginBottom:12,fontSize:12,color:"#166534"}}>
+                    ✅ Guard UPT lolos — file untuk <strong>{tplTargetUpt?.nama}</strong>.
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:12}}>
+                  {[
+                    {label:"Total Baris",val:tplPreview.total},
+                    {label:"Baris Valid",val:tplPreview.valid,color:C.green},
+                    {label:"Baris Error",val:tplPreview.invalid,color:tplPreview.invalid?C.red:C.muted},
+                    {label:"Katalog Baru",val:tplPreview.katalogBaru,color:"#f59e0b"},
+                    {label:"Katalog Existing",val:tplPreview.katalogExisting},
+                    {label:"Lokasi Tak Termapping",val:tplPreview.lokasiKosong,color:tplPreview.lokasiKosong?"#f59e0b":C.muted},
+                    {label:"Foto Terpasang",val:tplPreview.foto},
+                  ].map(kpi=>(
+                    <div key={kpi.label} style={{...sty.card,padding:10}}>
+                      <div style={{fontSize:12,color:C.muted}}>{kpi.label}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:kpi.color||C.text}}>{kpi.val}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12,maxHeight:300,overflowY:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:760}}>
+                    <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
+                      <tr>{["Baris","No Katalog","Nama","Jenis","Qty","Lokasi","Foto","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {tplRows.slice(0,200).map((r,i)=>(
+                        <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:r.errors.length?"#fef2f2":r.isNew?"#fefce8":"white"}}>
+                          <td style={{padding:"5px 8px"}}>{r.excelRow}</td>
+                          <td style={{padding:"5px 8px",fontWeight:700,color:"#0098da"}}>{r.noKat||"-"}</td>
+                          <td style={{padding:"5px 8px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.nama||"-"}</td>
+                          <td style={{padding:"5px 8px"}}>{r.jenisBarang||"-"}</td>
+                          <td style={{padding:"5px 8px",textAlign:"right"}}>{r.qty}</td>
+                          <td style={{padding:"5px 8px"}}>{r.lokasiId ? r.lokasiLabel : <span style={{color:"#f59e0b"}}>— belum termapping</span>}</td>
+                          <td style={{padding:"5px 8px",textAlign:"center"}}>{(r.fotoNameplate||r.fotoKeseluruhan)?"✅":"-"}</td>
+                          <td style={{padding:"5px 8px",fontWeight:700,color:r.errors.length?C.red:r.isNew?"#f59e0b":C.green}}>
+                            {r.errors.length ? r.errors.join("; ") : r.isNew ? "🆕 Katalog baru" : "✅ Existing"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <button style={{...sty.btn("primary"),opacity:(!tplGuard?.ok||tplBusy)?0.6:1}} disabled={!tplGuard?.ok||tplBusy} onClick={applyTplImport}>
+                    {tplBusy?"⏳ Menerapkan...":"✅ Terapkan Migrasi"}
+                  </button>
+                  <button style={sty.btn("ghost")} disabled={tplBusy} onClick={()=>{setTplRows(null);setTplPreview(null);setTplGuard(null);setTplFile(null);setTplTargetUpt(null);}}>Upload Ulang</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <details className="migration-upload-card migration-upload-card--sap" style={{...sty.card,marginBottom:12}}>
+            <summary style={{fontWeight:700,cursor:"pointer"}}>Import SAP PEMAT</summary>
+            <p style={{fontSize:12,color:C.muted,margin:"8px 0 10px"}}>Cutover awal dari export SAP (setup awal UPT Surabaya). Format CSV atau XLSX dengan kolom: Material, Material Description, Base Unit of Measure, Unrestricted Use Stock, Valuation Type, Harga Satuan.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
               <label style={{...sty.btn("primary"),cursor:"pointer"}}>
                 {busy?"⏳ Memproses...":"📂 Upload File SAP (CSV/XLSX)"}
@@ -667,7 +997,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, txns, migrated
                 {busy && <button style={{...sty.btn("ghost","sm")}} onClick={()=>{setBusy(false);setApplyProgress("");setApplyProgressPct(0);}}>Reset (jika stuck)</button>}
               </div>
             )}
-          </div>
+          </details>
           <ProgressBar/>
         </div>
       )}

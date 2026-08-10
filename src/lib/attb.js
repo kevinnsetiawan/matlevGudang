@@ -29,10 +29,10 @@ export function attbStageLabel(stage) {
 
 // Approval Tahap1->2 discope ke Asman UPT PENGAJU (item.upt) — pola sama
 // canApproveHeavyEquipmentLoan: WAJIB match persis, tidak longgar kalau upt kosong.
-export function canApproveAttb(user, item) {
+export function canApproveAttb(user, item, uptList) {
   if (user?.role === "SUPERADMIN") return true;
   if (user?.role !== "ASMAN") return false;
-  const userUpt = getUserUptScope(user);
+  const userUpt = getUserUptScope(user, uptList);
   return !!item?.upt && userUpt === item.upt;
 }
 

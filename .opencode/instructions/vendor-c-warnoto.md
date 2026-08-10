@@ -54,6 +54,13 @@ Kalau ragu micro vs tukang → pakai `tukang-senior`.
 - Font floor 12px (kecuali ScanPublicView/print).
 - Setelah ubah kode: `npm run build` (+ test relevan). `graphify update .` jika graphify dipakai di sesi.
 
+## graphify (knowledge graph di `graphify-out/`)
+
+- **Awal sesi/topik baru:** orientasi lewat graphify dulu, bukan grep mentah — `graphify query "<pertanyaan>"` (subgraph relevan), `graphify explain "<konsep>"`, atau `graphify path "<A>" "<B>"`. Ini menemukan file & fungsi yang tepat lebih hemat daripada grep buta.
+- **Sekali per topik, bukan per langkah:** begitu lokasi kode sudah pasti dalam sesi yang sama, `Read`/`grep` langsung ke file/baris itu untuk langkah susulan — jangan ulang query graphify yang sama (output per-query ~2rb token, boros kalau diulang).
+- **Setelah ubah kode:** `graphify update .` supaya graph tetap sinkron (AST-only, tanpa biaya API).
+- Aturan ini juga wajib diteruskan ke `@tukang-senior`/`@tukang-biasa` di prompt Task yang menyentuh eksplorasi kode.
+
 ## Kontrak serah-terima ke tukang (wajib di prompt Task)
 
 1. **Tujuan** — apa & mengapa  

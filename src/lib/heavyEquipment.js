@@ -143,10 +143,10 @@ export function getHeavyEquipmentLoanRuntimeStatus(loan, now = Date.now()) {
   return normalized;
 }
 
-export function canApproveHeavyEquipmentLoan(user, loan) {
+export function canApproveHeavyEquipmentLoan(user, loan, uptList) {
   if (user?.role === "SUPERADMIN") return true; // full-access, bypass scope UPT di bawah
   if (user?.role !== "ASMAN") return false;
-  const userUpt = getUserUptScope(user);
+  const userUpt = getUserUptScope(user, uptList);
   // Approval discope ke UNIT PEMINJAM (requesterUpt) — Asman UPT sendiri hanya boleh approve
   // pengajuan peminjaman YANG DIAJUKAN OLEH UPT-nya sendiri, bukan berdasar pemilik alat.
   // Diperketat 2026-07-06: dulu `requesterUpt` kosong/tidak ke-set otomatis dianggap "boleh

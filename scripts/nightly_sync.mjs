@@ -34,7 +34,8 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed, expandMonthlySeriesFromMap } from "../src/lib/ragShared.mjs";
+import { fmtNum, getSAPLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap, meanStdev } from "../src/lib/ragShared.mjs";
+import { getTopStockByQty, getTopStokTerbanyak } from "../src/lib/analytics.js";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -57,6 +58,7 @@ async function main() {
     { data: lokasiRows, error: eLok },
     { data: gudangRows, error: eGdg },
     { data: faqRows, error: eFaq },
+    { data: uptRows, error: eUpt },
     { data: mutasi, error: eMut },
   ] = await Promise.all([
     supabase.from("katalog").select("id, data"),
@@ -64,6 +66,7 @@ async function main() {
     supabase.from("lokasi").select("id, data"),
     supabase.from("gudang").select("id, data"),
     supabase.from("ai_faq_curated").select("id, pertanyaan, jawaban").eq("is_active", true),
+    supabase.from("upt").select("id, data"),
     // limit dinaikkan dari 500: itu batas TOTAL lintas semua katalog dalam 180 hari, terlalu kecil
     // untuk menghitung deret pemakaian bulanan per material (materialnya ratusan). Filter tanggal
     // 180 hari yang jadi pembatas utama; limit tinggal jaring pengaman anti-OOM. Jumlah baris riil
@@ -75,6 +78,7 @@ async function main() {
   if (eLok) throw eLok;
   if (eGdg) throw eGdg;
   if (eFaq) throw eFaq;
+  if (eUpt) throw eUpt;
   if (eMut) throw eMut;
 
   // GUARD KRITIS: kalau sumber utama (katalog + stocks) kosong, JANGAN lanjut — kalau lanjut,
@@ -87,7 +91,9 @@ async function main() {
 
   // Peta lokasi/gudang untuk resolusi blok + nama gudang (mirror lokasiList/gudangList App.jsx).
   const gudangById = {};
-  (gudangRows || []).forEach((r) => { gudangById[r.id] = { id: r.id, nama: r.data?.nama || "" }; });
+  (gudangRows || []).forEach((r) => { gudangById[r.id] = { id: r.id, nama: r.data?.nama || "", uptId: r.data?.uptId || null }; });
+  const uptNamaById = {};
+  (uptRows || []).forEach((r) => { uptNamaById[r.id] = r.data?.nama || r.id; });
   const lokasiById = {};
   (lokasiRows || []).forEach((r) => { lokasiById[r.id] = { id: r.id, kode: r.data?.kode || "", gudangId: r.data?.gudangId || "" }; });
 
@@ -115,70 +121,115 @@ async function main() {
     };
   });
 
-  // Agregasi qty+harga per katalogId (jumlah semua lokasi/blok) — mirror App.jsx syncRagChunks.
-  const stockByKatalog = {};
+  // Resolusi uptId dari lokasiId lewat lokasi -> gudang (satu-satunya field tersedia baik di
+  // stocks maupun tug15_history untuk melacak asal UPT sebuah baris).
+  const uptIdFromLokasi = (lokasiId) => {
+    const lok = lokasiById[lokasiId];
+    const gdg = lok?.gudangId ? gudangById[lok.gudangId] : null;
+    return gdg?.uptId || null;
+  };
+
+  // Agregasi qty+harga per (uptId, katalogId) — chunk katalog per-UPT (RAG 3-tier). Katalog
+  // tanpa stok di UPT manapun dapat 1 chunk global (upt_id null, deskripsi tanpa angka).
+  const stockByUptKatalog = {}; // key `${uptId}::${katalogId}`
   stocks.forEach((s) => {
     if (!s.katalogId) return;
-    if (!stockByKatalog[s.katalogId]) stockByKatalog[s.katalogId] = { qty: 0, price: s.price || 0, locations: [] };
-    stockByKatalog[s.katalogId].qty += s.qty || 0;
+    const uptId = uptIdFromLokasi(s.lokasiId);
+    if (!uptId) return;
+    const key = `${uptId}::${s.katalogId}`;
+    if (!stockByUptKatalog[key]) stockByUptKatalog[key] = { uptId, katalogId: s.katalogId, qty: 0, price: s.price || 0, locations: [] };
+    stockByUptKatalog[key].qty += s.qty || 0;
     if (s.qty > 0) {
       const lok = lokasiById[s.lokasiId];
       const gdg = lok?.gudangId ? gudangById[lok.gudangId] : null;
-      stockByKatalog[s.katalogId].locations.push({ gudang: gdg?.nama || "", blok: lok?.kode || s.lokasi || "", qty: s.qty || 0 });
+      stockByUptKatalog[key].locations.push({ gudang: gdg?.nama || "", blok: lok?.kode || s.lokasi || "", qty: s.qty || 0 });
     }
   });
+  const katalogIdsWithStock = new Set(Object.values(stockByUptKatalog).map((v) => v.katalogId));
+  const katalogById = {};
+  katalogList.forEach((k) => { katalogById[k.id] = k; });
 
-  const katalogChunks = katalogList.map((k) => ({
-    id: `katalog_${k.id}`,
-    source_type: "katalog",
-    source_id: k.id,
-    content: buildKatalogRagContent(k, stockByKatalog[k.id]),
-  }));
+  const katalogChunks = [
+    ...Object.values(stockByUptKatalog).map((v) => {
+      const k = katalogById[v.katalogId];
+      if (!k) return null;
+      const uptNama = uptNamaById[v.uptId] || v.uptId;
+      return { id: `katalog_${v.uptId}_${v.katalogId}`, source_type: "katalog", source_id: v.katalogId, upt_id: v.uptId, content: `UPT ${uptNama}: ${buildKatalogRagContent(k, v)}` };
+    }).filter(Boolean),
+    ...katalogList.filter((k) => !katalogIdsWithStock.has(k.id)).map((k) => ({ id: `katalog_${k.id}`, source_type: "katalog", source_id: k.id, upt_id: null, content: buildKatalogRagContent(k, null) })),
+  ];
 
   const faqChunks = (faqRows || []).map((f) => ({
     id: `faq_${f.id}`,
     source_type: "faq",
     source_id: String(f.id),
+    upt_id: null,
     content: `Pertanyaan: ${f.pertanyaan}\nJawaban resmi (kurasi Admin): ${f.jawaban}`,
   }));
 
-  // Ringkas mutasi per katalog dari tug15_history (tetap valid — tabel ini tidak ikut migrasi).
-  // Loop yang sama sekalian membangun peta pemakaian per bulan {katalogId: {"YYYY-MM": qty}} dari
-  // baris KELUAR saja — mirror definisi "usage" di browser (cuma TUG9/TUG8 yang dihitung sbg
-  // pemakaian, penerimaan/retur tidak) — untuk stok minimum otomatis di getKritisAgg di bawah.
+  // Ringkas mutasi per (uptId, katalogId) dari tug15_history (tetap valid — tabel ini tidak
+  // ikut migrasi). uptId di-resolve dari lokasi_id tiap baris (satu-satunya field yang tersedia
+  // di tug15_history untuk melacak UPT — lihat uptIdFromLokasi di atas); baris tanpa lokasi_id
+  // yang bisa di-resolve DILEWATI dari agregat mutasi (bukan ditebak). Loop yang sama sekalian
+  // membangun peta pemakaian per bulan {katalogId: {"YYYY-MM": qty}} dari baris KELUAR saja
+  // (nasional, lintas UPT) — mirror definisi "usage" di browser (cuma TUG9/TUG8 yang dihitung
+  // sbg pemakaian, penerimaan/retur tidak) — untuk stok minimum otomatis di getKritisAgg di bawah.
   console.log(`Baris tug15_history 180 hari terakhir: ${(mutasi || []).length}`);
-  const mutasiByKatalog = {};
+  const mutasiByUptKatalog = {}; // key `${uptId}::${katalogId}`
   const keluarPerBulanByKatalog = {};
+  let mutasiTanpaUpt = 0;
   (mutasi || []).forEach((m) => {
-    if (!mutasiByKatalog[m.katalog_id]) mutasiByKatalog[m.katalog_id] = { masuk: 0, keluar: 0, count: 0 };
-    if (m.jenis_transaksi === "MASUK") mutasiByKatalog[m.katalog_id].masuk += Number(m.qty) || 0;
+    const uptId = uptIdFromLokasi(m.lokasi_id);
+    if (!uptId) mutasiTanpaUpt += 1;
     else {
-      mutasiByKatalog[m.katalog_id].keluar += Number(m.qty) || 0;
-      if (m.jenis_transaksi === "KELUAR" && m.katalog_id && m.tanggal) {
-        const bulan = String(m.tanggal).slice(0, 7); // "YYYY-MM-DD" → "YYYY-MM"
-        if (!keluarPerBulanByKatalog[m.katalog_id]) keluarPerBulanByKatalog[m.katalog_id] = {};
-        keluarPerBulanByKatalog[m.katalog_id][bulan] = (keluarPerBulanByKatalog[m.katalog_id][bulan] || 0) + (Number(m.qty) || 0);
-      }
+      const key = `${uptId}::${m.katalog_id}`;
+      if (!mutasiByUptKatalog[key]) mutasiByUptKatalog[key] = { uptId, katalogId: m.katalog_id, masuk: 0, keluar: 0, count: 0 };
+      if (m.jenis_transaksi === "MASUK") mutasiByUptKatalog[key].masuk += Number(m.qty) || 0;
+      else mutasiByUptKatalog[key].keluar += Number(m.qty) || 0;
+      mutasiByUptKatalog[key].count += 1;
     }
-    mutasiByKatalog[m.katalog_id].count += 1;
+    if (m.jenis_transaksi === "KELUAR" && m.katalog_id && m.tanggal) {
+      const bulan = String(m.tanggal).slice(0, 7); // "YYYY-MM-DD" → "YYYY-MM"
+      if (!keluarPerBulanByKatalog[m.katalog_id]) keluarPerBulanByKatalog[m.katalog_id] = {};
+      keluarPerBulanByKatalog[m.katalog_id][bulan] = (keluarPerBulanByKatalog[m.katalog_id][bulan] || 0) + (Number(m.qty) || 0);
+    }
   });
+  if (mutasiTanpaUpt > 0) console.log(`  ${mutasiTanpaUpt} baris tug15_history tanpa lokasi_id ter-resolve — dilewati dari chunk mutasi per-UPT.`);
   const monthlySeriesByKatalogId = {};
   Object.entries(keluarPerBulanByKatalog).forEach(([katalogId, historyMap]) => {
     monthlySeriesByKatalogId[katalogId] = expandMonthlySeriesFromMap(historyMap);
   });
   const namaByKatalogId = {};
   katalogList.forEach((k) => { namaByKatalogId[k.id] = k.name; });
-  const mutasiChunks = Object.entries(mutasiByKatalog).map(([katalogId, d]) => ({
-    id: `mutasi_${katalogId}`,
+  const mutasiChunks = Object.values(mutasiByUptKatalog).map((d) => ({
+    id: `mutasi_${d.uptId}_${d.katalogId}`,
     source_type: "mutasi",
-    source_id: katalogId,
-    content: `Ringkasan mutasi 6 bulan terakhir untuk ${namaByKatalogId[katalogId] || katalogId}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
+    source_id: d.katalogId,
+    upt_id: d.uptId,
+    content: `UPT ${uptNamaById[d.uptId] || d.uptId}: Ringkasan mutasi 6 bulan terakhir untuk ${namaByKatalogId[d.katalogId] || d.katalogId}: Masuk ${fmtNum(d.masuk)}, Keluar ${fmtNum(d.keluar)}, dari ${d.count} transaksi.`,
   }));
 
-  const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks];
-  console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi)`);
+  // Chunk "forecast": proyeksi bulan-ke-habis per (uptId, katalogId) yang punya stok. minQty
+  // manual diambil dari agregat maksimum antar-lokasi (sama seperti getKritisAgg di atas).
+  const manualMinQtyByKatalogId = {};
+  stocks.forEach((s) => {
+    if (!s.katalogId) return;
+    manualMinQtyByKatalogId[s.katalogId] = Math.max(manualMinQtyByKatalogId[s.katalogId] || 0, s.minQty || 0);
+  });
+  const forecastChunks = Object.values(stockByUptKatalog).map((v) => {
+    const k = katalogById[v.katalogId];
+    if (!k) return null;
+    const uptNama = uptNamaById[v.uptId] || v.uptId;
+    const monthlySeries = monthlySeriesByKatalogId[v.katalogId] || [];
+    const { minQty: effectiveMinQty } = computeEffectiveMinQty({ monthlySeries, manualMinQty: manualMinQtyByKatalogId[v.katalogId] || 0 });
+    const content = `UPT ${uptNama}: ${buildForecastRagContent({ nama: k.name, satuan: k.satuan, qty: v.qty, monthlySeries, effectiveMinQty })}`;
+    return { id: `forecast_${v.uptId}_${v.katalogId}`, source_type: "forecast", source_id: v.katalogId, upt_id: v.uptId, content };
+  }).filter(Boolean);
 
-  const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "faq", "mutasi"]);
+  const allChunks = [...katalogChunks, ...faqChunks, ...mutasiChunks, ...forecastChunks];
+  console.log(`Total chunk: ${allChunks.length} (${katalogChunks.length} katalog, ${faqChunks.length} faq, ${mutasiChunks.length} mutasi, ${forecastChunks.length} forecast)`);
+
+  const { data: existingChunks } = await supabase.from("rag_chunks").select("id, content").in("source_type", ["katalog", "faq", "mutasi", "forecast"]);
   const existingContentById = new Map((existingChunks || []).map((r) => [r.id, r.content]));
   const toEmbed = splitChunksForEmbed(allChunks, existingContentById);
   console.log(`Chunk berubah/baru: ${toEmbed.length}, tidak berubah (skip): ${allChunks.length - toEmbed.length}`);
@@ -193,10 +244,10 @@ async function main() {
     console.log(`  embed batch ${i}-${i + batch.length} OK`);
   }
 
-  // Hapus chunk katalog/faq/mutasi lama yang sumbernya sudah tidak ada — TIDAK menyentuh
-  // source_type='txn' (domain sinkron client-side App.jsx).
+  // Hapus chunk katalog/faq/mutasi/forecast lama yang sumbernya sudah tidak ada — TIDAK
+  // menyentuh source_type='txn' (domain sinkron client-side App.jsx).
   const currentIds = new Set(allChunks.map((c) => c.id));
-  const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "faq", "mutasi"]);
+  const { data: existing } = await supabase.from("rag_chunks").select("id").in("source_type", ["katalog", "faq", "mutasi", "forecast"]);
   const toDelete = (existing || []).filter((r) => !currentIds.has(r.id)).map((r) => r.id);
   if (toDelete.length) {
     await supabase.from("rag_chunks").delete().in("id", toDelete);
@@ -214,6 +265,28 @@ async function main() {
   const top20 = [...enriched].sort((a, b) => b.nilai - a.nilai).slice(0, 20);
   // agregat per katalog + stok minimum otomatis dari histori — konsisten dgn dashboard App.jsx
   const kritis = getKritisAgg(enriched, monthlySeriesByKatalogId);
+
+  // topByQtyPerSatuan: top material by qty, DIKELOMPOKKAN per satuan (reuse getTopStockByQty
+  // dari analytics.js — sama persis dgn yang dipakai sendChat App.jsx Tier 1) — supaya Telegram
+  // single-shot bisa jawab "stok terbanyak" akurat tanpa tool call.
+  const topByQtyPerSatuan = getTopStockByQty(enriched, katalogList, 10)
+    .map((g) => ({ satuan: g.satuan, items: g.items.map((i) => ({ nama: i.nama, katalog: i.katalog, qty: i.totalQty })) }));
+
+  // proyeksiStokHabis: top 8 material paling mendesak habis — qty agregat per katalog (reuse
+  // getTopStokTerbanyak) x rata-rata pemakaian/bulan (meanStdev atas monthlySeriesByKatalogId,
+  // sudah dihitung di atas dari tug15_history KELUAR 180 hari).
+  const proyeksiStokHabis = getTopStokTerbanyak(enriched, katalogList, Infinity)
+    .map((g) => {
+      const series = monthlySeriesByKatalogId[g.katalogId] || [];
+      const avgPerBulan = series.length > 0 ? meanStdev(series).mean : 0;
+      if (avgPerBulan <= 0) return null;
+      const estimasiHari = Math.round((g.totalQty / avgPerBulan) * 30);
+      return { nama: g.nama, katalog: g.katalog, qty: g.totalQty, satuan: g.satuan, avgPerBulan: Math.round(avgPerBulan), estimasiHari };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.estimasiHari - b.estimasiHari)
+    .slice(0, 8);
+
   const state_data = {
     generatedAt: new Date().toISOString(),
     generatedBy: "nightly_sync.mjs (cron)",
@@ -221,6 +294,8 @@ async function main() {
     totalNilaiRp: Math.round(enriched.reduce((a, s) => a + s.nilai, 0)),
     top20ByValue: top20.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, hargaSatuan: s.price, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.katalog), ...withLokasi(s) })),
     materialKritis: kritis.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, minQty: s.minQty, ...withLokasi(s) })),
+    topByQtyPerSatuan,
+    proyeksiStokHabis,
   };
   await supabase.from("warnoto_state").insert({ state_data, version: "v1-nightly" });
 

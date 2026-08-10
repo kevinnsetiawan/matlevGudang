@@ -3,6 +3,7 @@
 import { supabase } from "../supabaseClient.js";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./openLocationCode.js";
 import { isDemoMode } from "./demo.js";
+import { mapStockScopeRow } from "./stockScope.js";
 
 // Satpam, Tim Mutu, UIT, UPT, Gudang, Lokasi dulu hanya tersimpan di
 // localStorage/CLOUD (per-browser, tidak sinkron antar device/user). Sekarang
@@ -90,7 +91,9 @@ export async function loadMasterTable(table) {
     ({ data, error } = await supabase.from(table).select("*"));
     if (error) { console.error(`loadMasterTable(${table}): ${error.message}`, error); return null; }
   }
-  return data.map(row => ({ ...row.data, id: row.id }));
+  return data.map(row => (table === "stock_opname" || table === "stock_count")
+    ? mapStockScopeRow(row)
+    : ({ ...row.data, id: row.id }));
 }
 
 // extraCols(item) => kolom tambahan per baris (FK/status) di luar id & data, opsional
@@ -105,7 +108,12 @@ export async function syncMasterTable(table, list, extraCols) {
   const rows = dedupedList.map(item => ({
     id: item.id,
     data: item,
-    created_at: item.createdAt ?? Date.now(),
+    // stock_count pakai `uploadedAt` sbg waktu sesi (bukan `createdAt`); tanpa ini setiap
+    // sync massal menimpa created_at=Date.now() ke SEMUA baris → kembar, tie-break recency
+    // jadi acak (bug dashboard akurasi ambil sesi salah).
+    created_at: item.createdAt
+      ?? (table === "stock_count" ? item.uploadedAt : null)
+      ?? Date.now(),
     ...(extraCols ? extraCols(item) : {}),
   }));
   if (rows.length) {
@@ -156,7 +164,12 @@ export async function syncMasterTableRows(table, rows, extraCols) {
   const upsertRows = dedupedRows.map(item => ({
     id: item.id,
     data: item,
-    created_at: item.createdAt ?? Date.now(),
+    // stock_count pakai `uploadedAt` sbg waktu sesi (bukan `createdAt`); tanpa ini setiap
+    // sync massal menimpa created_at=Date.now() ke SEMUA baris → kembar, tie-break recency
+    // jadi acak (bug dashboard akurasi ambil sesi salah).
+    created_at: item.createdAt
+      ?? (table === "stock_count" ? item.uploadedAt : null)
+      ?? Date.now(),
     ...(extraCols ? extraCols(item) : {}),
   }));
   const { error } = await supabase.from(table).upsert(upsertRows, { onConflict: "id" });

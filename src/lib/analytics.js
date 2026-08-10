@@ -1,7 +1,100 @@
 // Helper analitik dashboard (top pemakaian/stok, material akan habis, ringkasan txn)
 // — dipindah dari App.jsx (refactor Fase 4f).
 import { fmtDate } from "./utils.js";
-import { expandMonthlySeriesFromMap, computeEffectiveMinQty } from "./ragShared.mjs";
+import { expandMonthlySeriesFromMap, computeEffectiveMinQty, meanStdev, normInv } from "./ragShared.mjs";
+import { buildMonthlyDemandSeries, tsbMonthlyForecast } from "./tsbForecast.js";
+
+// Asumsi lead time pengadaan & panjang histori minimum sebelum stok minimum dihitung otomatis
+// — sama seperti konstanta di ForecastStokPage.jsx (lihat komentar di sana untuk alasan).
+export const DEFAULT_LEAD_TIME_DAYS = 30;
+export const MIN_HISTORY_MONTHS = 3;
+
+// Risiko kehabisan stok satu katalog — dipindah dari getRisk() di ForecastStokPage.jsx supaya
+// bisa dipakai juga oleh Dashboard (computeProcurementList) tanpa duplikasi rumus TSB/ROP.
+export function computeKatalogRisk(katalog, stocks, txns) {
+  const stockRows = (stocks||[]).filter(stock=>stock.katalogId===katalog.id);
+  const totalQty = stockRows.reduce((sum,stock)=>sum+(stock.qty||0),0);
+  const manualMinQty = stockRows.reduce((max,stock)=>Math.max(max,stock.minQty||0),0);
+  const usageItems = [];
+  (txns||[]).filter(txn=>["TUG9","TUG8"].includes(txn.docType)&&txn.status==="APPROVED").forEach(txn=>{
+    (txn.stockItems||[]).forEach(item=>{
+      const stock = (stocks||[]).find(row=>row.id===item.stockId);
+      if (stock?.katalogId===katalog.id) usageItems.push({qty:item.qty||0,ts:txn.approvedAt||txn.createdAt});
+    });
+  });
+  const monthlySeries = buildMonthlyDemandSeries(usageItems);
+  const { forecastPerPeriod } = tsbMonthlyForecast(monthlySeries);
+  const perDay = forecastPerPeriod/30;
+  const estimatedDays = perDay>0 ? Math.round(totalQty/perDay) : Infinity;
+  const { minQty, minQtySource } = computeEffectiveMinQty({
+    monthlySeries, manualMinQty,
+    leadTimeMonths: DEFAULT_LEAD_TIME_DAYS/30,
+    minHistoryMonths: MIN_HISTORY_MONTHS,
+  });
+  const critical = minQty>0 && totalQty<=minQty;
+  const base = {days:estimatedDays,perDay,minQty,minQtySource,monthlySeries};
+  if (critical || estimatedDays<=30) return {key:"critical",label:"Kritis",...base};
+  if (estimatedDays<=90) return {key:"attention",label:"Perhatian",...base};
+  if (estimatedDays<=180) return {key:"watch",label:"Waspada",...base};
+  return {key:"safe",label:"Aman",...base};
+}
+
+// Daftar usulan pengadaan (item Kritis/Waspada + qty usulan) — dipindah dari procurementList
+// (useMemo) di ForecastStokPage.jsx supaya ringkasannya juga bisa tampil di Dashboard. Rumus
+// TIDAK diubah, cuma dipindah: 3 cabang qty (Material Cadang gapQty > ROP+ROQ histori > restock
+// minimum) persis sama seperti sebelumnya.
+export function computeProcurementList({ katalogList, stocks, txns, materialCadangHealthData }) {
+  const analysisRuns = materialCadangHealthData?.analysisRuns||[];
+  const healthResults = materialCadangHealthData?.healthResults||[];
+  const latestRun = analysisRuns.slice(-1)[0] || null;
+  const materialCadangGapMap = new Map();
+  if (latestRun) {
+    healthResults
+      .filter(row=>row.runId===latestRun.id && row.treatment==="Material Cadang" && row.katalogId)
+      .forEach(row=>materialCadangGapMap.set(row.katalogId, row));
+  }
+
+  const sortDays = days => days===Infinity ? Number.MAX_SAFE_INTEGER : days;
+  const RISK_PRIORITY = {critical:0,attention:1,watch:2,safe:3};
+
+  const list = (katalogList||[])
+    .filter(katalog=>(stocks||[]).some(stock=>stock.katalogId===katalog.id))
+    .map(kat=>{
+      const stockRows = (stocks||[]).filter(stock=>stock.katalogId===kat.id);
+      const totalQty = stockRows.reduce((sum,stock)=>sum+(stock.qty||0),0);
+      const risk = computeKatalogRisk(kat, stocks, txns);
+      return {kat,stockRows,totalQty,risk};
+    })
+    .filter(entry=>entry.risk.key==="critical"||entry.risk.key==="watch")
+    .map(entry=>{
+      const price = entry.stockRows.find(stock=>stock.price>0)?.price || 0;
+      const mcResult = materialCadangGapMap.get(entry.kat.id);
+      const series = entry.risk.monthlySeries||[];
+      let qty = Math.max(0, entry.risk.minQty-entry.totalQty), method = "minimum_stock", methodLabel = "Restock ke stok minimum (belum ada histori pemakaian)";
+      if (mcResult) {
+        qty = Math.max(0, mcResult.gapQty||0);
+        method = "material_cadang";
+        methodLabel = "Poisson service-level · Material Cadang";
+      } else if (series.length) {
+        const { mean: avgMonthlyUsage, stdev: stdevMonthlyUsage } = meanStdev(series);
+        const serviceLevel = entry.risk.key==="critical" ? 0.98 : 0.95;
+        const leadTimeMonths = DEFAULT_LEAD_TIME_DAYS/30;
+        const safetyStock = normInv(serviceLevel)*stdevMonthlyUsage*Math.sqrt(leadTimeMonths);
+        const reorderPoint = avgMonthlyUsage*leadTimeMonths + safetyStock;
+        const orderQty = Math.max(avgMonthlyUsage, entry.risk.minQty);
+        qty = Math.ceil(Math.max(0, reorderPoint-entry.totalQty) + orderQty);
+        method = "rop_roq";
+        methodLabel = `ROP+ROQ · ± ${leadTimeMonths} bln lead time (asumsi) · service level ${Math.round(serviceLevel*100)}%`;
+      }
+      return {...entry, price, qty, method, methodLabel, value:qty*price};
+    })
+    .sort((a,b)=>RISK_PRIORITY[a.risk.key]-RISK_PRIORITY[b.risk.key] || sortDays(a.risk.days)-sortDays(b.risk.days));
+
+  const totalQty = list.reduce((sum,entry)=>sum+entry.qty,0);
+  const totalValue = list.reduce((sum,entry)=>sum+entry.value,0);
+  const criticalCount = list.filter(entry=>entry.risk.key==="critical").length;
+  return { list, totalQty, totalValue, criticalCount };
+}
 
 // Deret pemakaian bulanan (KELUAR TUG9/TUG8 approved) per katalogId, bulan kosong terisi 0.
 // Dipakai pemanggil getKritisAgg() (App.jsx, DashboardAsman, DashboardManager) supaya stok
@@ -63,6 +156,32 @@ export function getTopStokTerbanyak(stocks, katalogList, n) {
   const arr = Object.values(grouped).filter(x=>x.totalQty>0);
   arr.sort((a,b)=>b.totalQty-a.totalQty);
   return arr.slice(0, n);
+}
+
+// Top stok terbanyak, DIKELOMPOKKAN PER SATUAN (beda satuan tak bisa dibanding qty
+// mentah — reuse agregasi qty per katalog dari getTopStokTerbanyak, cuma dipecah per
+// satuan lalu urut per grup). Dipakai chat "Pak War" (App.jsx) supaya "stok paling
+// banyak" tidak comot dari ranking by-nilai (lihat HANDOFF Tier 1).
+export function getTopStockByQty(stocks, katalogList, n = 20) {
+  const bySatuan = {};
+  getTopStokTerbanyak(stocks, katalogList, Infinity).forEach(item => {
+    const satuan = item.satuan || "-";
+    if (!bySatuan[satuan]) bySatuan[satuan] = [];
+    bySatuan[satuan].push(item);
+  });
+  return Object.entries(bySatuan)
+    .map(([satuan, items]) => ({ satuan, items: items.slice(0, n) }))
+    .sort((a, b) => b.items.reduce((s, i) => s + i.totalQty, 0) - a.items.reduce((s, i) => s + i.totalQty, 0));
+}
+
+// Total qty per satuan lintas semua stok — dipakai bareng getTopStockByQty.
+export function getTotalPerSatuan(stocks) {
+  const totals = {};
+  (stocks || []).forEach(s => {
+    const satuan = s.satuan || s.unit || "-";
+    totals[satuan] = (totals[satuan] || 0) + (s.qty || 0);
+  });
+  return totals;
 }
 
 export function getMaterialAkanHabis(stocks, katalogList, txns, n) {

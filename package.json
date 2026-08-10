@@ -28,6 +28,7 @@
     "build": "vite build",
     "build:staging": "vite build --mode staging",
     "preview": "vite preview",
+    "test": "node --test \"tests/unit/*.test.mjs\" \"tests/*.test.mjs\"",
     "test:e2e": "playwright test",
     "test:responsive": "playwright test tests/e2e/responsive.spec.js",
     "test:responsive:update": "playwright test tests/e2e/responsive.spec.js --update-snapshots",

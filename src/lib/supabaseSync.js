@@ -8,6 +8,7 @@ import { getSAPLabel } from "./ragShared.mjs";
 import { getSAPStatus } from "./sap.js";
 import { syncMasterTable } from "./masterSync.js";
 import { isDemoMode } from "./demo.js";
+import { normalizeKatalogCode } from "./normalizeKatalogCode.js";
 
 // Marker sync harus mengikuti endpoint. Jangan baca marker global lama: marker
 // dari Supabase Cloud tidak boleh menekan recheck idempoten ke self-host baru.
@@ -31,6 +32,15 @@ const TXN_PHOTO_SLOTS = [
 
 export const _isDataUrl = (v) => typeof v === "string" && v.startsWith("data:");
 
+// Header auth untuk request sinkron: apikey TETAP anon key (identitas proyek),
+// tapi Authorization pakai access token sesi user yang login (bukan anon key)
+// supaya RLS bisa membedakan penulis asli, bukan cuma "siapa saja".
+async function authHeaders() {
+  const { data: { session } = {} } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Sesi login berakhir. Masuk ulang untuk menyinkronkan data.");
+  return { apikey: SUPABASE_KEY, Authorization: `Bearer ${session.access_token}` };
+}
+
 function rowSyncKey(r) {
   return `${r.katalogId}|${r.ts}|${r.masuk}|${r.keluar}|${r.docType}`;
 }
@@ -50,14 +60,10 @@ export async function syncTUG15ToSupabase(rows, katalogList) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
   const synced = getSyncedKeys();
-  const newRows = rows.filter(r => r.katalogId && r.katalogId!=="-" && !synced.has(rowSyncKey(r)));
+  const newRows = rows.filter(r => r.source !== "LAMA" && r.affectsSaldo !== false && r.katalogId && r.katalogId!=="-" && !synced.has(rowSyncKey(r)));
   if (newRows.length === 0) return { katalogCount: 0, historyCount: 0 };
 
-  const headers = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-  };
+  const headers = { ...(await authHeaders()), "Content-Type": "application/json" };
 
   // 1. Upsert katalog yang dipakai (FK target â€” harus ada dulu sebelum insert history)
   const katalogIds = [...new Set(newRows.map(r=>r.katalogId))];
@@ -110,11 +116,7 @@ export async function syncStockQtyToSupabase(stocks, katalogList) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
-  const headers = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": `Bearer ${SUPABASE_KEY}`,
-    "Content-Type": "application/json",
-  };
+  const headers = { ...(await authHeaders()), "Content-Type": "application/json" };
 
   // Jumlahkan qty per katalog (1 katalog bisa ada di banyak lokasi/baris stok)
   const qtyMap = {};
@@ -239,7 +241,7 @@ export async function syncFotoMaterialToSupabase(stocks, katalogList) {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
   }
-  const headers = { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${SUPABASE_KEY}` };
+  const headers = await authHeaders();
   let synced = {};
   try { synced = JSON.parse(localStorage.getItem(FOTO_SYNCED_HASHES_STORAGE) || "{}"); } catch { synced = {}; }
 
@@ -441,9 +443,10 @@ function addLiveSearchFields(row, fields) {
   };
 }
 
-export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, legacyRows = [], context = {}) {
+export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _legacyRows = [], context = {}) {
   const { dateFrom, dateTo, katalogId, jenisBarang, sapStatus } = filter;
   const docTypes = [...new Set(["TUG9", "TUG8", "TUG10", "TUG3", "TUG5", ...(filter.docTypes || [])])];
+  // TUG-15 canonical: history archive lama tidak pernah menjadi input laporan.
   const source = filter.source || "ALL";
   const searchText = filter.searchText || "";
   const ultgList = context.ultgList || filter.ultgList || [];
@@ -480,6 +483,18 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     return match ? match[1].trim() : (sourceUpt || "Tidak tercatat");
   };
 
+  // Canonicalize catalog references by name when old/new transaction IDs differ.
+  // Prefer the catalog ID actually used by stock rows (the same bucket as outbound rows).
+  const canonicalByName = new Map();
+  (stocks || []).forEach(s => {
+    const k = katalogList.find(item => item.id === s.katalogId);
+    if (k?.name && !canonicalByName.has(k.name)) canonicalByName.set(k.name, k);
+  });
+  const resolveCanonicalKatalog = (item, initial) => {
+    if (!initial) return initial;
+    return canonicalByName.get(initial.name) || initial;
+  };
+
   const rows = [];
 
   txns.forEach(t => {
@@ -499,7 +514,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     if (t.docType==="TUG9" || t.docType==="TUG8") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
         const stockRow = stocks.find(s=>s.id===si.stockId);
-        const kat = katalogList.find(k=>k.id===stockRow?.katalogId);
+        const kat = resolveCanonicalKatalog(si, katalogList.find(k=>k.id===stockRow?.katalogId));
         if (!shouldIncludeKatalog(kat, stockRow)) return;
         rows.push(addLiveSearchFields({
           katalog: kat.katalog||"-", deskripsi: kat.name, merk:resolveMerk(kat, si), type:resolveType(kat, si),
@@ -536,13 +551,13 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
 
     if (t.docType==="TUG10") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
-        const kat = si.katalogMode==="existing"
+        const kat = resolveCanonicalKatalog(si, si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
           // Material baru: transaksi tidak menyimpan katalogId hasil auto-create saat approve,
           // jadi resolve ke entry katalogList asli lewat nama (pola sama dgn buildKartuGantungHistory
           // di sap.js). Tanpa ini, event MASUK masuk bucket saldo berbeda dari event KELUAR (saldo minus).
           : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
-            || { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+            || { id:si.katalogId||"", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" });
         const fakeStockRow = { jenisBarang: STATUS_RETUR_TO_JENIS[si.statusMaterial]||"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
@@ -581,11 +596,11 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
 
     if (t.docType==="TUG3" && t.stage==="APPROVED") {
       (t.stockItems||[]).forEach((si, itemIndex) => {
-        const kat = si.katalogMode==="existing"
+        const kat = resolveCanonicalKatalog(si, si.katalogMode==="existing"
           ? katalogList.find(k=>k.id===si.katalogId)
           // idem TUG10: match nama ke katalogList asli supaya katalogId sama dgn event KELUAR
           : (si.namaBaru && katalogList.find(k=>k.name===si.namaBaru))
-            || { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" };
+            || { id:"-", katalog:si.katalogBaru||"", name:si.namaBaru, satuan:si.satuanBaru||"-" });
         const fakeStockRow = { jenisBarang:"Persediaan" };
         if (!shouldIncludeKatalog(kat, fakeStockRow)) return;
         rows.push(addLiveSearchFields({
@@ -666,12 +681,10 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
   // dihitung MUNDUR dari qty stok nyata (bukan qty stok polos) supaya tidak dobel-hitung
   // kalau material sudah punya transaksi tercatat. Hanya untuk katalog yang benar-benar
   // tidak punya arsip lama — kalau ada arsip, arsip itulah awal mulanya.
-  const legacyKatalogCodes = new Set(legacyRows.map(item => String(item.no_katalog || "").trim()).filter(c => c && c !== "-"));
   const liveByKatalog = new Map();
   rows.forEach(r => {
     if (r.source !== "BARU" || r.affectsSaldo === false) return;
     if (!r.katalogId || r.katalogId === "-") return;
-    if (legacyKatalogCodes.has(String(r.katalog || "").trim())) return;
     if (!liveByKatalog.has(r.katalogId)) liveByKatalog.set(r.katalogId, []);
     liveByKatalog.get(r.katalogId).push(r);
   });
@@ -702,42 +715,32 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
     }));
   });
 
+  // Arsip lama hanya untuk tampilan laporan/history. Tidak ikut saldo canonical.
   if (source !== "BARU") {
-    legacyRows.forEach(item => {
+    const katalogByCode = new Map((katalogList || []).map(k => [normalizeKatalogCode(k.katalog), k]).filter(([code]) => code));
+    (_legacyRows || []).forEach(item => {
       if (!docTypes.includes(item.doc_type)) return;
       const katalog = item.no_katalog || "-";
-      const deskripsi = item.nama_material || "-";
-      const selectedKatalog = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
-      // Kode legacy tidak punya FK ke master aktif; filter barang hanya boleh memakai
-      // kecocokan kode persis agar arsip tidak "divalidasi" atau dipetakan ulang.
-      if (selectedKatalog && String(selectedKatalog.katalog || "") !== String(katalog)) return;
+      const selected = katalogId === "ALL" ? null : katalogList.find(k => k.id === katalogId);
+      if (selected && String(selected.katalog || "") !== String(katalog)) return;
       if (jenisBarang !== "ALL" || sapStatus !== "ALL") return;
-      const ts = item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0;
       const isMasuk = String(item.jenis_transaksi || "").toUpperCase() === "MASUK";
       const isKeluar = String(item.jenis_transaksi || "").toUpperCase() === "KELUAR";
+      const matched = katalogByCode.get(normalizeKatalogCode(katalog));
+      const ts = item.tanggal ? new Date(`${item.tanggal}T00:00:00`).getTime() : 0;
       rows.push({
-        id:item.id || item.sync_key || item.item_id || `${item.doc_type}:${item.doc_id}`,
-        materialId:"",
-        requestedQty:0,
-        katalog, deskripsi, merk:"-", type:"-", satuan:item.satuan || "-", valuasi:0,
-        masuk: isMasuk ? Number(item.qty || 0) : 0,
-        keluar: isKeluar ? Number(item.qty || 0) : 0,
-        upt: item.source_upt || "-",
-        tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
-        keterangan: item.catatan || item.unit_lawan || "-",
-        tanggalMutasi: item.tanggal || "-", ts,
-        katalogId: "-", sapStatus:"ARSIP", sapLabel:"Arsip lama", jenisBarang:"-",
-        docType:item.doc_type || "-", lokasiId:"", lokasiKode:item.lokasi_kode || "-",
-        warehouseName:legacyWarehouseName(item.lokasi_kode, item.source_upt),
-        eventKind:String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate:item.tanggal || "-",
-        documentNo:item.doc_id || "-", jobName:"-", workLocation:item.lokasi_kode || "-",
-        counterparty:item.unit_lawan || "-", unit:item.unit_lawan || "-", unitLawan:item.unit_lawan || "-",
-        contractRefs:"-", documentRefs:item.doc_id || "-", notes:item.catatan || "-",
-        storageLocation:item.lokasi_kode || "-",
-        quality:[item.match_confidence !== null && item.match_confidence !== undefined ? `Match ${item.match_confidence}%` : "", item.issue_flags].filter(Boolean).join(" | ") || "-",
-        source:"LAMA", sourceLabel:"Lama", materialKey:historyMaterialKey(katalog, deskripsi, "legacy", item.id || item.sync_key || item.item_id),
-        legacyId:item.id, legacyDocId:item.doc_id || null, legacySyncKey:item.sync_key, fotoBarangUrl:item.foto_barang_url || null,
-        issueFlags:item.issue_flags || null, matchConfidence:item.match_confidence,
+        id: item.id || item.sync_key || item.item_id || `${item.doc_type}:${item.doc_id}`,
+        katalog, deskripsi: item.nama_material || "-", merk: "-", type: "-", satuan: item.satuan || "-", valuasi: 0,
+        masuk: isMasuk ? Number(item.qty || 0) : 0, keluar: isKeluar ? Number(item.qty || 0) : 0,
+        upt: item.source_upt || "-", tugBaDoc: `${String(item.doc_type || "-").replace("TUG", "TUG-")} / ${item.doc_id || "-"}`,
+        keterangan: item.catatan || item.unit_lawan || "-", tanggalMutasi: item.tanggal || "-", ts,
+        katalogId: matched?.id || "-", sapStatus: "ARSIP", sapLabel: "Arsip lama", jenisBarang: "-", docType: item.doc_type || "-",
+        lokasiId: "", lokasiKode: item.lokasi_kode || "-", warehouseName: legacyWarehouseName(item.lokasi_kode, item.source_upt),
+        eventKind: String(item.jenis_transaksi || "ARSIP").toUpperCase(), eventDate: item.tanggal || "-", documentNo: item.doc_id || "-",
+        jobName: "-", workLocation: item.lokasi_kode || "-", counterparty: item.unit_lawan || "-", unit: item.unit_lawan || "-",
+        notes: item.catatan || "-", storageLocation: item.lokasi_kode || "-", quality: "-", source: "LAMA", sourceLabel: "Lama",
+        affectsSaldo: false, materialKey: historyMaterialKey(katalog, item.nama_material || "-", "legacy", item.id || item.sync_key || item.item_id),
+        legacyId: item.id, legacyDocId: item.doc_id || null, legacySyncKey: item.sync_key, fotoBarangUrl: item.foto_barang_url || null,
       });
     });
   }
@@ -747,7 +750,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, l
   const saldoMap = {};
   return visibleRows.map((r,i) => {
     if (r.affectsSaldo === false) return { ...r, saldoAwal:null, saldoAkhir:null, no:i+1 };
-    const saldoKey = r.source === "LAMA" ? `legacy:${r.materialKey}` : `live:${r.katalogId}`;
+    const saldoKey = r.source === "LAMA" && r.katalogId === "-" ? `legacy:${r.materialKey}` : `live:${r.katalogId}`;
     const prev = saldoMap[saldoKey] || 0;
     const saldo = prev + r.masuk - r.keluar;
     saldoMap[saldoKey] = saldo;

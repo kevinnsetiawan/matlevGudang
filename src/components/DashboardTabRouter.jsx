@@ -19,8 +19,10 @@ export function DashboardTabRouter(props) {
     enrichedStocks, txns, katalogList, uptList, lokasiList, rencanaKedatanganList,
     topN, setTopN, pemakaianMode, setPemakaianMode,
     heavyEquipmentList, heavyEquipmentLoans, attbList, attbBongkaranPool,
-    materialCadangData, gudangList, petaWilayahDivRef,
+    materialCadangData, gudangList, petaWilayahDivRef, procurementSummary,
   } = props;
+  // Nama UPT untuk label dashboard — ikut UPT user login, bukan hardcoded Surabaya.
+  const dashUptNama = (uptList||[]).find(u=>u.id===currentUser?.uptId)?.nama || "UPT Surabaya";
   return (
     <>
       <div className="dashboard-command">
@@ -53,7 +55,7 @@ export function DashboardTabRouter(props) {
           pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
           C={C} sty={sty} setTab={setTab}
           heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-          currentUser={currentUser}
+          currentUser={currentUser} uptNama={dashUptNama}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           isMobile={isMobile}
         />
@@ -66,14 +68,14 @@ export function DashboardTabRouter(props) {
           <ExecOverview totalVal={totalVal} kritisMaterials={lowStocks} forecastSoon={forecastSoon} approvalCount={myPendingApprovals.length} stockCountPendingCount={stockCountPendingCount} attbActionCount={attbPendingCount+attbBelumLanjutCount} akurasi={stockCountList[0]?.summary?.akuratPct ?? null} maturity={maturityAssessments[0]||null} setTab={setTab} setOpnameSubTab={setOpnameSubTab} C={C} sty={sty} isMobile={isMobile}/>
         ) : (
         <DashboardAsman
-          stocks={enrichedStocks} txns={txns} katalogList={katalogList}
+          stocks={enrichedStocks} txns={txns} katalogList={katalogList} uptList={uptList}
           rencanaKedatanganList={rencanaKedatanganList}
           myPendingApprovals={myPendingApprovals}
           topN={topN} setTopN={setTopN}
           pemakaianMode={pemakaianMode} setPemakaianMode={setPemakaianMode}
           C={C} sty={sty} setTab={setTab}
           heavyEquipmentList={heavyEquipmentList} heavyEquipmentLoans={heavyEquipmentLoans}
-          currentUser={currentUser}
+          currentUser={currentUser} uptNama={dashUptNama}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           isMobile={isMobile}
         />
@@ -88,7 +90,7 @@ export function DashboardTabRouter(props) {
 
         {dashTab==="detail" && (
         <DashboardDefault
-          stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList}
+          stocks={enrichedStocks} txns={txns} katalogList={katalogList} lokasiList={lokasiList} uptList={uptList}
           rencanaKedatanganList={rencanaKedatanganList}
           myPendingApprovals={myPendingApprovals}
           lowStocks={lowStocks} totalVal={totalVal}
@@ -99,6 +101,7 @@ export function DashboardTabRouter(props) {
           materialCadangData={materialCadangData}
           attbList={attbList} attbBongkaranPool={attbBongkaranPool}
           isMobile={isMobile}
+          procurementSummary={procurementSummary}
         />
         )}
       </>
@@ -106,7 +109,7 @@ export function DashboardTabRouter(props) {
 
       {dashTab==="ringkasan" && (
         <DashboardRingkasanBlock
-          C={C} currentUser={currentUser} gudangList={gudangList}
+          C={C} currentUser={currentUser} gudangList={gudangList} uptNama={dashUptNama}
           petaWilayahDivRef={petaWilayahDivRef} stockCountList={stockCountList}
           setTab={setTab} setOpnameSubTab={setOpnameSubTab}
         />

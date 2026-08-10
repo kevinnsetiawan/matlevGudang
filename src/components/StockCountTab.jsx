@@ -7,7 +7,8 @@ import * as XLSX from "xlsx";
 
 export function StockCountTab({ stockCountList, currentUser, sty, C, previewStockCount, saveStockCountSession, approveStockCountItem, rejectStockCountItem, deleteStockCountSession }) {
   const [uploading, setUploading] = useState(false);
-  const [expandedId, setExpandedId] = useState(stockCountList[0]?.id || null);
+  const orderedStockCountList = [...stockCountList].sort((a, b) => Number(b.uploadedAt || 0) - Number(a.uploadedAt || 0));
+  const [expandedId, setExpandedId] = useState(orderedStockCountList[0]?.id || null);
   const [catatanDraft, setCatatanDraft] = useState({}); // itemId -> teks catatan sedang diketik
   const [draftItems, setDraftItems] = useState(null); // hasil baca file, BELUM disimpan — masih bisa direview/dicoret per item
   const [saving, setSaving] = useState(false);
@@ -152,9 +153,9 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
         );
       })()}
 
-      {stockCountList.length===0 ? (
+      {orderedStockCountList.length===0 ? (
         !draftItems && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada sesi Stock Count. {hasRole(currentUser, "ADMIN") && "Klik \"Upload CSV/XLSX SAP\" untuk mulai."}</div>
-      ) : stockCountList.map(session => {
+      ) : orderedStockCountList.map(session => {
         const isOpen = expandedId===session.id;
         const mismatch = session.items.filter(i=>i.status!=="AKURAT").sort((a,b)=>b.selisihPct-a.selisihPct);
         return (
@@ -162,7 +163,7 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",cursor:"pointer",background:"#f9fafb"}} onClick={()=>setExpandedId(isOpen?null:session.id)}>
               <div>
                 <div style={{fontWeight:800,fontSize:14}}>{fmtDate(session.uploadedAt)} — {session.summary.totalItem} item dibandingkan</div>
-                <div style={{fontSize:12,color:C.muted}}>{session.summary.akuratCount} akurat • {mismatch.length} selisih{mismatch.some(i=>i.approval==="PENDING")&&` • ${mismatch.filter(i=>i.approval==="PENDING").length} menunggu approval`}</div>
+                <div style={{fontSize:12,color:C.muted}}>{session.summary.akuratCount} akurat • {mismatch.length} temuan • {mismatch.filter(i=>i.approval==="PENDING").length} pending</div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:22,fontWeight:900,color:session.summary.akuratPct>=90?C.green:session.summary.akuratPct>=70?C.yellow:C.red}}>{session.summary.akuratPct}%</span>
@@ -171,14 +172,24 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
             </div>
             {isOpen && (
               <div style={{padding:"0 16px 16px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8,marginBottom:10}}>
+                  {[
+                    ["Akurat",session.summary.akuratCount,C.green],
+                    ["Temuan",mismatch.length,"#dc2626"],
+                    ["Pending",mismatch.filter(i=>i.approval==="PENDING").length,C.yellow],
+                  ].map(([label,value,color])=><div key={label} style={{padding:"7px 8px",border:`1px solid ${C.border}`,borderRadius:8,textAlign:"center"}}><div style={{fontSize:17,fontWeight:800,color}}>{value}</div><div style={{fontSize:11,color:C.muted}}>{label}</div></div>)}
+                </div>
                 {hasRole(currentUser, "ADMIN") && (
                   <div style={{textAlign:"right",marginBottom:8}}>
                     <button style={sty.btn("danger","sm")} onClick={()=>deleteStockCountSession(session.id)}>🗑️ Hapus Sesi</button>
                   </div>
                 )}
-                {mismatch.length===0 ? (
-                  <div style={{fontSize:12,color:C.green,fontWeight:700}}>✅ Semua item akurat, tidak ada selisih &gt;5%.</div>
-                ) : mismatch.map(item => (
+                <details open={mismatch.some(i=>i.approval==="PENDING")} style={{border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px"}}>
+                  <summary style={{cursor:"pointer",fontWeight:800,fontSize:13}}>Temuan selisih ({mismatch.length}) — buka untuk cek &amp; approval per item</summary>
+                  <div style={{paddingTop:8}}>
+                  {mismatch.length===0 ? (
+                    <div style={{fontSize:12,color:C.green,fontWeight:700}}>✅ Semua item akurat, tidak ada selisih &gt;5%.</div>
+                  ) : mismatch.map(item => (
                   <div key={item.id} style={{border:`1px solid ${C.border}`,borderRadius:8,padding:12,marginBottom:8,background:item.approval==="PENDING"?"#fffbeb":item.approval==="APPROVED"?"#f0fdf4":"#fef2f2"}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:6}}>
                       <div>
@@ -214,7 +225,9 @@ export function StockCountTab({ stockCountList, currentUser, sty, C, previewStoc
                       </div>
                     )}
                   </div>
-                ))}
+                  ))}
+                  </div>
+                </details>
               </div>
             )}
           </div>
