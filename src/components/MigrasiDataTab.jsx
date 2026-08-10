@@ -859,6 +859,65 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
     setTplBusy(false);
   }
 
+  // Blok "Import Histori Transaksi (TUG Lama)" — dipakai di 2 tempat: kolom kanan
+  // saat step==="upload" (sebelah Import Stok), dan posisi lama (di bawah, terpisah)
+  // untuk step wizard lain (preview/backup/done). Konten sama, gating sama, cuma posisi beda.
+  const histBlock = can(currentUser, "aksi.import", rolePerms) ? (
+    <div>
+      <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:10}}>Import Histori Transaksi (TUG Lama)</div>
+      <div className="migration-upload-card migration-upload-card--legacy" style={{...sty.card,borderLeft:"4px solid #7c3aed"}}>
+      <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
+      <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
+        Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.
+      </p>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:legacyTugRows?14:0}}>
+        <button style={sty.btn("ghost","sm")} onClick={downloadLegacyTugTemplate}>⬇️ Download Template</button>
+        <label style={{...sty.btn("primary","sm"),cursor:"pointer"}}>
+          📂 Upload File Excel
+          <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleLegacyTugFile}/>
+        </label>
+        {legacyTugRows && <button style={sty.btn("ghost","sm")} onClick={()=>{setLegacyTugRows(null);setLegacyTugChecked(new Set());}}>Upload Ulang</button>}
+      </div>
+      {legacyTugRows && (
+        <>
+          <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10,flexWrap:"wrap"}}>
+            <span>Total Dokumen: <b>{legacyTugRows.length}</b></span>
+            <span style={{color:C.green}}>Valid: <b>{legacyTugRows.filter(g=>g.errors.length===0 && !g.alreadyExists).length}</b></span>
+            <span style={{color:C.red}}>Error: <b>{legacyTugRows.filter(g=>g.errors.length>0).length}</b></span>
+            <span style={{color:"#92400e"}}>Sudah Ada: <b>{legacyTugRows.filter(g=>g.alreadyExists).length}</b></span>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:14}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
+                <tr>{["","No Dokumen","Jenis","Tanggal","Item","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {legacyTugRows.map(g => {
+                  const disabled = g.errors.length>0 || g.alreadyExists;
+                  const statusText = g.alreadyExists ? "Sudah ada, dilewati" : g.errors.length>0 ? g.errors.join("; ") : "OK";
+                  return (
+                    <tr key={g.docNo} style={{borderTop:`1px solid ${C.border}`,background:g.errors.length>0?"#fef2f2":g.alreadyExists?"#fefce8":undefined}}>
+                      <td style={{padding:"4px 8px"}}><input type="checkbox" checked={legacyTugChecked.has(g.docNo)} disabled={disabled} onChange={()=>toggleLegacyTugDoc(g.docNo)}/></td>
+                      <td style={{padding:"4px 8px",fontWeight:700}}>{g.docNo}</td>
+                      <td style={{padding:"4px 8px"}}>{g.docType||"-"}</td>
+                      <td style={{padding:"4px 8px"}}>{g.tanggal||"-"}</td>
+                      <td style={{padding:"4px 8px"}}>{g.items.length}</td>
+                      <td style={{padding:"4px 8px",fontWeight:700,color:g.errors.length>0?C.red:g.alreadyExists?"#92400e":C.green}}>{statusText}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button style={sty.btn("primary")} disabled={legacyTugBusy||legacyTugChecked.size===0} onClick={applyLegacyTugImport}>
+            {legacyTugBusy?"Menyimpan...":`Terapkan (${legacyTugChecked.size} dokumen)`}
+          </button>
+        </>
+      )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="admin-mobile-page migration-data-page">
       {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
@@ -887,19 +946,23 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         </div>
       )}
 
-      {/* Step indicator */}
-      <div className="migration-stepper" style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
-        {["upload","preview","backup","done"].map((s,i)=>(
-          <div className={`migration-stepper__item${step===s?" is-current":""}`} key={s} style={{display:"flex",alignItems:"center",gap:4}}>
-            <div className="migration-stepper__number" style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
-            <span style={{fontSize:12,fontWeight:step===s?700:400,color:step===s?C.accent:C.muted,textTransform:"capitalize"}}>{s==="backup"?"Backup & Apply":s}</span>
-            {i<3 && <span className="migration-stepper__connector" style={{color:C.border,marginLeft:4}}>→</span>}
-          </div>
-        ))}
-      </div>
+      {/* Step indicator — hanya relevan saat sedang di dalam wizard cutover SAP (preview/backup/done) */}
+      {step!=="upload" && (
+        <div className="migration-stepper" style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
+          {["upload","preview","backup","done"].map((s,i)=>(
+            <div className={`migration-stepper__item${step===s?" is-current":""}`} key={s} style={{display:"flex",alignItems:"center",gap:4}}>
+              <div className="migration-stepper__number" style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
+              <span style={{fontSize:12,fontWeight:step===s?700:400,color:step===s?C.accent:C.muted,textTransform:"capitalize"}}>{s==="backup"?"Backup & Apply":s}</span>
+              {i<3 && <span className="migration-stepper__connector" style={{color:C.border,marginLeft:4}}>→</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {step==="upload" && (
+        <div className="migration-upload-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16,alignItems:"start"}}>
         <div>
+          <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:10}}>Import Stok</div>
           <div className="migration-upload-card migration-upload-card--tpl" style={{...sty.card,marginBottom:12,borderLeft:"4px solid #16a34a"}}>
             <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:"#166534"}}>📦 Import Data Stok (Template WARNOTO)</div>
             <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Migrasi stok per-UPT: katalog, qty, harga, foto, lokasi. Untuk semua UPT.</p>
@@ -976,7 +1039,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
           </div>
 
           <details className="migration-upload-card migration-upload-card--sap" style={{...sty.card,marginBottom:12}}>
-            <summary style={{fontWeight:700,cursor:"pointer"}}>Import SAP PEMAT</summary>
+            <summary style={{fontWeight:700,cursor:"pointer"}}>Cara lain / Legacy — Import dari export SAP (setup awal)</summary>
             <p style={{fontSize:12,color:C.muted,margin:"8px 0 10px"}}>Cutover awal dari export SAP (setup awal UPT Surabaya). Format CSV atau XLSX dengan kolom: Material, Material Description, Base Unit of Measure, Unrestricted Use Stock, Valuation Type, Harga Satuan.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
               <label style={{...sty.btn("primary"),cursor:"pointer"}}>
@@ -999,6 +1062,8 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
             )}
           </details>
           <ProgressBar/>
+        </div>
+        {histBlock}
         </div>
       )}
 
@@ -1218,57 +1283,12 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         </div>
       )}
 
-      {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas ── */}
-      {can(currentUser, "aksi.import", rolePerms) && (
-        <div className="migration-upload-card migration-upload-card--legacy" style={{...sty.card,marginTop:16,borderLeft:"4px solid #7c3aed"}}>
-          <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
-          <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
-            Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.
-          </p>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:legacyTugRows?14:0}}>
-            <button style={sty.btn("ghost","sm")} onClick={downloadLegacyTugTemplate}>⬇️ Download Template</button>
-            <label style={{...sty.btn("primary","sm"),cursor:"pointer"}}>
-              📂 Upload File Excel
-              <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleLegacyTugFile}/>
-            </label>
-            {legacyTugRows && <button style={sty.btn("ghost","sm")} onClick={()=>{setLegacyTugRows(null);setLegacyTugChecked(new Set());}}>Upload Ulang</button>}
-          </div>
-          {legacyTugRows && (
-            <>
-              <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10,flexWrap:"wrap"}}>
-                <span>Total Dokumen: <b>{legacyTugRows.length}</b></span>
-                <span style={{color:C.green}}>Valid: <b>{legacyTugRows.filter(g=>g.errors.length===0 && !g.alreadyExists).length}</b></span>
-                <span style={{color:C.red}}>Error: <b>{legacyTugRows.filter(g=>g.errors.length>0).length}</b></span>
-                <span style={{color:"#92400e"}}>Sudah Ada: <b>{legacyTugRows.filter(g=>g.alreadyExists).length}</b></span>
-              </div>
-              <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:14}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
-                    <tr>{["","No Dokumen","Jenis","Tanggal","Item","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {legacyTugRows.map(g => {
-                      const disabled = g.errors.length>0 || g.alreadyExists;
-                      const statusText = g.alreadyExists ? "Sudah ada, dilewati" : g.errors.length>0 ? g.errors.join("; ") : "OK";
-                      return (
-                        <tr key={g.docNo} style={{borderTop:`1px solid ${C.border}`,background:g.errors.length>0?"#fef2f2":g.alreadyExists?"#fefce8":undefined}}>
-                          <td style={{padding:"4px 8px"}}><input type="checkbox" checked={legacyTugChecked.has(g.docNo)} disabled={disabled} onChange={()=>toggleLegacyTugDoc(g.docNo)}/></td>
-                          <td style={{padding:"4px 8px",fontWeight:700}}>{g.docNo}</td>
-                          <td style={{padding:"4px 8px"}}>{g.docType||"-"}</td>
-                          <td style={{padding:"4px 8px"}}>{g.tanggal||"-"}</td>
-                          <td style={{padding:"4px 8px"}}>{g.items.length}</td>
-                          <td style={{padding:"4px 8px",fontWeight:700,color:g.errors.length>0?C.red:g.alreadyExists?"#92400e":C.green}}>{statusText}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <button style={sty.btn("primary")} disabled={legacyTugBusy||legacyTugChecked.size===0} onClick={applyLegacyTugImport}>
-                {legacyTugBusy?"Menyimpan...":`Terapkan (${legacyTugChecked.size} dokumen)`}
-              </button>
-            </>
-          )}
+      {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas.
+           Saat step==="upload" blok ini sudah dirender di kolom kanan (lihat grid di atas),
+           di sini cuma untuk step wizard lain (preview/backup/done). ── */}
+      {step!=="upload" && histBlock && (
+        <div style={{marginTop:24,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          {histBlock}
         </div>
       )}
     </div>
