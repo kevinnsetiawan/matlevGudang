@@ -410,18 +410,3 @@ export async function seedMasterTableIfEmpty(table, defaults, extraCols) {
   await syncMasterTable(table, defaults, extraCols);
   return defaults;
 }
-
-// Upsert APPEND-ONLY (tidak pernah delete baris lain) — dipakai untuk domain
-// audit-log seperti Health Index Material Cadang (imports/runs/health_results/
-// ai_insights/apply_audit) yang tumbuh terus, bukan "daftar aktif" seperti
-// katalog/stocks. localStorage/CLOUD tetap sumber utama UI (dibaca saat load),
-// Supabase di sini murni backup/audit-trail — jadi tidak perlu delete-sync
-// simetris seperti syncMasterTable, cukup upsert baris baru saja.
-export async function syncMaterialCadangRows(table, rows, mapFn) {
-  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
-  if (!supabase || !rows?.length) return false;
-  const mapped = rows.map(mapFn);
-  const { error } = await supabase.from(table).upsert(mapped, { onConflict: "id" });
-  if (error) { console.error(`syncMaterialCadangRows upsert(${table}): ${error.message}`, error); return false; }
-  return true;
-}

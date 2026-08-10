@@ -26,7 +26,7 @@ import { DEFAULT_HEAVY_EQUIPMENT, normalizeHeavyEquipmentJenis, heavyEquipmentSt
 import { ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, ATTB_FIELDS_BY_JENIS, ATTB_ALASAN_PENGHAPUSBUKUAN, ATTB_WAKTU_USULAN_OPTIONS, ATTB_CORE_FIELDS, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, parseAttbCurrency, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "./src/lib/attb.js";
 import { npNorm, npTokens, npNums, NAMEPLATE_MIN, cohereEmbed, cohereEmbedImage, ocrSpaceOCR, matchNameplateToKatalog, nameplateTextSim, matchNameplateAll, buildTxnRagContent } from "./src/lib/rag.js";
 import { computeForecast } from "./src/lib/forecast.js";
-import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, syncMaterialCadangRows, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
+import { subGudangAbbr, subGudangKodeMap, getLokasiPetaInfo, extractLatLngFromAddress, loadMasterTable, syncMasterTable, syncMasterTableRows, deleteMasterTableRow, loadWarehouseCapacity, syncWarehouseCapacity, loadWarehouseCapacityImports, syncWarehouseCapacityImports } from "./src/lib/masterSync.js";
 import { getDefaultMaturityAuditHistory, loadMaturityAssessments, loadMaturityAudits, loadMaturityAuditHistory, loadMaturity5SAssessments, upsertMaturityAssessments, upsertMaturityAudits } from "./src/lib/maturitySync.js";
 import { Sparkline } from "./src/components/Sparkline.jsx";
 import { AIFaqPanel } from "./src/components/AIFaqPanel.jsx";
@@ -950,9 +950,34 @@ export default function PLNWarehouse() {
         setAttbList(attbLocal);
         if (attbLocal.length > 0) syncMasterTable("attb_list", attbLocal, e => ({ upt: e.upt || null, stage: e.stage || null }));
       }
-      setMaterialCadangData(cmcd || { imports:[], analyses:[], applyHistory:[] });
-      setMaterialCadangHealthData(cmch || { imports:[], analysisRuns:[], healthResults:[], applyAudit:[] });
-      setMaterialCadangAiInsights(cmcai || { runs:[], materialInsights:[] });
+      // Material Cadang: server (durable, per-UPT, RLS-scoped) jadi sumber utama; localStorage
+      // fallback. Kalau server kosong tapi localStorage ADA isi → seed sekali ke server
+      // (mengangkat data lama yang masih tersimpan di device ini agar durable & lintas-device).
+      const mcMerge = (rows, key, arrKeys) => {
+        const out = {}; arrKeys.forEach(k => out[k] = []);
+        (rows||[]).forEach(r => { const o = r?.[key] || {}; arrKeys.forEach(k => { if (Array.isArray(o[k])) out[k] = out[k].concat(o[k]); }); });
+        return out;
+      };
+      let mcServerRows = null;
+      if (supabase) {
+        const { data: mcData_, error: mcErr_ } = await supabase.from("material_cadang_state").select("upt_id,data,health,ai");
+        if (!mcErr_) mcServerRows = mcData_ || [];
+      }
+      if (mcServerRows && mcServerRows.length) {
+        setMaterialCadangData(mcMerge(mcServerRows, "data", ["imports","analyses","applyHistory"]));
+        setMaterialCadangHealthData(mcMerge(mcServerRows, "health", ["imports","analysisRuns","healthResults","applyAudit"]));
+        setMaterialCadangAiInsights(mcMerge(mcServerRows, "ai", ["runs","materialInsights"]));
+      } else {
+        const lmcd = cmcd || { imports:[], analyses:[], applyHistory:[] };
+        const lmch = cmch || { imports:[], analysisRuns:[], healthResults:[], applyAudit:[] };
+        const lmcai = cmcai || { runs:[], materialInsights:[] };
+        setMaterialCadangData(lmcd); setMaterialCadangHealthData(lmch); setMaterialCadangAiInsights(lmcai);
+        const seedUpt = currentUser?.uptId || null;
+        const hasLocal = (lmcd.analyses?.length || lmcd.imports?.length || lmch.analysisRuns?.length || lmch.healthResults?.length);
+        if (supabase && seedUpt && hasLocal) {
+          supabase.from("material_cadang_state").upsert({ upt_id: seedUpt, data: lmcd, health: lmch, ai: lmcai, updated_at: new Date().toISOString() }, { onConflict: "upt_id" });
+        }
+      }
       // Kapasitas Gudang — Supabase (warehouse_capacity/_imports) sekarang sumber
       // utama kalau sudah ada isinya; kalau masih kosong (instalasi lama yang baru
       // upgrade ke skema jsonb ini), dorong sekali data localStorage yang ada ke
@@ -1310,6 +1335,15 @@ export default function PLNWarehouse() {
         : deletedStockId
           ? deleteMasterTableRow("stocks", deletedStockId)
           : syncMasterTable("stocks", s, extraColsStocks) });
+    }
+    // Material Cadang — durable per-UPT di Supabase (dulu localStorage-only → hilang saat
+    // Clear site data). Hanya untuk penulis ber-uptId (akun scoped); state mereka = data UPT
+    // sendiri, jadi simpan utuh. Masuk failedLabels supaya kegagalan TIDAK senyap.
+    const mcWriterUpt = stateRef.current.currentUser?.uptId || null;
+    if ((overrides.materialCadangData !== undefined || overrides.materialCadangHealthData !== undefined || overrides.materialCadangAiInsights !== undefined) && supabase && !isDemoMode() && mcWriterUpt) {
+      syncTasks.push({ label: "Material Cadang", promise: supabase.from("material_cadang_state")
+        .upsert({ upt_id: mcWriterUpt, data: mcd, health: mch, ai: mcai, updated_at: new Date().toISOString() }, { onConflict: "upt_id" })
+        .then(({ error }) => { if (error) console.error("upsert material_cadang_state:", error.message); return !error; }) });
     }
     // Kapasitas Gudang — sebelumnya localStorage/CLOUD-only, sekarang auto-backup
     // ke Supabase tiap kali berubah (lihat schema.sql section 10-11).

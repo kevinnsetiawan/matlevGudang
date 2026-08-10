@@ -4,9 +4,8 @@ import { fmtNum } from "../lib/ragShared.mjs";
 import { fmtDate } from "../lib/utils.js";
 import { hasRole } from "../lib/roles.js";
 import { normalizeKatalog } from "../lib/sap.js";
-import { syncMaterialCadangRows } from "../lib/masterSync.js";
 import { CLOUD } from "../lib/cloud.js";
-import { parseMaterialCadangRows, hitungMaterialCadang, enrichMaterialCadangHealthResults, generateMaterialCadangAiInsights, mapApplyAuditRow } from "../lib/materialCadang.js";
+import { parseMaterialCadangRows, hitungMaterialCadang, enrichMaterialCadangHealthResults, generateMaterialCadangAiInsights } from "../lib/materialCadang.js";
 import * as XLSX from "xlsx";
 
 export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, materialCadangHealthData, setMaterialCadangHealthData, materialCadangAiInsights, setMaterialCadangAiInsights, maraReference, setMaraReference, catalogMasterRef, setCatalogMasterRef, katalogList, setKatalogList, stocks, allStocks, setStocks, gudangList, lokasiList, txns, currentUser, sty, C, saveToCloud, showToast, users, uptList }) {
@@ -211,26 +210,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setSubTab("hasil");
     showToast("Health Index Material Cadang berhasil dihitung.", "success");
 
-    // Backup ke Supabase (audit trail) — append-only, tidak mengubah angka
-    // deterministic di atas, murni menyimpan apa yang sudah dihitung lokal.
-    syncMaterialCadangRows("material_cadang_imports", [importRecord], r => ({
-      id: r.id, file_name: r.fileName, imported_by: r.importedBy, imported_at: r.importedAt,
-      total_rows: r.stats?.total||0, valid_rows: r.stats?.match||0, warning_rows: r.stats?.warning||0,
-      invalid_rows: (r.stats?.invalid||0)+(r.stats?.unmatched||0), data_quality: r.stats||{}, raw_meta: {},
-    }));
-    syncMaterialCadangRows("material_cadang_analysis_runs", [healthRun], r => ({
-      id: r.id, import_id: r.importId, legacy_analysis_id: r.legacyAnalysisId, created_by: r.createdBy,
-      created_at: r.createdAt, model_ai: r.modelAi, params: r.params||{}, summary: {},
-    }));
-    syncMaterialCadangRows("material_cadang_health_results", healthRows, r => ({
-      id: r.resultId, run_id: r.runId, katalog_id: r.katalogId||null, no_katalog: r.noKat||null,
-      nama_material: r.katalogName||r.namaMaterial||null, health_index: r.healthIndex, health_status: r.healthStatus,
-      risk_score: r.riskScore, data_confidence: r.dataConfidence, abc_class: r.abcClass, policy: r.policy,
-      current_qty: r.currentQty, recommended_qty: r.recommendedQty, gap_qty: r.gapQty,
-      gap_value: (r.gapQty||0)*(r.harga||0), deterministic_breakdown: r.healthBreakdown||{},
-      data_quality_flags: r.dataQualityFlags||[], result_payload: r,
-    }));
-
     setAiInsightLoading(true);
     const aiRun = await generateMaterialCadangAiInsights(healthRun, healthRows, stocks, katalogList, txns);
     const materialInsights = (aiRun.materialInsights||[]).map((m, idx)=>({ ...m, id:`${aiRun.id}-MI-${idx}`, runId }));
@@ -244,29 +223,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     if (aiRun.status === "ANSWERED") showToast("AI Management Insight berhasil dibuat.", "success");
     else showToast("Health Index selesai. AI insight belum tersedia, data lokal tetap aman.", "error");
 
-    // Backup insight ke Supabase — 1 baris scope RUN (ringkasan) + N baris scope
-    // MATERIAL (per item). AI cuma menulis kolom insight/diagnosis/rekomendasi,
-    // tidak ada kolom angka resmi (healthIndex dst) di tabel ini sama sekali.
-    const runInsightRow = {
-      id: aiRun.id, runId: aiRun.runId, insight_scope: "RUN", model: aiRun.model, status: aiRun.status,
-      confidence: null, executive_summary: aiRun.executiveSummary||null, diagnosis: null, recommendation: null,
-      flags: aiRun.dataQualityFindings||[], created_at: aiRun.createdAt,
-      insight_payload: { topRisks: aiRun.topRisks, recommendedActions: aiRun.recommendedActions, procurementPriority: aiRun.procurementPriority, validationNeeded: aiRun.validationNeeded },
-    };
-    syncMaterialCadangRows("material_cadang_ai_insights", [runInsightRow], r => ({
-      id: r.id, run_id: r.runId, no_katalog: null, insight_scope: r.insight_scope, model: r.model,
-      status: r.status, confidence: r.confidence, executive_summary: r.executive_summary,
-      diagnosis: r.diagnosis, recommendation: r.recommendation, flags: r.flags, insight_payload: r.insight_payload,
-      created_at: r.created_at,
-    }));
-    if (materialInsights.length) {
-      syncMaterialCadangRows("material_cadang_ai_insights", materialInsights, r => ({
-        id: r.id, run_id: r.runId, no_katalog: r.noKatalog||null, insight_scope: "MATERIAL", model: aiRun.model,
-        status: aiRun.status, confidence: r.confidence ?? null, executive_summary: null,
-        diagnosis: r.diagnosis||null, recommendation: r.recommendation||null, flags: [], insight_payload: r,
-        created_at: aiRun.createdAt,
-      }));
-    }
   }
 
   async function handleAjukanApply(item) {
@@ -298,7 +254,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangData(updated);
     setMaterialCadangHealthData(updatedHealth);
     await saveToCloud({ materialCadangData: updated, materialCadangHealthData: updatedHealth });
-    syncMaterialCadangRows("material_cadang_apply_audit", [auditEntry], mapApplyAuditRow);
     setApplyConfirm(null); setApplyNotes("");
     showToast("Pengajuan apply minQty dikirim ke Asman.", "success");
   }
@@ -333,7 +288,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangData(updated);
     setMaterialCadangHealthData(updatedHealth);
     await saveToCloud({ materialCadangData: updated, materialCadangHealthData: updatedHealth });
-    syncMaterialCadangRows("material_cadang_apply_audit", auditEntries, mapApplyAuditRow);
     setApplyAllConfirm(false);
     showToast(`${entries.length} material diajukan untuk approval Asman.`, "success");
   }
@@ -374,7 +328,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangHealthData(updatedHealth);
     if (nextStocks !== allStocks) setStocks(nextStocks);
     await saveToCloud({ katalogList: updatedKatalog, materialCadangData: updatedMC, materialCadangHealthData: updatedHealth, stocks: nextStocks }, { stocksChangedRows: stocksHint });
-    syncMaterialCadangRows("material_cadang_apply_audit", auditEntries, mapApplyAuditRow);
     setApproveAllConfirm(false);
     showToast(`${pendingApply.length} pengajuan disetujui.`, "success");
   }
@@ -412,7 +365,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     const stocksHint = nextStocks !== allStocks ? nextStocks.filter(s => s.katalogId === entry.katalogId &&
       ((lokasiList||[]).find(l=>l.id===s.lokasiId)?.gudangId||s.gudangId) === defaultLoc?.gudangId) : [];
     await saveToCloud({ katalogList: updated, materialCadangData: updatedMC, materialCadangHealthData: updatedHealth, stocks: nextStocks }, { stocksChangedRows: stocksHint });
-    syncMaterialCadangRows("material_cadang_apply_audit", [approveAuditEntry], mapApplyAuditRow);
     showToast(`Min Qty ${entry.namaBarang} berhasil diperbarui ke ${entry.recommendedQty}.`, "success");
   }
 
@@ -443,7 +395,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     const stocksHint = nextStocks !== allStocks ? nextStocks.filter(s => s.katalogId === item.katalogId &&
       ((lokasiList||[]).find(l=>l.id===s.lokasiId)?.gudangId||s.gudangId) === defaultLoc?.gudangId) : [];
     await saveToCloud({ katalogList: updatedKatalog, materialCadangData: updatedMC, materialCadangHealthData: updatedHealth, stocks: nextStocks }, { stocksChangedRows: stocksHint });
-    syncMaterialCadangRows("material_cadang_apply_audit", [auditEntry], mapApplyAuditRow);
     setApplyConfirm(null); setApplyNotes("");
     showToast(`Min Qty ${entry.namaBarang} langsung diterapkan ke ${item.recommendedQty}.`, "success");
   }
@@ -484,7 +435,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangHealthData(updatedHealth);
     if (nextStocks !== allStocks) setStocks(nextStocks);
     await saveToCloud({ katalogList: updatedKatalog, materialCadangData: updatedMC, materialCadangHealthData: updatedHealth, stocks: nextStocks }, { stocksChangedRows: stocksHint });
-    syncMaterialCadangRows("material_cadang_apply_audit", auditEntries, mapApplyAuditRow);
     setApplyAllConfirm(false);
     showToast(`${entries.length} material langsung di-apply ke Min Qty.`, "success");
   }
@@ -503,7 +453,6 @@ export function MaterialCadangTab({ materialCadangData, setMaterialCadangData, m
     setMaterialCadangData(updated);
     setMaterialCadangHealthData(updatedHealth);
     await saveToCloud({ materialCadangData: updated, materialCadangHealthData: updatedHealth });
-    syncMaterialCadangRows("material_cadang_apply_audit", [rejectAuditEntry], mapApplyAuditRow);
     showToast("Pengajuan ditolak.", "success");
   }
 

@@ -867,6 +867,20 @@ create policy "Authenticated write mc_ai_insights" on material_cadang_ai_insight
 create policy "Authenticated read mc_apply_audit" on material_cadang_apply_audit for select using (auth.role() = 'authenticated');
 create policy "Authenticated write mc_apply_audit" on material_cadang_apply_audit for all using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
+-- Material Cadang durable per-UPT (blob 3 store localStorage). RLS UPT-scoped (can_access_upt).
+create table if not exists public.material_cadang_state (
+  upt_id text primary key,
+  data jsonb not null default '{}'::jsonb,
+  health jsonb not null default '{}'::jsonb,
+  ai jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+alter table public.material_cadang_state enable row level security;
+drop policy if exists "Scoped material_cadang_state" on public.material_cadang_state;
+create policy "Scoped material_cadang_state" on public.material_cadang_state
+  for all using (can_access_upt(upt_id)) with check (can_access_upt(upt_id));
+grant select, insert, update, delete on public.material_cadang_state to authenticated;
+
 -- 20b. MATERIAL_INSPECTIONS — append-only inspection Material Cadang.
 -- DB canonical; foto privat disimpan sebagai path bucket, bukan base64 jsonb.
 -- Revisi 2026-07-27: satu BA (material_inspection_batches) berisi 1..10 material
