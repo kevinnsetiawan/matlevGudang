@@ -42,6 +42,9 @@ function EquipmentPhotoInput({ foto, nama, handleImg, setForm, sty, C, showToast
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList, users, sty, C, handleImg, saveEdit, createEquipment, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
+  // SUPERADMIN/Pusat tak punya UPT sendiri (myUpt kosong) → tak bisa dikunci sebagai peminjam.
+  // Mereka (dan MSB) memilih UPT peminjam manual lewat selector; UPT ADMIN/TL biasa tetap terkunci.
+  const canChooseRequesterUpt = isMSB || !myUpt;
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
   // padahal unifiedLoans-nya sendiri tidak pernah benar-benar difilter UPT) — digabung jadi 1
@@ -380,7 +383,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
             <div style={{fontSize:13,fontWeight:900,marginBottom:10}}>Ajukan Peminjaman</div>
             <div style={{marginBottom:8}}>
               <label style={sty.label}>Alat {!isMSB && <span style={{fontWeight:400,color:C.muted}}>(di luar UPT {myUpt||"Surabaya"})</span>}</label>
-              <select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:isMSB?"":(myUpt||"")}))}>
+              <select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:canChooseRequesterUpt?"":(myUpt||"")}))}>
                 <option value="">-- Pilih alat --</option>
                 {borrowableEquipment.map(e=><option key={e.id} value={e.id}>{e.upt} — {e.nama} ({e.kapasitas||"-"})</option>)}
               </select>
@@ -388,7 +391,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
             </div>
             <div style={{marginBottom:8}}>
               <label style={sty.label}>UPT Peminjam</label>
-              {isMSB ? (
+              {canChooseRequesterUpt ? (
                 <select style={sty.select} value={loanForm.requesterUpt} onChange={e=>setLoanForm(f=>({...f,requesterUpt:e.target.value}))}>
                   <option value="">-- Pilih UPT --</option>
                   {requesterOptions.map(u=><option key={u} value={u}>{u}</option>)}
