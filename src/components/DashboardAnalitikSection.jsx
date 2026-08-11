@@ -1,6 +1,6 @@
 // Komponen DashboardAnalitikSection — dipindah dari App.jsx (refactor Fase 4f).
-import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
-import { getSAPStatus, getSAPBadgeStyle } from "../lib/sap.js";
+import { fmtNum } from "../lib/ragShared.mjs";
+import { katalogSapLabel, katalogSapStatus, sapBadgeStyleForLabel } from "../lib/sap.js";
 import { getTopPemakaian, getTopStokTerbanyak, getMaterialAkanHabis } from "../lib/analytics.js";
 import { ChartBar, Fire, Package, Warning, CheckCircle } from "@phosphor-icons/react";
 
@@ -66,7 +66,7 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
             : topPemakaian.map((item,i)=>(
                 <BarRow key={item.katalogId}
                   label={`${i+1}. ${item.nama}`}
-                  sub={`${item.katalog} • ${getSAPLabel(item.katalog)}`}
+                  sub={`${item.katalog} • ${katalogSapLabel(item)}`}
                   value={pemakaianMode==="frekuensi"?item.frekuensi:item.totalQty}
                   maxVal={maxPemakaian}
                   extra={pemakaianMode==="frekuensi"?`${item.frekuensi}x bon`:item.satuan}
@@ -82,11 +82,11 @@ export function DashboardAnalitikSection({ txns, stocks, katalogList, topN, setT
           {topStok.length===0
             ? <div style={{textAlign:"center",color:C.muted,fontSize:12,padding:20}}>Belum ada data stok</div>
             : topStok.map((item,i)=>{
-                const sapBs = getSAPBadgeStyle(item.katalog);
+                const sapBs = sapBadgeStyleForLabel(katalogSapLabel(item));
                 return (
                   <BarRow key={item.katalogId}
                     label={`${i+1}. ${item.nama}`}
-                    sub={<span style={{padding:"1px 5px",borderRadius:10,fontSize:12,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{getSAPStatus(item.katalog)}</span>}
+                    sub={<span style={{padding:"1px 5px",borderRadius:10,fontSize:12,fontWeight:700,background:sapBs.bg,color:sapBs.fg}}>{katalogSapStatus(item)}</span>}
                     value={item.totalQty}
                     maxVal={maxStok}
                     extra={`${fmtNum(item.totalQty)} ${item.satuan}`}

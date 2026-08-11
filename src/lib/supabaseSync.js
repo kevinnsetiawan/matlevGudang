@@ -4,8 +4,7 @@
 import { supabase, SUPABASE_URL, SUPABASE_KEY, fetchSupabase } from "../supabaseClient.js";
 import { UIT, UPT, STATUS_RETUR_TO_JENIS } from "../constants.js";
 import { fmtDateOnly } from "./utils.js";
-import { getSAPLabel } from "./ragShared.mjs";
-import { getSAPStatus } from "./sap.js";
+import { katalogSapStatus, katalogSapLabel } from "./sap.js";
 import { syncMasterTable } from "./masterSync.js";
 import { isDemoMode } from "./demo.js";
 import { normalizeKatalogCode } from "./normalizeKatalogCode.js";
@@ -466,7 +465,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
     }
     // SAP status filter (from katalog number)
     if (sapStatus !== "ALL") {
-      if (getSAPStatus(kat.katalog) !== sapStatus) return false;
+      if (katalogSapStatus(kat) !== sapStatus) return false;
     }
     return true;
   }
@@ -525,8 +524,8 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
           keterangan: t.namaPekerjaan||"-",
           tanggalMutasi: tanggal, ts,
           katalogId: kat.id,
-          sapStatus: getSAPStatus(kat.katalog),
-          sapLabel: getSAPLabel(kat.katalog),
+          sapStatus: katalogSapStatus(kat),
+          sapLabel: katalogSapLabel(kat),
           jenisBarang: stockRow?.jenisBarang||"-",
           docType: t.docType,
           lokasiId: stockRow?.lokasiId||"",
@@ -569,8 +568,8 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
           keterangan: `${t.namaPekerjaan||"-"} â€” ${si.statusMaterial||""}`,
           tanggalMutasi: tanggal, ts,
           katalogId: kat?.id||"-",
-          sapStatus: getSAPStatus(kat?.katalog),
-          sapLabel: getSAPLabel(kat?.katalog),
+          sapStatus: katalogSapStatus(kat),
+          sapLabel: katalogSapLabel(kat),
           jenisBarang: fakeStockRow.jenisBarang,
           docType: "TUG10",
           lokasiId: t.lokasiTujuanId||"",
@@ -612,8 +611,8 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
           keterangan: `Penerimaan dari ${t.dariSupplier||"-"}`,
           tanggalMutasi: tanggal, ts,
           katalogId: kat?.id||"-",
-          sapStatus: getSAPStatus(kat?.katalog),
-          sapLabel: getSAPLabel(kat?.katalog),
+          sapStatus: katalogSapStatus(kat),
+          sapLabel: katalogSapLabel(kat),
           jenisBarang: "Persediaan",
           docType: "TUG3",
           lokasiId: si.lokasiTujuanId||"",
@@ -656,7 +655,7 @@ export function buildMutasiRows(txns, katalogList, stocks, filter, lokasiList, _
           // TUG-5 adalah permintaan, bukan mutasi: sentinel ini mempertahankan
           // guard sync lama agar tidak masuk tug15_history/live saldo.
           katalogId:"-", resolvedKatalogId:kat?.id || "-", affectsSaldo:false,
-          sapStatus: getSAPStatus(kat?.katalog), sapLabel:getSAPLabel(kat?.katalog), jenisBarang:"Persediaan",
+          sapStatus: katalogSapStatus(kat), sapLabel:katalogSapLabel(kat), jenisBarang:"Persediaan",
           docType:"TUG5", lokasiId:"", lokasiKode:"-",
           warehouseName:"Tidak tercatat",
           source:"BARU", sourceLabel:"Baru", materialKey:historyMaterialKey(kat?.katalog, kat?.name, "live", `${t.id}:${itemIndex}`),

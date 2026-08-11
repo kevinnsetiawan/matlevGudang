@@ -218,10 +218,24 @@ export function statusMaterialBadgeStyle(status) {
 //   anything else        → Non-SAP
 export function getSAPStatus(katalog) {
   if (!katalog || katalog.trim() === "") return "Non-SAP";
-  const k = katalog.trim();
+  const k = katalog.trim().replace(/^0+/, "");
   if (/^\d{10}$/.test(k)) return "SAP";
   if (/^\d{7,8}$/.test(k)) return "SAP";
   return "Non-SAP";
+}
+
+// Override eksplisit menang; "SAP" tetap pakai turunan Persediaan/Cadang, fallback generic bila kode non-numerik.
+export function resolveSapLabel(code, override) {
+  if (override === "Non-SAP") return "Non-SAP";
+  const derived = getSAPLabel(code);
+  if (override === "SAP") return derived === "Non-SAP" ? "SAP — Persediaan" : derived;
+  return derived;
+}
+export function katalogSapLabel(k) { return resolveSapLabel(k?.katalog, k?.sapStatus); }
+export function katalogSapStatus(k) {
+  if (k?.sapStatus === "Non-SAP") return "Non-SAP";
+  if (k?.sapStatus === "SAP") return "SAP";
+  return getSAPStatus(k?.katalog);
 }
 
 // getSAPLabel pindah ke src/lib/ragShared.mjs (dipakai bersama nightly_sync.mjs).
@@ -242,7 +256,8 @@ export function getSAPBadgeStyle(katalog) {
 // diupload (id STK-PREMEM-*) = Non-SAP (kandidat masuk SAP, belum terdaftar);
 // material lain ikut format kode katalognya lewat getSAPLabel.
 export function stockSapLabel(stock) {
-  return String(stock?.id || "").startsWith("STK-PREMEM-") ? "Non-SAP" : getSAPLabel(stock?.katalog);
+  if (String(stock?.id || "").startsWith("STK-PREMEM-")) return "Non-SAP";
+  return resolveSapLabel(stock?.katalog, stock?.sapStatus);
 }
 
 // Accent color per Jenis Barang, used on the printable QR label

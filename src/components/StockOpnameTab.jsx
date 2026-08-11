@@ -5,7 +5,7 @@ import { fmtDate, parseSAPFile, parseUsulanPencocokanXLSX } from "../lib/utils.j
 import { fmtNum } from "../lib/ragShared.mjs";
 import { ROLES, hasRole } from "../lib/roles.js";
 import { buildBeritaAcaraHTML } from "../lib/docBuilders.js";
-import { applyMaraNameSearch, getSAPStatus, normalizeKatalog, extractKatalogIdFromScan } from "../lib/sap.js";
+import { applyMaraNameSearch, katalogSapStatus, normalizeKatalog, extractKatalogIdFromScan } from "../lib/sap.js";
 import * as XLSX from "xlsx";
 
 export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, users, sty, C,
@@ -180,7 +180,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
 
   function buildItemsNonSAP() {
     // Only Non-SAP items from Data Stok
-    return [...new Set(stocks.filter(s=>getSAPStatus(katalogList.find(k=>k.id===s.katalogId)?.katalog)==="Non-SAP").map(s=>s.katalogId))]
+    return [...new Set(stocks.filter(s=>katalogSapStatus(katalogList.find(k=>k.id===s.katalogId))==="Non-SAP").map(s=>s.katalogId))]
       .filter(Boolean).map(kid=>{
         const kat = katalogList.find(k=>k.id===kid);
         if(!kat) return null;

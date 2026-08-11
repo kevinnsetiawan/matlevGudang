@@ -5,8 +5,7 @@
 import { useState } from "react";
 import { can } from "../lib/perms.js";
 import { ROLES, hasRole, roleTier, getScopeUptIds, inScopeUpt } from "../lib/roles.js";
-import { getSAPBadgeStyle } from "../lib/sap.js";
-import { getSAPLabel } from "../lib/ragShared.mjs";
+import { katalogSapLabel, sapBadgeStyleForLabel } from "../lib/sap.js";
 import { uid, fmtDate } from "../lib/utils.js";
 import { subGudangKodeMap } from "../lib/masterSync.js";
 import { ImportLokasiModal, downloadLokasiTemplate } from "./ImportLokasiModal.jsx";
@@ -172,7 +171,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                   <tbody>
                     {pagedKatalog.map(k=>{
                       const sampleFoto = stocks.find(s=>s.katalogId===k.id && s.img)?.img || null;
-                      const bs = getSAPBadgeStyle(k.katalog);
+                      const bs = sapBadgeStyleForLabel(katalogSapLabel(k));
                       return (
                         <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`}}>
                           <td className="mobile-card-table__photo" data-label="Foto" style={{padding:"8px 10px",textAlign:"center"}}>
@@ -191,7 +190,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                             {k.belumDicocokkanMara && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:12,fontWeight:700,background:"#fef3c7",color:"#92400e"}}>⚠️ Belum MARA</span></div>}
                           </td>
                           <td data-label="Satuan" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
-                          <td data-label="Status" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
+                          <td data-label="Status" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{katalogSapLabel(k)}</span></td>
                           <td data-label="Aksi" style={{padding:"8px 10px"}}>
                             {hasRole(currentUser, "ADMIN") && (
                               <div style={{display:"flex",gap:4,justifyContent:"center"}}>

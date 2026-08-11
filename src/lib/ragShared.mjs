@@ -14,7 +14,7 @@ export function fmtNum(n) {
 
 export function getSAPLabel(kodeKatalog) {
   if (!kodeKatalog || String(kodeKatalog).trim() === "") return "Non-SAP";
-  const k = String(kodeKatalog).trim();
+  const k = String(kodeKatalog).trim().replace(/^0+/, "");
   if (/^\d{10}$/.test(k)) return "SAP — Cadang";
   if (/^\d{7,8}$/.test(k)) return "SAP — Persediaan";
   return "Non-SAP";

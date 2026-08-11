@@ -1,7 +1,7 @@
 // Komponen BarcodePrintModal — dipindah dari App.jsx (refactor Fase 5e).
 import { useState } from "react";
 import { JENIS_BARANG } from "../constants.js";
-import { getSAPLabel } from "../lib/ragShared.mjs";
+import { katalogSapLabel } from "../lib/sap.js";
 import { buildBarcodeSheetHTML } from "../lib/docBuilders.js";
 
 // Modal Admin: filter (jenis barang + SAP/Non-SAP) lalu cetak lembar barcode massal.
@@ -23,7 +23,7 @@ export function BarcodePrintModal({ katalogList, stocks, lokasiList, gudangList,
   const allJenis = jenisSel.size === JENIS_BARANG.length;
   const filtered = katalogList.filter((k) => {
     const jenisOk = allJenis ? true : jenisSel.has(k.jenisBarang);
-    const isSap = getSAPLabel(k.katalog).startsWith("SAP");
+    const isSap = katalogSapLabel(k).startsWith("SAP");
     const sapOk = sapSel === "ALL" || (sapSel === "SAP" && isSap) || (sapSel === "NONSAP" && !isSap);
     return jenisOk && sapOk;
   });

@@ -3,7 +3,8 @@
 // kembalikan string HTML / buka window cetak. Tanpa React/state.
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
 import QRCode from "qrcode";
-import { fmtNum, getSAPLabel } from "./ragShared.mjs";
+import { fmtNum } from "./ragShared.mjs";
+import { katalogSapLabel } from "./sap.js";
 import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari } from "./utils.js";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE } from "../constants.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt } from "./heavyEquipment.js";
@@ -1429,7 +1430,7 @@ export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
     const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(k.id)}`;
     const qr = await QRCode.toDataURL(scanUrl, { margin: 1, width: 220 });
     const lok = (lokasiByKatalog[k.id] || []).join("; ") || "-";
-    return `<div class="label"><img src="${qr}" alt="QR"/><div class="nm">${esc(k.name || "-")}</div><div class="kt">No. Kat: ${esc(k.katalog || "-")}</div><div class="meta">${esc(k.jenisBarang || "-")} · ${esc(getSAPLabel(k.katalog))}</div><div class="lk">📍 ${esc(lok)}</div></div>`;
+    return `<div class="label"><img src="${qr}" alt="QR"/><div class="nm">${esc(k.name || "-")}</div><div class="kt">No. Kat: ${esc(k.katalog || "-")}</div><div class="meta">${esc(k.jenisBarang || "-")} · ${esc(katalogSapLabel(k))}</div><div class="lk">📍 ${esc(lok)}</div></div>`;
   }));
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"/><title>Cetak Barcode Kartu Gantung — ${labels.length} label</title>
 <style>
