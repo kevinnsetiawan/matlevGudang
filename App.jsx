@@ -1912,20 +1912,28 @@ export default function PLNWarehouse() {
       console.warn("Upload foto Data Stok gagal:", sf.id, e?.message||e);
       showToast("Gagal upload foto ke server, coba lagi.","error"); return;
     }
+    // Identitas barang (name/katalog/satuan/category) hanya boleh berasal dari
+    // Master Katalog terpilih — re-derive di sini supaya tidak pernah desync
+    // (bug lama: ganti barang via SearchableSelect ubah name tapi katalog/satuan tertinggal).
+    const kat = katalogList.find(k=>k.id===sf.katalogId);
+    if (kat) sf = {...sf, name:kat.name, katalog:kat.katalog, unit:kat.satuan||sf.unit, category:kat.category||sf.category};
     let ns;
     let wentToApproval = false;
     if (stockModal==="edit") {
       const original = stocks.find(s=>s.id===sf.id) || {};
       const isTL = hasRole(currentUser, "TL");
-      const fieldsChanged = original.qty!==sf.qty || original.price!==sf.price || original.jenisBarang!==sf.jenisBarang;
+      const identityChanged = original.katalogId !== sf.katalogId; // ganti barang (name+katalog+satuan sekaligus)
+      const otherChanged = original.price!==sf.price || original.jenisBarang!==sf.jenisBarang;
+      const fieldsChanged = identityChanged || otherChanged;
       if (fieldsChanged && !isTL) {
         wentToApproval = true;
-        // qty/harga/jenis butuh approval TL — field lain (lokasi, minQty, foto) tetap langsung tersimpan
+        // barang/harga/jenis butuh approval TL — field lain (lokasi, minQty, foto) tetap langsung tersimpan
         const updated = {
           ...sf,
-          qty: original.qty, price: original.price, jenisBarang: original.jenisBarang,
+          katalogId: original.katalogId, name: original.name, katalog: original.katalog, unit: original.unit, category: original.category,
+          price: original.price, jenisBarang: original.jenisBarang,
           editPending: true,
-          pendingEditData: { qty: sf.qty, price: sf.price, jenisBarang: sf.jenisBarang },
+          pendingEditData: { katalogId: sf.katalogId, name: sf.name, katalog: sf.katalog, unit: sf.unit, category: sf.category, price: sf.price, jenisBarang: sf.jenisBarang },
           editRequestedBy: currentUser.id, editRequestedAt: Date.now(),
         };
         ns = stocks.map(s=>s.id===sf.id?updated:s);
@@ -1938,7 +1946,7 @@ export default function PLNWarehouse() {
     // Hanya 1 baris berubah (edit/tambah baris id===sf.id) — sync ringan cuma baris itu.
     await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===sf.id)});
     logAudit(currentUser, stockModal==="edit"?"UPDATE":"CREATE", "stocks", sf.id, {katalogId:sf.katalogId, lokasiId:sf.lokasiId, wentToApproval});
-    showToast(wentToApproval ? "📨 Perubahan qty/harga/jenis diajukan! Menunggu approval TL." : (stockModal==="edit" ? "Data Stok diupdate!" : "Data Stok baru ditambahkan!"));
+    showToast(wentToApproval ? "📨 Perubahan barang (nama/no katalog/satuan)/harga/jenis diajukan! Menunggu approval TL." : (stockModal==="edit" ? "Data Stok diupdate!" : "Data Stok baru ditambahkan!"));
   }
   // Foto Data Stok WAJIB disimpan sebagai URL Supabase Storage, JANGAN base64 mentah
   // ke jsonb `stocks.data` (insiden 2026-07-23 & 2026-07-28: tabel stocks 119KB → 12MB,
@@ -2091,20 +2099,42 @@ export default function PLNWarehouse() {
   // Catatan: satu-satunya tombol pemanggil ini dirender ADMIN-only, jadi cabang
   // "ajukan approval TL" di bawah ini tidak pernah tereksekusi lewat UI saat ini.
   async function deleteStock(id) {
-    if (!window.confirm("Hapus baris stok ini?")) return;
-    const ns = stocks.filter(s=>s.id!==id);
-    setStocks(ns); await saveToCloud({stocks: ns}, {stocksDeletedId: id});
-    logAudit(currentUser, "DELETE", "stocks", id);
-    showToast("Data Stok dihapus.");
+    const st = stocks.find(s=>s.id===id); if (!st) return;
+    if (st.deletePending) { showToast("Sudah ada pengajuan hapus menunggu approval.","info"); return; }
+    if (hasRole(currentUser, "TL")) {
+      if (!window.confirm("Hapus baris stok ini?")) return;
+      const ns = stocks.filter(s=>s.id!==id);
+      setStocks(ns); await saveToCloud({stocks: ns}, {stocksDeletedId: id});
+      logAudit(currentUser, "DELETE", "stocks", id);
+      showToast("Data Stok dihapus.");
+    } else {
+      if (!window.confirm("Ajukan penghapusan baris stok ini ke TL?")) return;
+      const ns = stocks.map(s=>s.id===id ? {...s, deletePending:true, deleteRequestedBy:currentUser.id, deleteRequestedAt:Date.now()} : s);
+      setStocks(ns); await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
+      logAudit(currentUser, "REQUEST_DELETE", "stocks", id);
+      showToast("📨 Pengajuan hapus dikirim, menunggu approval TL.");
+    }
   }
 
-  // Approve/reject pengajuan Edit (qty/harga/jenis) Data Stok — khusus TL
+  // Ringkasan perubahan pending (barang/harga/jenis) utk judul approval history —
+  // hanya sebut field yang benar-benar berubah (qty tidak lagi ada di sini, terkunci di form edit).
+  function describeStockEditPending(st) {
+    const p = st.pendingEditData || {};
+    const parts = [];
+    if (p.katalog!=null && p.katalog!==st.katalog) parts.push(`barang → ${p.name} [${p.katalog}]`);
+    if (p.price!=null && p.price!==st.price) parts.push(`harga Rp${fmtNum(st.price)}→Rp${fmtNum(p.price)}`);
+    if (p.jenisBarang!=null && p.jenisBarang!==st.jenisBarang) parts.push(`jenis ${st.jenisBarang}→${p.jenisBarang}`);
+    return parts.join(", ") || "perubahan data";
+  }
+
+  // Approve/reject pengajuan Edit (barang/harga/jenis) Data Stok — khusus TL
   async function approveStockEdit(id) {
     const st = stocks.find(s=>s.id===id);
     if (!st || !st.editPending) return;
+    const desc = describeStockEditPending(st);
     const ns = stocks.map(s=>s.id===id ? {...s, ...s.pendingEditData, editPending:false, pendingEditData:null, editApprovedBy:currentUser.id, editApprovedAt:Date.now()} : s);
     setStocks(ns); await saveToCloud({stocks: ns}, {stocksChangedRows: ns.filter(s=>s.id===id)});
-    await logApprovalHistory({type:"STOCK_EDIT", decision:"APPROVED", title:`Edit ${st.name}: qty ${fmtNum(st.qty)}→${fmtNum(st.pendingEditData.qty)}, harga Rp${fmtNum(st.price)}→Rp${fmtNum(st.pendingEditData.price)}, jenis ${st.jenisBarang}→${st.pendingEditData.jenisBarang}`, requestedBy:st.editRequestedBy, requestedAt:st.editRequestedAt});
+    await logApprovalHistory({type:"STOCK_EDIT", decision:"APPROVED", title:`Edit ${st.name}: ${desc}`, requestedBy:st.editRequestedBy, requestedAt:st.editRequestedAt});
     showToast(`✅ Perubahan ${st.name} disetujui.`);
   }
   async function rejectStockEdit(id) {
@@ -3911,7 +3941,12 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
 
       {/* DETAIL DATA STOK — klik baris di tabel Data Stok, termasuk foto Nameplate + Foto Keseluruhan */}
       {stockDetailId && (() => {
-        const st = stocks.find(s=>s.id===stockDetailId);
+        const rawSt = stocks.find(s=>s.id===stockDetailId);
+        if (!rawSt) return null;
+        // Pakai versi enriched (name/katalog/kategori/satuan/jenis resolve dari katalogId) supaya
+        // detail konsisten dgn daftar. Sebelumnya pakai stock mentah → field denormalized yang
+        // basi (mis. habis ganti barang) menampilkan nama/no katalog LAMA walau katalogId sudah benar.
+        const st = enrichStock(rawSt, katalogList, lokasiList);
         if (!st) return null;
         const kat = katalogList.find(k=>k.id===st.katalogId);
         const lok = lokasiList.find(l=>l.id===st.lokasiId);

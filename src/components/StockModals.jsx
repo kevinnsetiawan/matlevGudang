@@ -4,6 +4,7 @@
 import { JENIS_BARANG } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG7HTML, downloadTUG5HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML, downloadTUG7HTML } from "../lib/docBuilders.js";
+import { SearchableSelect } from "./SearchableSelect.jsx";
 
 export function StockDetailModal({ stockModal, setStockModal, stockForm, setStockForm, katalogList, lokasiList, setLightboxImg, handleImg, saveStock, isMobile, sty, C }) {
   return (
@@ -13,10 +14,15 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Barang (dari Master Katalog)</label>
-                <select style={sty.select} value={stockForm.katalogId||""} onChange={e=>setStockForm(sf=>({...sf,katalogId:e.target.value}))}>
-                  <option value="">-- Pilih Barang --</option>
-                  {katalogList.map(k=><option key={k.id} value={k.id}>{k.name} [{k.katalog}]</option>)}
-                </select>
+                <SearchableSelect
+                  options={katalogList}
+                  value={stockForm.katalogId||""}
+                  onChange={id=>setStockForm(sf=>({...sf,katalogId:id}))}
+                  getLabel={k=>`${k.name} [${k.katalog}]`}
+                  getSearchText={k=>[k.name, k.katalog, k.category, k.jenisBarang, k.keterangan].filter(Boolean).join(" ")}
+                  placeholder="-- Cari nama / no katalog / kategori --"
+                  sty={sty} C={C} isMobile={isMobile}
+                />
                 {katalogList.length===0 && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>Belum ada Master Katalog. Tambahkan dulu di tab "Master Katalog".</div>}
               </div>
               <div style={{gridColumn:"1/-1"}}>
@@ -28,7 +34,11 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
                 {lokasiList.length===0 && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>Belum ada Blok Lokasi. Tambahkan dulu di Master Data → Master Gudang.</div>}
               </div>
               <div><label style={sty.label}>Harga Satuan (Rp)</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.price||0} onChange={e=>setStockForm(sf=>({...sf,price:Number(e.target.value)}))}/></div>
-              <div><label style={sty.label}>Qty di Lokasi Ini</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.qty||0} onChange={e=>setStockForm(sf=>({...sf,qty:Number(e.target.value)}))}/></div>
+              <div>
+                <label style={sty.label}>Qty di Lokasi Ini</label>
+                <input style={{...sty.input, ...(stockModal==="edit"?{background:"#f3f4f6",cursor:"not-allowed"}:{})}} type="number" inputMode="decimal" value={stockForm.qty||0} disabled={stockModal==="edit"} onChange={e=>setStockForm(sf=>({...sf,qty:Number(e.target.value)}))}/>
+                {stockModal==="edit" && <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Qty berubah lewat transaksi TUG, tidak diedit manual.</div>}
+              </div>
               <div><label style={sty.label}>Min Qty Alert</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.minQty||0} onChange={e=>setStockForm(sf=>({...sf,minQty:Number(e.target.value)}))}/></div>
               <div>
                 <label style={sty.label}>Jenis Barang</label>
