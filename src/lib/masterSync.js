@@ -44,7 +44,12 @@ export function subGudangKodeMap(subs) {
     if (map[sg.id]) return;
     const base = subGudangAbbr(sg.nama) || "SGD";
     let kode = base, n = 1;
-    while (used.has(kode)) { n++; kode = (base.slice(0,2) + n).slice(0,3); }
+    // Suffix WAJIB injektif terhadap n (tanpa .slice(0,3)) supaya kode selalu unik & loop
+    // pasti berhenti. Versi lama `(base.slice(0,2)+n).slice(0,3)` jenuh jadi "XY1" untuk n>=10
+    // (10+n→"XY10"→"XY1", 11→"XY1", ...) → kalau "XY1" sudah dipakai, while tak pernah keluar =
+    // freeze. Terjadi nyata: puluhan Sub Gudang "GUDANG TERBUKA/TERTUTUP ..." semua ber-abbr "TR.."
+    // → kolam suffix "TR#" habis → hang saat render ATTB (subGudangKodeMap dipanggil dgn list penuh).
+    while (used.has(kode)) { n++; kode = base.slice(0,2) + n; }
     used.add(kode); map[sg.id] = kode;
   });
   return map;
