@@ -128,7 +128,7 @@ export function getTopPemakaian(txns, stocks, katalogList, mode, n) {
       if (!stockRow) return;
       const kat = (katalogList||[]).find(k=>k.id===stockRow.katalogId);
       if (!kat) return;
-      outItems.push({ katalogId: kat.id, nama: kat.name, katalog: kat.katalog||"-", satuan: kat.satuan||"-", qty: si.qty||0 });
+      outItems.push({ katalogId: kat.id, nama: kat.name, katalog: kat.katalog||"-", sapStatus: kat.sapStatus, satuan: kat.satuan||"-", qty: si.qty||0 });
     });
   });
   // Group by katalogId
@@ -149,7 +149,7 @@ export function getTopStokTerbanyak(stocks, katalogList, n) {
   (stocks||[]).forEach(s => {
     const kat = (katalogList||[]).find(k=>k.id===s.katalogId);
     if (!kat) return;
-    if (!grouped[kat.id]) grouped[kat.id] = { katalogId:kat.id, nama:kat.name, katalog:kat.katalog||"-", satuan:kat.satuan||"-", jenisBarang:s.jenisBarang||"-", totalQty:0, totalNilai:0 };
+    if (!grouped[kat.id]) grouped[kat.id] = { katalogId:kat.id, nama:kat.name, katalog:kat.katalog||"-", sapStatus:kat.sapStatus, satuan:kat.satuan||"-", jenisBarang:s.jenisBarang||"-", totalQty:0, totalNilai:0 };
     grouped[kat.id].totalQty += s.qty||0;
     grouped[kat.id].totalNilai += (s.qty||0)*(s.price||0);
   });
