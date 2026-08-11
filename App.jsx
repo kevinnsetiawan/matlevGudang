@@ -2,7 +2,8 @@
 // Sistem Tata Usaha Gudang (TUG) Digital - v3.0
 // TUG-9: Bon Pemakaian + Surat Jalan + BAST
 
-import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useDeferredValue, Fragment } from "react";
+import { X } from "@phosphor-icons/react";
 import * as Sentry from "@sentry/react";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE, APP_VERSION, KAPASITAS_LABEL, ROMAN, JENIS_BARANG, STATUS_RETUR_TO_JENIS } from "./src/constants.js";
 import { supabase, SUPABASE_URL, SUPABASE_KEY, SUPABASE_AUTH_STORAGE_KEY, usernameToAuthEmail, describeLoginError, isRetryableLoginError } from "./src/supabaseClient.js";
@@ -16,8 +17,8 @@ import { expandMonthlySeriesFromMap, tsbMonthlyForecast } from "./src/lib/tsbFor
 import { logAudit } from "./src/lib/audit.js";
 import { C as C_LIGHT, C_DARK, makeSty } from "./src/theme.js";
 import { generateDocNumbers, generateReservasiDocNo, uid, fmtDate, fmtDateOnly, fmtRp, buildStockStats, formatStockStatsText, parseSAPRowsFromCSV, parseUsulanPencocokanXLSX, parseSAPRowsFromXLSX, parseIndoNumber, mapSAPRow, parseSAPFile, terbilangHari, enrichStock, enrichStocks, dedupeById, migrateLegacyStocks } from "./src/lib/utils.js";
-import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML } from "./src/lib/docBuilders.js";
-import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, applyMaraNameSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan, stockSapLabel } from "./src/lib/sap.js";
+import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG5ULTGHTML, buildTUG7HTML, downloadTUG5HTML, buildHeavyEquipmentLoanHTML, downloadHeavyEquipmentLoanHTML, buildBeritaAcaraHTML, downloadTUG7HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML, buildTUG2FrontHTML } from "./src/lib/docBuilders.js";
+import { normalizeSearchText, expandHaystackSynonyms, queryTokenGroups, applyMaraNameSearch, matchesMaterialSearch, matchesStockSearch, matchesKatalogSearch, totalQtyForKatalog, lokasiUsedCapacity, statusMaterialBadgeStyle, getSAPStatus, getSAPBadgeStyle, jenisBarangAccentColor, buildKartuGantungHistory, normalizeKatalog, extractKatalogIdFromScan, stockSapLabel, sapBadgeStyleForLabel } from "./src/lib/sap.js";
 import { ROLES, hasRole, getUserUptScope, canAccessGudang, getScopeUptIds, inScopeUpt } from "./src/lib/roles.js";
 import { getVisibleGudangForInspection } from "./src/lib/inspectionScope.mjs";
 import { stockScopeExtraCols, stockScopeColumnsAvailable } from "./src/lib/stockScope.js";
@@ -79,7 +80,7 @@ import { SearchableSelect } from "./src/components/SearchableSelect.jsx";
 import { SatpamModal, TimMutuModal, UitModal, UptModal, UltgModal } from "./src/components/MasterOrgModals.jsx";
 import { KatalogModal, LokasiModal, GudangEditModal, GudangAddModal } from "./src/components/MasterDataModals.jsx";
 import { AkunModal, GantiPasswordModal } from "./src/components/AkunModals.jsx";
-import { StockDetailModal, MaturityAssessmentModal, DocPreviewModal } from "./src/components/StockModals.jsx";
+import { StockEditFields, MaturityAssessmentModal, DocPreviewModal } from "./src/components/StockModals.jsx";
 import { OcrSuggestGudangModal, LokasiDeleteConfirmModal, ConfirmDialogModal, PhotoSearchModal, LightboxModal, PetaMiniDetailModal, CapacityReviewModal } from "./src/components/MiscModals.jsx";
 import { Tug5FormModal, Tug98FormModal, Tug10FormModal, Tug3FormModal } from "./src/components/TugFormModals.jsx";
 import { BarcodeScanner } from "./src/components/BarcodeScanner.jsx";
@@ -106,7 +107,7 @@ import { useAccountAdmin } from "./src/hooks/useAccountAdmin.js";
 import { useMasterDataCrud } from "./src/hooks/useMasterDataCrud.jsx";
 import { useWarehouseConfig } from "./src/hooks/useWarehouseConfig.jsx";
 import { decode as olcDecode, isFull as olcIsFull, recoverNearest as olcRecoverNearest } from "./src/lib/openLocationCode.js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "./src/lib/ragShared.mjs";
+import { fmtNum, buildKatalogRagContent, getKritisAgg, splitChunksForEmbed } from "./src/lib/ragShared.mjs";
 import { buildMutasiRows, syncTUG15ToSupabase, syncStockQtyToSupabase, syncFotoMaterialToSupabase, processTxnPhotos, resolveTxnPrivPhotos, compressImage, _isDataUrl, uploadPhotoToStorage, _withTimeout } from "./src/lib/supabaseSync.js";
 import { createAndSubmitCanonicalTug, decideCanonicalTug, loadCanonicalTugTransactions, newCanonicalActionKeys, prepareCanonicalTugReview } from "./src/lib/tugCanonical.js";
 import { getHeavyEquipmentUploadErrorMessage, getHeavyEquipmentProcessingErrorMessage } from "./src/lib/heavyEquipmentPhoto.js";
@@ -382,6 +383,11 @@ export default function PLNWarehouse() {
   const [filterJenis, setFilterJenis] = useState("ALL");
   const [filterStatusSAP, setFilterStatusSAP] = useState("ALL");
   const [stockUptFilter, setStockUptFilter] = useState(""); // "" = semua; hanya dipakai viewer multi-UPT (UIT/Pusat)
+  const [stockGudangSelect, setStockGudangSelect] = useState(""); // filter tabel Data Stok per Gudang
+  const [stockBlokSelect, setStockBlokSelect] = useState(""); // filter tabel Data Stok per Blok, bergantung stockGudangSelect
+  const [stockQuickFilter, setStockQuickFilter] = useState(""); // "" | "kritis" | "tanpaLokasi"
+  const [stockSort, setStockSort] = useState({key:"nama", dir:"asc"}); // key: "nama" | "qty" | "lokasi"
+  const [stockViewMode, setStockViewMode] = useState("lokasi"); // "lokasi" | "katalog" (agregat per barang, lintas lokasi)
   const [tugUptFilter, setTugUptFilter] = useState(""); // "" = semua; sama pola stockUptFilter, khusus tab TUG
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(10);
@@ -514,6 +520,51 @@ export default function PLNWarehouse() {
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false); // modal cetak barcode massal (Admin, Master Katalog)
   const [petaMiniDetail, setPetaMiniDetail] = useState(null); // {stock, lokasi, gudang}
   const [stockDetailId, setStockDetailId] = useState(null); // id stok yang dibuka detailnya (klik baris Data Stok)
+  const [stockDetailTab, setStockDetailTab] = useState("detail"); // "detail" | "riwayat" — reset tiap ganti barang
+  const [riwayatExpanded, setRiwayatExpanded] = useState(false); // "Tampilkan semua" tab Riwayat
+  const [confirmDiscard, setConfirmDiscard] = useState(false); // konfirmasi inline "buang perubahan?" mode edit
+  const stockFormSnapshotRef = useRef(null); // snapshot stockForm saat masuk mode edit, buat cek isDirty
+  const stockDetailTriggerRef = useRef(null); // elemen pemicu, difokuskan balik saat modal detail ditutup
+  const stockDetailModalRef = useRef(null);
+  const stockFormDirty = stockModal === "edit" && stockFormSnapshotRef.current
+    ? JSON.stringify(stockFormSnapshotRef.current) !== JSON.stringify(stockForm)
+    : false;
+  useEffect(() => {
+    if (stockDetailId) {
+      stockDetailTriggerRef.current = document.activeElement;
+      stockDetailModalRef.current?.focus();
+    } else {
+      stockDetailTriggerRef.current?.focus?.();
+    }
+  }, [stockDetailId]);
+  useEffect(() => {
+    // Buka barang lain (atau tutup) jangan mewarisi tab/konfirmasi dari barang sebelumnya.
+    setStockDetailTab("detail");
+    setRiwayatExpanded(false);
+    setConfirmDiscard(false);
+  }, [stockDetailId]);
+  useEffect(() => {
+    // Kunci scroll body selama sheet detail terbuka — tanpa ini scroll jari yang meleset
+    // di HP menggeser tabel di belakang sheet.
+    if (!stockDetailId) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, [stockDetailId]);
+  useEffect(() => {
+    if (!stockDetailId) return;
+    function onKeyDown(e) {
+      if (e.key !== "Escape") return;
+      // Mode edit: ESC balik ke view dulu (cegah kehilangan input tak sengaja), bukan langsung tutup.
+      // Kalau ada perubahan belum disimpan, tampilkan konfirmasi inline dulu (bukan window.confirm).
+      if (stockModal === "edit") {
+        if (stockFormDirty) { setConfirmDiscard(true); return; }
+        setStockModal(null);
+      } else { setStockDetailId(null); setPendingFoto({}); }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [stockDetailId, stockModal, stockFormDirty]);
   // Cari barang dengan foto (visual search) di Data Stok
   const [photoSearchOpen, setPhotoSearchOpen] = useState(false);
   const [photoSearchImg, setPhotoSearchImg] = useState(null);
@@ -1424,7 +1475,7 @@ export default function PLNWarehouse() {
   stateRef.current.saveToCloud = saveToCloud;
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:"smooth" }); }, [chatHistory]);
-  useEffect(() => { setStockPage(1); }, [search, filterJenis, filterStatusSAP, stockPageSize]);
+  useEffect(() => { setStockPage(1); }, [search, filterJenis, filterStatusSAP, stockPageSize, stockGudangSelect, stockBlokSelect, stockQuickFilter, stockSort, stockViewMode]);
   useEffect(() => { setKatalogPage(1); }, [katalogPageSize, katalogSearch]);
 
   // Auto-gabungkan Gudang/Sub Gudang duplikat sekali per sesi setelah data dimuat — supaya
@@ -1888,7 +1939,7 @@ export default function PLNWarehouse() {
   // openAddStock (tombol "+ Tambah Data Stok") dihapus 2026-07-02 — kebijakan bisnis: semua
   // material masuk WAJIB lewat TUG (TUG-3/9/dst), tidak boleh input langsung ke Data Stok.
   // stockModal/saveStock tetap ada, cuma dipakai "edit" sekarang (lihat openEditStock).
-  function openEditStock(s) { setStockForm({...s}); setStockModal("edit"); }
+  function openEditStock(s) { setStockForm({...s}); stockFormSnapshotRef.current = {...s}; setStockModal("edit"); }
   async function saveStock() {
     if (!stockForm.katalogId) { showToast("Pilih barang dari Master Katalog!","error"); return; }
     if (!stockForm.lokasiId) { showToast("Pilih lokasi dari Master Lokasi!","error"); return; }
@@ -2746,7 +2797,7 @@ export default function PLNWarehouse() {
       generatedAt: new Date().toISOString(),
       totalItem: enrichedStocks.length,
       totalNilaiRp: Math.round(enrichedStocks.reduce((a,s)=>a+(s.qty*s.price),0)),
-      top20ByValue: top20.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, hargaSatuan:s.price, nilaiRp: Math.round(s.qty*s.price), status:getSAPLabel(s.katalog), ...withLokasi(s) })),
+      top20ByValue: top20.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, hargaSatuan:s.price, nilaiRp: Math.round(s.qty*s.price), status:stockSapLabel(s), ...withLokasi(s) })),
       materialKritis: kritis.map(s=>({ nama:s.name, katalog:s.katalog, qty:s.qty, satuan:s.unit, minQty:s.minQty, ...withLokasi(s) })),
       pemakaian3BulanTop10: topPakai,
       tugPendingApproval: pending.map(t=>({ docType:t.docType, id:t.id, namaPekerjaan:t.namaPekerjaan, requiredApprover:t.requiredApprover, createdAt:t.createdAt })),
@@ -3346,6 +3397,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
   // semua UPT; UIT (dataScope >1) lihat UPT di UIT-nya. Akun 1 UPT tak dapat dropdown (kosong).
   const stockUptFilterOptions = dataScope === null ? uptList
     : (Array.isArray(dataScope) && dataScope.length > 1 ? uptList.filter(u => dataScope.includes(u.id)) : []);
+  const deferredSearch = useDeferredValue(search); // React 18+: input tetap responsif saat list besar difilter ulang
   const filteredStocks = scopedEnrichedStocks.filter(s=>{
     const lokForSearch = lokasiList.find(l=>l.id===s.lokasiId);
     const gdgForSearch = (lokForSearch?.gudangId || s.gudangId)
@@ -3355,7 +3407,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       ...s,
       blok: [lokForSearch?.kode, lokForSearch?.nama].filter(Boolean).join(" "),
       gudang: [gdgForSearch?.kode, gdgForSearch?.nama].filter(Boolean).join(" "),
-    }, search);
+    }, deferredSearch);
     const mj = filterJenis==="ALL" || s.jenisBarang===filterJenis;
     const msap = filterStatusSAP==="ALL" || stockSapLabel(s)===filterStatusSAP;
     // RBAC per gudang: sembunyikan stok yang lokasinya milik gudang terlarang.
@@ -3366,13 +3418,56 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
     // belum di-assign lokasi) tetap kena filter UPT lewat s.uptId, bukan hilang.
     const stockUpt = (gid ? gudangList.find(g=>g.id===gid)?.uptId : null) || s.uptId || null;
     const mu = !stockUptFilter || (stockUpt === stockUptFilter);
-    return ms && mj && msap && mg && mu;
+    const mgud = !stockGudangSelect || gid === stockGudangSelect;
+    const mblok = !stockBlokSelect || s.lokasiId === stockBlokSelect;
+    const mq = stockQuickFilter==="kritis" ? (s.jenisBarang!=="Non-Stock" && s.qty<=s.minQty)
+      : stockQuickFilter==="tanpaLokasi" ? !s.lokasiId
+      : true;
+    return ms && mj && msap && mg && mu && mgud && mblok && mq;
   });
   // Opsi filter UPT generik dipakai TUG (identik pola stockUptFilterOptions).
   const multiUptFilterOptions = stockUptFilterOptions;
-  const stockTotalPages = Math.max(1, Math.ceil(filteredStocks.length / stockPageSize));
+  // Mode "katalog" — group filteredStocks per barang (lintas lokasi) jadi baris sintetis
+  // "AGG-<katalogId>", supaya user bisa lihat total qty barang tanpa pecahan per blok.
+  // Mode "lokasi" (default): viewStocks === filteredStocks apa adanya, TIDAK ada perubahan.
+  const viewStocks = stockViewMode !== "katalog" ? filteredStocks : (() => {
+    const groups = new Map();
+    for (const s of filteredStocks) {
+      const key = s.katalogId || s.katalog;
+      let g = groups.get(key);
+      if (!g) { g = { ...s, id:"AGG-"+key, qty:0, minQty:0, lokasiId:undefined, lokasiCount:0, aggMembers:[], deletePending:false, editPending:false }; groups.set(key, g); }
+      g.qty += Number(s.qty)||0;
+      g.minQty += Number(s.minQty)||0;
+      g.lokasiCount += 1;
+      g.aggMembers.push(s);
+      if (s.deletePending) g.deletePending = true;
+      if (s.editPending) g.editPending = true;
+    }
+    return [...groups.values()];
+  })();
+  // Sort Data Stok — kunci "lokasi" (kode gudang+blok, atau lokasiCount di mode katalog)
+  // dihitung sekali per baris sebelum sort (decorate-sort), bukan di dalam comparator,
+  // supaya lookup lokasiList/gudangList tidak dipanggil O(n log n) kali untuk daftar besar.
+  const sortedStocks = viewStocks
+    .map(s => {
+      // Lookup lokasi/gudang hanya kalau memang sort by lokasi — kalau tidak, seluruh
+      // daftar (bisa ribuan baris) kena 2 .find() percuma di SETIAP render.
+      if (stockSort.key !== "lokasi") return { s, lokasiKey: "" };
+      if (stockViewMode === "katalog") return { s, lokasiKey: s.lokasiCount };
+      const lok = lokasiList.find(l=>l.id===s.lokasiId);
+      const gdg = (lok?.gudangId || s.gudangId) ? gudangList.find(g=>g.id===(lok?.gudangId||s.gudangId)) : null;
+      return { s, lokasiKey: [gdg?.kode||gdg?.nama, lok?.kode].filter(Boolean).join(" ") };
+    })
+    .sort((a, b) => {
+      const cmp = stockSort.key==="qty" ? (Number(a.s.qty)||0) - (Number(b.s.qty)||0)
+        : stockSort.key==="lokasi" ? (typeof a.lokasiKey==="number" ? a.lokasiKey-b.lokasiKey : a.lokasiKey.localeCompare(b.lokasiKey,"id",{numeric:true,sensitivity:"base"}))
+        : String(a.s.name||"").localeCompare(String(b.s.name||""),"id",{numeric:true,sensitivity:"base"});
+      return stockSort.dir==="desc" ? -cmp : cmp;
+    })
+    .map(x => x.s);
+  const stockTotalPages = Math.max(1, Math.ceil(viewStocks.length / stockPageSize));
   const stockPageClamped = Math.min(stockPage, stockTotalPages);
-  const pagedStocks = filteredStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
+  const pagedStocks = sortedStocks.slice((stockPageClamped-1)*stockPageSize, stockPageClamped*stockPageSize);
   const filteredKatalog = katalogList.filter(k => matchesKatalogSearch(k, katalogSearch) && (!katalogFilterBelumMara || k.belumDicocokkanMara));
   const katalogTotalPages = Math.max(1, Math.ceil(filteredKatalog.length / katalogPageSize));
   const katalogPageClamped = Math.min(katalogPage, katalogTotalPages);
@@ -3646,11 +3741,16 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         {tab==="stock" && (
           <DataStokTab
             C={C} sty={sty} currentUser={currentUser} isMobile={isMobile}
-            search={search} setSearch={setSearch}
+            search={search} setSearch={setSearch} openScanner={openScanner}
             setPhotoSearchImg={setPhotoSearchImg} setPhotoSearchOpen={setPhotoSearchOpen}
             filterJenis={filterJenis} setFilterJenis={setFilterJenis}
             filterStatusSAP={filterStatusSAP} setFilterStatusSAP={setFilterStatusSAP}
-            stockUptFilter={stockUptFilter} setStockUptFilter={setStockUptFilter} stockUptFilterOptions={stockUptFilterOptions}
+            stockUptFilter={stockUptFilter} setStockUptFilter={setStockUptFilter} stockUptFilterOptions={stockUptFilterOptions} uptNama={currentUptNama}
+            stockGudangSelect={stockGudangSelect} setStockGudangSelect={setStockGudangSelect}
+            stockBlokSelect={stockBlokSelect} setStockBlokSelect={setStockBlokSelect}
+            stockQuickFilter={stockQuickFilter} setStockQuickFilter={setStockQuickFilter}
+            stockSort={stockSort} setStockSort={setStockSort}
+            stockViewMode={stockViewMode} setStockViewMode={setStockViewMode} stockViewCount={viewStocks.length}
             filteredStocks={filteredStocks} stocks={stocks} setStocks={setStocks}
             photoSearchResults={photoSearchResults} setPhotoSearchResults={setPhotoSearchResults}
             photoSearchResultMode={photoSearchResultMode} photoSearchOcrText={photoSearchOcrText}
@@ -3661,7 +3761,7 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
             stockGudangFilter={stockGudangFilter} setStockGudangFilter={setStockGudangFilter}
             setPendingFoto={setPendingFoto} setLightboxImg={setLightboxImg}
             saveToCloud={saveToCloud} showToast={showToast}
-            openEditStock={openEditStock} deleteStock={deleteStock}
+            deleteStock={deleteStock}
             setKartuGantungDetail={setKartuGantungDetail} setPetaMiniDetail={setPetaMiniDetail}
             stockPageSize={stockPageSize} setStockPageSize={setStockPageSize}
             stockPageClamped={stockPageClamped} setStockPage={setStockPage} stockTotalPages={stockTotalPages}
@@ -3904,7 +4004,6 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
       </main>
 
       {/* STOCK MODAL (Data Stok = junction of Katalog x Lokasi) */}
-      {stockModal && <StockDetailModal stockModal={stockModal} setStockModal={setStockModal} stockForm={stockForm} setStockForm={setStockForm} katalogList={katalogList} lokasiList={lokasiList} setLightboxImg={setLightboxImg} handleImg={handleImg} saveStock={saveStock} isMobile={isMobile} sty={sty} C={C} />}
 
       {/* MASTER KATALOG MODAL */}
       {katalogModal && <KatalogModal katalogModal={katalogModal} setKatalogModal={setKatalogModal} katalogForm={katalogForm} setKatalogForm={setKatalogForm} maraSearch={maraSearch} setMaraSearch={setMaraSearch} setMaraSearchResults={setMaraSearchResults} maraSearchLoading={maraSearchLoading} maraSearchError={maraSearchError} maraSearchResults={maraSearchResults} searchMaraCatalog={searchMaraCatalog} applyMaraToKatalog={applyMaraToKatalog} openScanner={openScanner} saveKatalog={saveKatalog} isMobile={isMobile} CATEGORIES={CATEGORIES} sty={sty} C={C} />}
@@ -3939,7 +4038,8 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         <PhotoSearchModal photoSearchOpen={photoSearchOpen} photoSearchLoading={photoSearchLoading} setPhotoSearchOpen={setPhotoSearchOpen} photoSearchMode={photoSearchMode} setPhotoSearchMode={setPhotoSearchMode} photoSearchImg={photoSearchImg} setPhotoSearchImg={setPhotoSearchImg} handleImg={handleImg} runPhotoSearch={runPhotoSearch} sty={sty} C={C} />
       )}
 
-      {/* DETAIL DATA STOK — klik baris di tabel Data Stok, termasuk foto Nameplate + Foto Keseluruhan */}
+      {/* DETAIL DATA STOK — klik baris di tabel Data Stok. Mode edit dirender INLINE di modal
+          yang sama (stockModal==="edit") — SATU pop-up, bukan dua berlapis (revisi 3). */}
       {stockDetailId && (() => {
         const rawSt = stocks.find(s=>s.id===stockDetailId);
         if (!rawSt) return null;
@@ -3954,7 +4054,29 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
         const keteranganBarang = kat?.keterangan || st.keteranganBarang || "Keterangan barang belum diisi.";
         const canUploadFoto = hasRole(currentUser, "ADMIN","TL");
         const isSAP = st.id?.startsWith("STK-SAP-");
-        const bs = getSAPBadgeStyle(st.katalog);
+        const sapLabel = stockSapLabel(st);
+        const bs = sapBadgeStyleForLabel(sapLabel);
+        const isEditing = stockModal === "edit";
+        const closeModal = () => { setStockDetailId(null); setPendingFoto({}); };
+        const backOrClose = () => {
+          if (isEditing) {
+            if (stockFormDirty) { setConfirmDiscard(true); return; }
+            setStockModal(null);
+          } else closeModal();
+        };
+        const discardEdit = () => { setConfirmDiscard(false); setStockModal(null); };
+        const printKartuGantung = async () => {
+          if (!kat) return;
+          if (isMobile) {
+            const html = await buildTUG2FrontHTML(kat, stocks, lokasiList, subGudangList, gudangList, currentUptNama);
+            const w = window.open("", "_blank");
+            if (w) { w.document.write(html); w.document.close(); }
+            else showToast("Popup diblokir browser. Izinkan popup untuk mencetak.", "error");
+          } else {
+            closeModal();
+            setKartuGantungDetail(kat);
+          }
+        };
         const fotoBox = (label, field) => {
           const previewImg = resolveStockPhotoUrl(pendingFoto[field] ?? st[field]);
           const hasUnsaved = pendingFoto[field] != null;
@@ -3992,35 +4114,128 @@ Sumber: Data TUG WARNOTO UPT Surabaya`;
           );
         };
         return (
-          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1500,padding:20}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>
-            <div style={{...sty.card,width:560,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-                <div>
-                  <h3 style={{fontSize:16,fontWeight:800}}>{st.name}</h3>
-                  <p style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:2}}>{st.katalog||kat?.katalog||"-"}</p>
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",zIndex:1500,padding:isMobile?0:20}} onClick={()=>{ if(!isEditing) closeModal(); }}>
+            <div ref={stockDetailModalRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Detail ${st.name}`}
+              style={{...sty.card,width:isMobile?"100%":600,maxWidth:"100%",maxHeight:isMobile?"92dvh":"90dvh",overflowY:"auto",borderRadius:isMobile?"16px 16px 0 0":14,paddingBottom:isMobile?"calc(20px + env(safe-area-inset-bottom))":20}}
+              onClick={e=>e.stopPropagation()}>
+              <div style={{position:"sticky",top:-20,zIndex:2,background:C.surface}}>
+                <div style={sty.modalHeader}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:800,fontSize:15,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{isEditing?"Edit — ":""}{st.name}</div>
+                    <div style={{fontSize:12,color:"rgba(255,255,255,0.75)",fontWeight:700,marginTop:2}}>{st.katalog||kat?.katalog||"-"}</div>
+                  </div>
+                  <button aria-label="Tutup" onClick={backOrClose} style={{background:"transparent",border:"none",color:"white",cursor:"pointer",padding:8,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <X size={20} weight="bold" aria-hidden="true"/>
+                  </button>
                 </div>
-                <button aria-label="Tutup detail stok" style={{background:"#dc2626",color:"white",border:"none",borderRadius:8,minWidth:44,minHeight:44,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:800}} onClick={()=>{setStockDetailId(null); setPendingFoto({});}}>Tutup</button>
+                {!isEditing && (
+                  <div className="operations-segments" role="group" aria-label="Tab detail barang" style={{marginBottom:14}}>
+                    <button type="button" aria-pressed={stockDetailTab==="detail"} className={stockDetailTab==="detail"?"is-active":""} onClick={()=>setStockDetailTab("detail")}>Detail</button>
+                    <button type="button" aria-pressed={stockDetailTab==="riwayat"} className={stockDetailTab==="riwayat"?"is-active":""} onClick={()=>setStockDetailTab("riwayat")}>Riwayat</button>
+                  </div>
+                )}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16,fontSize:12}}>
-                <div><b>Kategori:</b> {st.category||"-"}</div>
-                <div><b>Jenis:</b> <span style={sty.jenisBadge(st.jenisBarang)}>{st.jenisBarang}</span></div>
-                <div><b>Qty:</b> {fmtNum(st.qty)} {st.unit}</div>
-                <div><b>Min Qty:</b> {fmtNum(st.minQty)} {st.unit}</div>
-                <div><b>Gudang:</b> {gdg?.kode||gdg?.nama||"—"}</div>
-                <div><b>Blok:</b> {lok?.kode||"—"}</div>
-                <div><b>Harga:</b> Rp {fmtNum(st.price)}</div>
-                <div><b>Status:</b> <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg}}>{getSAPLabel(st.katalog)}</span></div>
-                <div className="stock-detail-keterangan"><b>Keterangan Barang:</b> <span>{keteranganBarang}</span></div>
-              </div>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                {fotoBox("Foto Nameplate", "fotoNameplate")}
-                {fotoBox("Foto Keseluruhan", "fotoKeseluruhan")}
-              </div>
-              {!canUploadFoto && <div style={{fontSize:12,color:C.muted,marginTop:10}}>Hanya Admin/TL yang bisa mengunggah/mengganti foto.</div>}
-              <div style={{marginTop:16,paddingTop:14,borderTop:`1px solid ${C.border}`}}>
-                <button style={{...sty.btn("ghost"),width:"100%",borderColor:"#e0f2fe",color:"#0369a1"}}
-                  onClick={()=>{ if(kat) setKartuGantungDetail(kat); }}>Lihat Kartu Gantung (TUG-2)</button>
-              </div>
+
+              {isEditing ? (
+                <StockEditFields stockModal={stockModal} stockForm={stockForm} setStockForm={setStockForm} katalogList={katalogList} lokasiList={lokasiList} setLightboxImg={setLightboxImg} handleImg={handleImg} isMobile={isMobile} sty={sty} C={C}/>
+              ) : stockDetailTab === "riwayat" ? (
+                (() => {
+                  const history = kat ? buildKartuGantungHistory(kat, txns, stocks, lokasiList, subGudangList, gudangList) : [];
+                  const newestFirst = [...history].reverse(); // buildKartuGantungHistory urut lama→baru; balik sekali di sini.
+                  const mutasi = newestFirst.filter(h=>h.masuk>0||h.keluar>0); // baris baseline "Migrasi Data" bukan mutasi
+                  if (mutasi.length === 0) {
+                    return <div style={{fontSize:12,color:C.muted,padding:"24px 0",textAlign:"center"}}>Belum ada mutasi tercatat untuk material ini.</div>;
+                  }
+                  const totalMasuk = mutasi.reduce((a,h)=>a+h.masuk,0);
+                  const totalKeluar = mutasi.reduce((a,h)=>a+h.keluar,0);
+                  const shown = riwayatExpanded ? mutasi : mutasi.slice(0,20);
+                  const docLabel = { TUG9:"TUG-9", TUG8:"TUG-8", TUG10:"TUG-10", TUG3:"TUG-3" };
+                  const ringkas = [["Total masuk",`+${fmtNum(totalMasuk)}`,C.green],["Total keluar",`-${fmtNum(totalKeluar)}`,C.red],["Stok sekarang",fmtNum(st.qty),C.text]];
+                  return (
+                    <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:8}}>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                        {ringkas.map(([label,val,warna])=>(
+                          <div key={label} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:"8px 10px",textAlign:"center"}}>
+                            <div style={{fontSize:12,color:C.muted,fontWeight:600}}>{label}</div>
+                            <div style={{fontSize:14,fontWeight:800,color:warna}}>{val} <span style={{fontSize:12,fontWeight:600,color:C.muted}}>{st.unit}</span></div>
+                          </div>
+                        ))}
+                      </div>
+                      {shown.map((h,idx)=>{
+                        const masuk = h.masuk>0;
+                        const warna = masuk ? C.green : C.red;
+                        const lokasiTeks = [h.subGudang,h.rak].filter(v=>v&&v!=="-").join(" / ");
+                        return (
+                          <div key={idx} style={{display:"flex",gap:10,border:`1px solid ${C.border}`,borderLeft:`3px solid ${warna}`,borderRadius:10,padding:"10px 12px",fontSize:12}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontWeight:800,color:warna}}>{masuk?"Barang Masuk":"Barang Keluar"} {docLabel[h.docType] ? <span style={{fontWeight:700,color:C.muted}}>· {docLabel[h.docType]} {h.noBon||"-"}</span> : null}</div>
+                              <div style={{color:C.muted,marginTop:2}}>{h.tgl ? fmtDateOnly(h.tgl) : "-"}{lokasiTeks ? ` · ${lokasiTeks}` : ""}</div>
+                              {h.catatan && h.catatan!=="-" && <div style={{color:C.muted,marginTop:2,overflowWrap:"anywhere"}}>{h.catatan}</div>}
+                            </div>
+                            <div style={{textAlign:"right",whiteSpace:"nowrap"}}>
+                              <div style={{fontWeight:800,color:warna}}>{masuk?`+${fmtNum(h.masuk)}`:`-${fmtNum(h.keluar)}`} {st.unit}</div>
+                              <div style={{color:C.muted,marginTop:2}}>sisa {fmtNum(h.sisa)}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {!riwayatExpanded && mutasi.length > 20 && (
+                        <button style={{...sty.btn("ghost","sm"),width:"100%"}} onClick={()=>setRiwayatExpanded(true)}>Tampilkan semua ({mutasi.length})</button>
+                      )}
+                    </div>
+                  );
+                })()
+              ) : (
+                <>
+                  <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6}}>Identitas</div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:14,fontSize:12}}>
+                    <div><b>Kategori:</b> {st.category||"-"}</div>
+                    <div><b>Jenis:</b> <span style={sty.jenisBadge(st.jenisBarang)}>{st.jenisBarang}</span></div>
+                    <div><b>Status:</b> <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg}}>{sapLabel}</span></div>
+                    <div><b>Harga:</b> Rp {fmtNum(st.price)}</div>
+                    <div className="stock-detail-keterangan" style={{gridColumn:"1/-1"}}><b>Keterangan Barang:</b> <span>{keteranganBarang}</span></div>
+                  </div>
+                  <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6}}>Lokasi & Stok</div>
+                  <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16,fontSize:12}}>
+                    <div><b>Qty:</b> {fmtNum(st.qty)} {st.unit}</div>
+                    <div><b>Min Qty:</b> {fmtNum(st.minQty)} {st.unit}</div>
+                    <div><b>Gudang:</b> {gdg?.kode||gdg?.nama||"—"}</div>
+                    <div><b>Sub Gudang:</b> {(()=>{ const sg=subGudangList.find(s=>s.id===lok?.subGudangId); return sg?.nama || sg?.kode || "—"; })()}</div>
+                    <div><b>Blok:</b> {lok?.kode||"—"}</div>
+                    <div><b>Lokasi UPT:</b> {uptList.find(u=>u.id===(gdg?.uptId||st.uptId))?.nama || "—"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                    {fotoBox("Foto Nameplate", "fotoNameplate")}
+                    {fotoBox("Foto Keseluruhan", "fotoKeseluruhan")}
+                  </div>
+                  {!canUploadFoto && <div style={{fontSize:12,color:C.muted,marginTop:10}}>Hanya Admin/TL yang bisa mengunggah/mengganti foto.</div>}
+                </>
+              )}
+
+              {isEditing && confirmDiscard ? (
+                <div className="approval-actions" style={{...sty.stickyFooter,paddingBottom:14}}>
+                  <div style={{flexBasis:"100%",fontSize:12,fontWeight:700,color:C.red,marginBottom:2}}>Perubahan belum disimpan.</div>
+                  <button className="approval-btn--cancel" onClick={()=>setConfirmDiscard(false)}>Lanjut edit</button>
+                  <button className="approval-btn--danger" onClick={discardEdit}>Buang perubahan</button>
+                </div>
+              ) : (isEditing || hasRole(currentUser, "ADMIN")) && (
+                isEditing ? (
+                  <div style={{...sty.stickyFooter,paddingBottom:14}}>
+                    <button style={{...sty.btn("ghost"),flex:1}} onClick={backOrClose}>Batal</button>
+                    <button style={{...sty.btn("primary"),flex:2}} onClick={saveStock}>💾 Simpan</button>
+                  </div>
+                ) : (
+                  // Grid kolom sama lebar — label ketiga tombol beda panjang, kalau dibiarkan
+                  // flex-nya .approval-actions bikin lebar tombol timpang. Di HP 3 kolom
+                  // terlalu sempit (label "Kartu Gantung" pecah), jadi 2 kolom + Hapus
+                  // melebar sendiri di baris bawah.
+                  <div className="approval-actions" style={{...sty.stickyFooter,display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":`repeat(${kat?3:2},1fr)`,gap:10,paddingBottom:14}}>
+                    <button className="approval-btn--primary" disabled={st.deletePending} onClick={()=>{ setPendingFoto({}); openEditStock(st); }}>Edit</button>
+                    {kat && <button className="approval-btn--cancel" title="Cetak Kartu Gantung (TUG-2)" onClick={printKartuGantung}>Kartu Gantung</button>}
+                    <button className="approval-btn--danger" style={isMobile&&kat?{gridColumn:"1/-1"}:undefined} disabled={st.deletePending} onClick={()=>{ closeModal(); deleteStock(st.id); }}>Hapus</button>
+                  </div>
+                )
+              )}
             </div>
           </div>
         );

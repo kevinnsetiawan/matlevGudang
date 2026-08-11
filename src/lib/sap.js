@@ -2,7 +2,7 @@
 // App.jsx (refactor Fase 3c). Pure string/data ops, tanpa React/state/supabase.
 // CATEGORY_SYNONYMS/QUERY_SYNONYMS dipakai internal oleh mesin pencarian.
 import { subGudangKodeMap } from "./masterSync.js";
-import { getSAPLabel } from "./ragShared.mjs";
+import { getSAPLabel, resolveSapLabel as resolveSapLabelShared, rowSapLabel } from "./ragShared.mjs";
 
 // ─── PENCARIAN MATERIAL: struktur nama (KATEGORI;SUBTIPE;SPEK...) di katalog
 // TIDAK diubah — hanya cara membandingkannya saat search yang disesuaikan,
@@ -225,16 +225,15 @@ export function getSAPStatus(katalog) {
 }
 
 // Override eksplisit menang; "SAP" tetap pakai turunan Persediaan/Cadang, fallback generic bila kode non-numerik.
-export function resolveSapLabel(code, override) {
-  if (override === "Non-SAP") return "Non-SAP";
-  const derived = getSAPLabel(code);
-  if (override === "SAP") return derived === "Non-SAP" ? "SAP — Persediaan" : derived;
-  return derived;
-}
+// STATUS_SAP[0]/[1] ("SAP — Persediaan"/"SAP — Cadang") = user memaksa label spesifik secara
+// eksplisit (mis. dari form Edit), lolos apa pun format kode katalognya. "Non-SAP" dan "SAP"
+// lama TIDAK diubah perilakunya — data hasil import lama memakai keduanya.
+export function resolveSapLabel(code, override) { return resolveSapLabelShared(code, override); }
 export function katalogSapLabel(k) { return resolveSapLabel(k?.katalog, k?.sapStatus); }
 export function katalogSapStatus(k) {
   if (k?.sapStatus === "Non-SAP") return "Non-SAP";
-  if (k?.sapStatus === "SAP") return "SAP";
+  // Nilai apa pun yang diawali "SAP" ("SAP", "SAP — Persediaan", "SAP — Cadang") = status SAP.
+  if (String(k?.sapStatus || "").startsWith("SAP")) return "SAP";
   return getSAPStatus(k?.katalog);
 }
 
@@ -252,13 +251,11 @@ export function getSAPBadgeStyle(katalog) {
   return sapBadgeStyleForLabel(getSAPLabel(katalog));
 }
 
-// Label status SAP untuk sebuah Data Stok. HANYA material non-stock yg baru
-// diupload (id STK-PREMEM-*) = Non-SAP (kandidat masuk SAP, belum terdaftar);
-// material lain ikut format kode katalognya lewat getSAPLabel.
-export function stockSapLabel(stock) {
-  if (String(stock?.id || "").startsWith("STK-PREMEM-")) return "Non-SAP";
-  return resolveSapLabel(stock?.katalog, stock?.sapStatus);
-}
+// Label status SAP untuk sebuah Data Stok. Override manual (sapStatus terisi, mis. user
+// memilih dari form Edit) SELALU menang. Kalau kosong, baru berlaku heuristik lama: material
+// non-stock yg baru diupload (id STK-PREMEM-*) = Non-SAP (kandidat masuk SAP, belum terdaftar).
+// Perubahan urutan ini DISENGAJA (2026-08-11, keputusan arsitek) — bukan regresi.
+export function stockSapLabel(stock) { return rowSapLabel(stock); }
 
 // Accent color per Jenis Barang, used on the printable QR label
 export function jenisBarangAccentColor(jenisBarang) {
@@ -305,7 +302,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const stockRow = (stocks||[]).find(s=>s.id===si.stockId);
         if (stockRow && stockRow.katalogId === katalogId) {
           const lok = (lokasiList||[]).find(l=>l.id===stockRow.lokasiId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
+          events.push({ docType: t.docType, tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG10") {
@@ -313,7 +310,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===t.lokasiTujuanId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
+          events.push({ docType: "TUG10", tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG3" && t.stage === "APPROVED") {
@@ -321,7 +318,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===si.lokasiTujuanId);
-          events.push({ tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
+          events.push({ docType: "TUG3", tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
         }
       });
     }

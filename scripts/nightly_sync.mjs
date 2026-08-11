@@ -34,7 +34,7 @@
 //   SUPABASE_URL, SUPABASE_SECRET_KEY (service_role), COHERE_API_KEY
 
 import { createClient } from "@supabase/supabase-js";
-import { fmtNum, getSAPLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap, meanStdev } from "../src/lib/ragShared.mjs";
+import { fmtNum, rowSapLabel, buildKatalogRagContent, buildForecastRagContent, getKritisAgg, computeEffectiveMinQty, splitChunksForEmbed, expandMonthlySeriesFromMap, meanStdev } from "../src/lib/ragShared.mjs";
 import { getTopStockByQty, getTopStokTerbanyak } from "../src/lib/analytics.js";
 import { cohereEmbed } from "./lib/cohere.mjs";
 
@@ -292,7 +292,7 @@ async function main() {
     generatedBy: "nightly_sync.mjs (cron)",
     totalItem: enriched.length,
     totalNilaiRp: Math.round(enriched.reduce((a, s) => a + s.nilai, 0)),
-    top20ByValue: top20.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, hargaSatuan: s.price, nilaiRp: Math.round(s.nilai), status: getSAPLabel(s.katalog), ...withLokasi(s) })),
+    top20ByValue: top20.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, hargaSatuan: s.price, nilaiRp: Math.round(s.nilai), status: rowSapLabel(s), ...withLokasi(s) })),
     materialKritis: kritis.map((s) => ({ nama: s.name, katalog: s.katalog, qty: s.qty, satuan: s.unit, minQty: s.minQty, ...withLokasi(s) })),
     topByQtyPerSatuan,
     proyeksiStokHabis,

@@ -1,16 +1,19 @@
 // Modal-modal terkait stok & dokumen (dipindah dari App.jsx, refactor batch 1).
 // StockDetailModal (form tambah/edit stok), MaturityAssessmentModal (asesmen manual),
 // DocPreviewModal (preview & unduh dokumen TUG).
-import { JENIS_BARANG } from "../constants.js";
+import { JENIS_BARANG, STATUS_SAP } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
+import { resolveSapLabel } from "../lib/sap.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG7HTML, downloadTUG5HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML, downloadTUG7HTML } from "../lib/docBuilders.js";
 import { SearchableSelect } from "./SearchableSelect.jsx";
 
-export function StockDetailModal({ stockModal, setStockModal, stockForm, setStockForm, katalogList, lokasiList, setLightboxImg, handleImg, saveStock, isMobile, sty, C }) {
+// Field-field form edit Data Stok — dipakai INLINE di dalam modal detail (App.jsx,
+// mode stockModal==="edit") supaya view+edit jadi SATU modal (bukan dua pop-up
+// berlapis). Dulunya bagian dari StockDetailModal (form tambah+edit terpisah),
+// tapi jalur "Tambah Data Stok Baru" sudah tidak ada pemanggilnya lagi — jadi ini
+// murni form edit sekarang.
+export function StockEditFields({ stockModal, stockForm, setStockForm, katalogList, lokasiList, setLightboxImg, handleImg, isMobile, sty, C }) {
   return (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}}>
-          <div style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
-            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{stockModal==="edit"?"Edit Data Stok":"Tambah Data Stok Baru"}</span><button onClick={()=>setStockModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Barang (dari Master Katalog)</label>
@@ -45,6 +48,18 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
                 <select style={sty.select} value={stockForm.jenisBarang||"Cadang"} onChange={e=>setStockForm(sf=>({...sf,jenisBarang:e.target.value}))}>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}</select>
                 {stockForm.jenisBarang==="Non-Stock" && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>ℹ️ Barang khusus proyek — tidak dihitung dalam alert stok minimum</div>}
               </div>
+              <div>
+                <label style={sty.label}>Status Material</label>
+                <select style={sty.select} value={stockForm.sapStatus||""} onChange={e=>setStockForm(sf=>({...sf,sapStatus:e.target.value}))}>
+                  <option value="">Otomatis (ikuti format no. katalog)</option>
+                  {STATUS_SAP.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+                {!stockForm.sapStatus && (
+                  <div style={{fontSize:12,color:C.muted,marginTop:4}}>
+                    Otomatis → {resolveSapLabel(stockForm.katalog || katalogList.find(k=>k.id===stockForm.katalogId)?.katalog, "")}
+                  </div>
+                )}
+              </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Foto Kondisi Barang (opsional)</label>
                 {stockForm.img && <img src={resolveStockPhotoUrl(stockForm.img)} alt="prev" onClick={()=>setLightboxImg(resolveStockPhotoUrl(stockForm.img))} style={{width:80,height:80,objectFit:"cover",borderRadius:8,marginBottom:6,border:`1px solid ${C.border}`,display:"block",cursor:"zoom-in"}}/>}
@@ -73,12 +88,6 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
                 <div style={{gridColumn:"1/-1",fontSize:12,color:C.muted}}>ℹ️ Data hasil import SAP (PEMAT) — foto Nameplate/Keseluruhan akan disinkronkan saat import data PEMAT berikutnya, tidak wajib diisi sekarang.</div>
               )}
             </div>
-            <div style={sty.stickyFooter}>
-              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setStockModal(null)}>Batal</button>
-              <button style={{...sty.btn("primary"),flex:2}} onClick={saveStock}>💾 Simpan ke Cloud</button>
-            </div>
-          </div>
-        </div>
   );
 }
 

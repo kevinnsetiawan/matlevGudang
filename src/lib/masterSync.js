@@ -55,6 +55,17 @@ export function subGudangKodeMap(subs) {
   return map;
 }
 
+// Sort opsi Blok (kode -> nama -> id), dipakai PindahBlokModal & DataStokTab.
+export function sortBlokOptions(options) {
+  return [...options].sort((a, b) => {
+    const byKode = String(a?.kode || "").localeCompare(String(b?.kode || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byKode !== 0) return byKode;
+    const byNama = String(a?.nama || "").localeCompare(String(b?.nama || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byNama !== 0) return byNama;
+    return String(a?.id || "").localeCompare(String(b?.id || ""), "id", { numeric: true, sensitivity: "base" });
+  });
+}
+
 export function getLokasiPetaInfo(lok, gdg, subGudangList) {
   if (!lok) return null;
   if (lok.subGudangId && lok.subMapX != null) {

@@ -20,6 +20,25 @@ export function getSAPLabel(kodeKatalog) {
   return "Non-SAP";
 }
 
+// Label status SAP yang menghormati override manual (field `sapStatus`, disimpan di jsonb)
+// dan material non-stock hasil migrasi (id STK-PREMEM-* = Non-SAP). Tinggal di sini, bukan di
+// src/lib/sap.js, karena nightly_sync.mjs (Node) tidak bisa mengimpor sap.js — kalau logikanya
+// disalin, status di bot Telegram/web akan menyimpang dari yang dilihat user di aplikasi.
+export function resolveSapLabel(kodeKatalog, override) {
+  if (override === "Non-SAP") return "Non-SAP";
+  if (override === "SAP — Persediaan" || override === "SAP — Cadang") return override;
+  const derived = getSAPLabel(kodeKatalog);
+  if (override === "SAP") return derived === "Non-SAP" ? "SAP — Persediaan" : derived;
+  return derived;
+}
+
+// Untuk satu baris Data Stok / Master Katalog (punya .katalog, .sapStatus, .id).
+export function rowSapLabel(row) {
+  if (row?.sapStatus) return resolveSapLabel(row?.katalog, row.sapStatus);
+  if (String(row?.id || "").startsWith("STK-PREMEM-")) return "Non-SAP";
+  return getSAPLabel(row?.katalog);
+}
+
 export function meanStdev(series) {
   const mean = series.reduce((sum, value) => sum + value, 0) / series.length;
   const stdev = Math.sqrt(series.reduce((sum, value) => sum + (value - mean) ** 2, 0) / series.length);
@@ -129,7 +148,7 @@ export function buildForecastRagContent({ nama, satuan, qty, monthlySeries = [],
 
 // Isi 1 chunk RAG "katalog": nama, kode, kategori, status SAP, qty + harga Rupiah, lokasi fisik.
 export function buildKatalogRagContent(k, stockInfo) {
-  const sap = getSAPLabel(k.katalog);
+  const sap = rowSapLabel(k);
   if (!stockInfo) return `Material: ${k.name}. Nomor Katalog: ${k.katalog || "-"}. Kategori: ${k.category || "-"}. Jenis Barang: ${k.jenisBarang || "-"}. Satuan: ${k.satuan || "-"}. Keterangan: ${k.keterangan || "-"}. Status: ${sap}. Belum ada data stok untuk material ini.`;
   const angka = ` Qty saat ini: ${fmtNum(stockInfo.qty)} ${k.satuan || "-"}. Harga satuan: Rp ${fmtNum(Math.round(stockInfo.price))}. Nilai total: Rp ${fmtNum(Math.round(stockInfo.qty * stockInfo.price))}.`;
   const lokasiText = (stockInfo.locations || []).length === 0 ? " Lokasi: belum diisi." :
