@@ -110,7 +110,21 @@ export async function syncTUG15ToSupabase(rows, katalogList) {
 // â”€â”€â”€ SUPABASE SYNC (Data Stok â†’ stock_current) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Push qty stok terkini (dijumlah per katalog dari semua lokasi) supaya job
 // training bisa hitung estimasi_hari_sampai_habis = qty_saat_ini / rata2 prediksi harian.
-export async function syncStockQtyToSupabase(stocks, katalogList) {
+// Rincian lokasi fisik satu katalog untuk halaman scan publik. Tabel gudang/lokasi
+// tidak bisa dibaca tanpa login, jadi ringkasannya dititipkan ke katalog.data (jsonb,
+// tanpa perubahan skema) waktu sinkron.
+function buildLokasiPublik(katalogId, stocks, lokasiList, subGudangList, gudangList) {
+  return (stocks||[])
+    .filter(s => s.katalogId === katalogId && (s.qty||0) > 0)
+    .map(s => {
+      const lok = (lokasiList||[]).find(l => l.id === s.lokasiId);
+      const gud = (gudangList||[]).find(g => g.id === lok?.gudangId);
+      const sub = (subGudangList||[]).find(sg => sg.id === lok?.subGudangId);
+      return { gudang: gud?.nama || gud?.kode || null, subGudang: sub?.nama || sub?.kode || null, blok: lok?.kode || null, qty: s.qty || 0 };
+    });
+}
+
+export async function syncStockQtyToSupabase(stocks, katalogList, master = {}) {
   if (isDemoMode()) return { katalogCount: 0, stockCount: 0 }; // mode demo: pura-pura sukses, tidak menulis Supabase
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     throw new Error("Supabase belum dikonfigurasi (cek VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY di .env)");
@@ -146,6 +160,28 @@ export async function syncStockQtyToSupabase(stocks, katalogList) {
     body: JSON.stringify(stockPayload),
   });
   if (!stockRes.ok) throw new Error(`Gagal sync stock_current: ${await stockRes.text()}`);
+
+  // Titipkan rincian lokasi ke katalog.data supaya halaman scan QR (tanpa login)
+  // bisa menyebut Gudang/Sub Gudang/Blok, bukan cuma kode rak dari riwayat.
+  // Baris existing DIBACA DULU lalu di-merge — merge-duplicates mengganti kolom
+  // data utuh, jadi tanpa ini fotoKeseluruhanUrl hasil upload foto ikut terhapus.
+  if (master.lokasiList) {
+    const idFilter = katalogIds.map(encodeURIComponent).join(",");
+    const existRes = await fetchSupabase(`${SUPABASE_URL}/rest/v1/katalog?id=in.(${idFilter})&select=id,data`, { headers });
+    const existRows = existRes.ok ? await existRes.json() : [];
+    const existMap = Object.fromEntries(existRows.map(r => [r.id, r.data || {}]));
+    const enriched = katalogIds.map(kid => {
+      const prev = existMap[kid] || {};
+      const kat = katalogList.find(k => k.id === kid) || {};
+      return { id: kid, data: { ...prev, ...kat, fotoKeseluruhanUrl: prev.fotoKeseluruhanUrl || kat.fotoKeseluruhanUrl || null, lokasiPublik: buildLokasiPublik(kid, stocks, master.lokasiList, master.subGudangList, master.gudangList) } };
+    });
+    const enrichRes = await fetchSupabase(`${SUPABASE_URL}/rest/v1/katalog?on_conflict=id`, {
+      method: "POST",
+      headers: { ...headers, "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify(enriched),
+    });
+    if (!enrichRes.ok) throw new Error(`Gagal sync lokasi katalog: ${await enrichRes.text()}`);
+  }
 
   return { katalogCount: katalogPayload.length, stockCount: stockPayload.length };
 }

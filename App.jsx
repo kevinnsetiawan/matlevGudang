@@ -491,7 +491,7 @@ export default function PLNWarehouse() {
         const filter = { dateFrom:"", dateTo:"", katalogId:"ALL", jenisBarang:"ALL", sapStatus:"ALL", docTypes:["TUG9","TUG8","TUG10","TUG3"] };
         const rows = buildMutasiRows(txns, katalogList, stocks, filter, lokasiList);
         const histRes = await syncTUG15ToSupabase(rows, katalogList);
-        await syncStockQtyToSupabase(stocks, katalogList);
+        await syncStockQtyToSupabase(stocks, katalogList, { lokasiList, subGudangList, gudangList });
         await syncFotoMaterialToSupabase(stocks, katalogList);
         if (histRes.historyCount > 0) {
           showToastRef.current && showToastRef.current(`☁️ Auto-sync Supabase: ${histRes.historyCount} baris histori baru.`, "success");
