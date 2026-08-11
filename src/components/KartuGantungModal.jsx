@@ -1,6 +1,6 @@
 // Komponen KartuGantungModal — membedakan Halaman Depan (QR Code) & Halaman Belakang (Riwayat Transaksi) TUG.2.
 import { useState } from "react";
-import { fmtDate, fmtDateOnly } from "../lib/utils.js";
+import { fmtDate, fmtDateOnly, scanUrlFor } from "../lib/utils.js";
 import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
 import { buildKartuGantungHistory, resolveLokasiLengkap, getSAPBadgeStyle, jenisBarangAccentColor } from "../lib/sap.js";
 import { buildTUG2FrontHTML, buildTUG2BackHTML } from "../lib/docBuilders.js";
@@ -17,7 +17,7 @@ export function KartuGantungModal({ katalog, stocks, txns, lokasiList, gudangLis
   const sampleFoto = sampleStock ? resolveStockPhotoUrl(sampleStock.fotoKeseluruhan) : null;
   const kategoriMaterial = stocks.find(s=>s.katalogId===katalog.id)?.jenisBarang || "-";
 
-  const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
+  const scanUrl = scanUrlFor(katalog.id);
   const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(scanUrl)}`;
 
   const handlePrintFront = async () => {

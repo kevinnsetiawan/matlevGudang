@@ -1,7 +1,7 @@
 // Komponen StockOpnameTab — dipindah dari App.jsx (refactor Fase 5c).
 import { useState, useRef } from "react";
 import { supabase } from "../supabaseClient.js";
-import { fmtDate, parseSAPFile, parseUsulanPencocokanXLSX } from "../lib/utils.js";
+import { fmtDate, parseSAPFile, parseUsulanPencocokanXLSX, scanUrlFor } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { ROLES, hasRole } from "../lib/roles.js";
 import { buildBeritaAcaraHTML } from "../lib/docBuilders.js";
@@ -629,7 +629,7 @@ export function StockOpnameTab({ opnameList, stocks, katalogList, currentUser, u
                 <>
                   <h3 style={{fontSize:16,fontWeight:800,marginBottom:14}}>🏷️ Label QR Siap Dicetak</h3>
                   {(() => {
-                    const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(qrResult.id)}`;
+                    const scanUrl = scanUrlFor(qrResult.id);
                     const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(scanUrl)}`;
                     return (
                       <div style={{border:`3px solid ${C.accent}`,borderRadius:10,padding:16,background:"white",textAlign:"center",marginBottom:14}}>
