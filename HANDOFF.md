@@ -1,6 +1,6 @@
 # HANDOFF — WARNOTO
 
-**Vendor aktif terakhir:** Claude (Vendor A) | **Update:** 2026-08-07
+**Vendor aktif terakhir:** Claude (Vendor A) | **Update:** 2026-08-11
 
 ## Tujuan / benang merah
 WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel). Fokus: penyempurnaan UI bertahap + isolasi multi-UPT review-first, bukan redesign besar.
@@ -47,6 +47,12 @@ WARNOTO = aplikasi gudang PLN (React, Vite 4, Supabase self-host, deploy Vercel)
 - Vendor C = OpenCode Go (backup ke-3 setelah Claude→Codex→GLM, manual).
 
 ## Status sekarang
+
+- **Sesi 2026-08-11 (Opus, siang) — fix freeze buka menu ATTB + override status SAP/Non-SAP saat import. SEMUA DI-PUSH (`fae1db6`→`03b0522`→`06e3edf`), build hijau.**
+  1. **FIX FREEZE ATTB (`06e3edf`, root cause):** `subGudangKodeMap` (`src/lib/masterSync.js`) infinite `while` loop. Suffix anti-tabrakan `(base.slice(0,2)+n).slice(0,3)` **jenuh** jadi "XY1" untuk n≥10 (10→"XY10"→potong→"XY1", 11→"XY1", …) → kalau "XY1" sudah dipakai, loop tak pernah keluar → **hang main-thread**. Data nyata: ~48 Sub Gudang semua "GUDANG TERBUKA/TERTUTUP …" → `subGudangAbbr` = "TRB"/"TRT" (2 huruf awal semua "TR") → kolam suffix "TR#" habis → freeze saat AttbTab render (`subGudangKodeMap(subGudangList)` dgn **list PENUH semua gudang**; caller lain aman krn subset per-gudang `filter gudangId`). **Fix 1 baris:** suffix injektif thd n (buang `.slice(0,3)`) → kode selalu unik, loop dijamin berhenti. Verified: node assert 48 nama patologis → 48 kode unik tanpa hang + live browser buka ATTB render penuh (21 baris, pipeline 6). **Gotcha investigasi:** hipotesis awal (realtime `stocks` setState-in-render) SALAH — cuma bystander; RBAC guard (`App.jsx:1679`, useEffect) mem-bounce ATTB ke Dashboard saat rolePerms belum load (bukan bug, hilang setelah load) → menutupi repro. `.click()` sidebar via DOM tak reliable switch tab; pakai panggil React `onClick` prop langsung + tunggu rolePerms.
+  2. **Override Status SAP/Non-SAP eksplisit saat Import (`fae1db6`+`03b0522`):** classifier `getSAPLabel`/`getSAPStatus` kini strip leading-zero sebelum test panjang digit (kode padded `000000004180001` = 15 digit dulu keliru Non-SAP; angka asli 7 digit = SAP Persediaan). Helper baru `resolveSapLabel`/`katalogSapLabel`/`katalogSapStatus` (`sap.js`) + field `sapStatus` disimpan di katalog/stock saat Import Template WARNOTO (kolom "Status Material" di template + radio "Verifikasi Status Material" AUTO/SAP/Non-SAP di preview) — dihormati di DataStok/MasterData/Barcode/Opname/docBuilders/supabaseSync + Dashboard Analitik (`analytics.js` salin `kat.sapStatus`). `TPL_JENIS_ENUM` +Non-Stock.
+  3. **Filter per-UPT menu ATTB:** opsi filter UPT (`AttbTab.jsx`) kini dari **cakupan viewer** (`getScopeUptIds`), bukan cuma UPT yang sudah punya data — global/UIT bisa pilih UPT mana pun (termasuk yang kosong). Sebelumnya dropdown sembunyi krn `uptOptions` dari `attbList` (cuma Surabaya). Data ATTB di DB memang baru Surabaya (150); UPT lain kosong sampai diisi. Terverifikasi: dropdown 6 UPT, pilih Gresik→0 item, Surabaya→150.
+  - **Config (bukan repo):** plugin `impeccable@impeccable` DIMATIKAN (`~/.claude/settings.json`, boros token hook Stop); pakai skill desain hanya saat dipanggil user (frontend-design/design-taste-frontend/redesign-existing-projects/web-design-guidelines).
 
 - **Sesi 2026-08-11 (Opus) — input 21 material non-stock Surabaya + fitur Status Material SAP. Kode DI-PUSH, build hijau; data self-host committed.**
   1. **21 material non-stock UPT Surabaya** masuk self-host (`stocks` id `STK-PREMEM-*` + 16 `katalog` baru; 4 kode sudah ada di-reuse). Nama+kode = **katalog MARA** (dicocokkan `migration-tools/match_nonstock_mara.py`, di-review/override manual, ditandai hijau di `D:\CLAUDE\WARNOTO data\Data Material Gudang\Non Stock\Non Stock.xlsx` sheet "Data Barang Baru"). `jenisBarang="Pre Memory"`, lokasi **Ketintang → GUDANG TERTUTUP KETINTANG** (Rak A–D = LOK existing), foto **sengaja kosong** (tim lapangan isi). Insert atomic (dry-run ROLLBACK → COMMIT).
