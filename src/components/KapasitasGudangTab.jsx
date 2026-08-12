@@ -1,19 +1,42 @@
 // Komponen KapasitasGudangTab — dipindah dari App.jsx (refactor Fase 5a).
 import { useState } from "react";
+import { ChartBar, WarningCircle, Warehouse, ArrowsClockwise } from "@phosphor-icons/react";
 import { KAPASITAS_LABEL, UIT, UPT } from "../constants.js";
 import { fmtNum } from "../lib/ragShared.mjs";
 import { hasRole, getScopeUptIds } from "../lib/roles.js";
+import { supabase } from "../supabaseClient.js";
 import { PetaGudangTab } from "./PetaGudangTab.jsx";
 
-export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab }) {
+export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[], gudangList, subGudangList, lokasiList, stocks, currentUser, uptList=[], sty, C, setTab, setStockSubTab, showToast, onSynced }) {
   const [subTab, setSubTab] = useState("dashboard");
   const [filterUPT, setFilterUPT] = useState("ALL");
   const [petaUptFilter, setPetaUptFilter] = useState(""); // "" = semua; peta pakai uptId (gudang.uptId)
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [detailRecord, setDetailRecord] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const canEdit = hasRole(currentUser, "ADMIN","TL");
   const pendingImports = gudangCapacityImports.filter(item=>item.status==="PENDING_ASMAN").length;
+
+  async function syncFromSheet() {
+    if (syncing) return;
+    if (!confirm("Sinkron data kapasitas dari Google Sheet? Data kapasitas akan diperbarui.")) return;
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-kapasitas", { method: "POST" });
+      const err = error || data?.error;
+      if (err) {
+        showToast("Gagal sinkron: " + (data?.error || error?.message || String(err)), "error");
+        return;
+      }
+      showToast(`Sinkron berhasil: ${data.kapasitas} kapasitas, ${data.gudang} gudang, ${data.sub_gudang} sub-gudang.`, "success");
+      await onSynced?.();
+    } catch (e) {
+      showToast("Gagal sinkron: " + e.message, "error");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   // Daftar UPT unik dari data (string label, bukan Master UPT)
   const uptLabelList = [...new Set(gudangCapacityList.map(r=>r.upt))].sort();
@@ -62,6 +85,12 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
         <div className="capacity-summary-banner__header">
           <div><span>Warehouse capacity</span><strong>Data Kapasitas Gudang</strong></div>
           <small>Laporan utilisasi luas gudang berbasis m² — UIT JBM</small>
+          {hasRole(currentUser, "ADMIN") && (
+            <button style={sty.btn("ghost","sm")} disabled={syncing} onClick={syncFromSheet} aria-label="Sinkron dari Sheet">
+              <ArrowsClockwise size={14} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6}} className={syncing?"capacity-spin":""}/>
+              {syncing ? "Menyinkron…" : "Sinkron dari Sheet"}
+            </button>
+          )}
         </div>
         {gudangCapacityList.length > 0 && (
           <div className="capacity-summary-banner__metrics">
@@ -89,12 +118,23 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
         ))}
       </div>
 
+      <div className="capacity-content" style={{position:"relative"}}>
+      {syncing && (
+        <div className="capacity-skeleton-overlay" style={{position:"absolute",inset:0,zIndex:10,background:"rgba(255,255,255,0.85)",display:"flex",flexDirection:"column",alignItems:"center",paddingTop:24}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:16}}>Menyinkron data kapasitas…</div>
+          <div style={{width:"100%",maxWidth:900,padding:"0 16px"}}>
+            {[0,1,2,3,4].map(i=>(
+              <div key={i} className="capacity-skeleton" style={{height:16,background:"#eef2f7",borderRadius:8,marginBottom:10}}/>
+            ))}
+          </div>
+        </div>
+      )}
       {/* DASHBOARD */}
       {subTab==="dashboard" && (
         <div>
           {gudangCapacityList.length === 0 ? (
             <div style={{...sty.card,textAlign:"center",padding:40,color:C.muted}}>
-              <div style={{fontSize:40,marginBottom:12}}>📐</div>
+              <Warehouse size={40} weight="regular" aria-hidden style={{color:C.muted,marginBottom:12}}/>
               <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Data kapasitas gudang belum tersedia</div>
               <div style={{fontSize:13,marginBottom:8}}>
                 {pendingImports>0
@@ -102,22 +142,22 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                   : "Belum ada record kapasitas live. Import file KAPASITAS GUDANG UIT JBM.xlsx melalui Master Data → Master Gudang."}
               </div>
               <div style={{fontSize:12,marginBottom:20,color:C.muted}}>Sumber halaman ini adalah data import yang sudah berstatus disetujui, bukan file draft.</div>
-              {canEdit && <button style={sty.btn("primary")} onClick={()=>{setTab("master");setStockSubTab("gudang");}}>📥 Buka Master Gudang untuk Import</button>}
+              {canEdit && <button style={sty.btn("primary")} onClick={()=>{setTab("master");setStockSubTab("gudang");}}>Buka Master Gudang untuk Import</button>}
             </div>
           ) : (
             <div>
               <div className="capacity-ranking-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
                 <div style={{...sty.card}}>
-                  <div style={{fontWeight:700,marginBottom:10}}>🏆 Ranking UPT (Utilization)</div>
+                  <div style={{fontWeight:700,marginBottom:10}}><ChartBar size={15} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6,color:C.muted}}/>Ranking UPT (Utilisasi)</div>
                   {uptRanking.map((u,i)=>(
                     <div key={u.upt} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`}}>
                       <div>
                         <div style={{fontWeight:700,fontSize:12}}>#{i+1} {u.upt}</div>
-                        <div style={{fontSize:12,color:C.muted}}>{fmtNum(Math.round(u.terpakai))} / {fmtNum(Math.round(u.lahan))} m²</div>
+                        <div style={{fontSize:12,color:C.muted,fontVariantNumeric:"tabular-nums"}}>{fmtNum(Math.round(u.terpakai))} / {fmtNum(Math.round(u.lahan))} m²</div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{fontWeight:800,color:u.util>=0.9?C.red:u.util>=0.75?"#f59e0b":C.green}}>{(u.util*100).toFixed(1)}%</div>
-                        <div style={{width:80,height:6,background:"#e5e7eb",borderRadius:3,marginTop:3}}>
+                        <div style={{fontWeight:800,color:u.util>=0.9?C.red:u.util>=0.75?"#b45309":"#15803d",fontVariantNumeric:"tabular-nums"}}>{(u.util*100).toFixed(1)}%</div>
+                        <div style={{width:80,height:6,background:"#e6eaf1",borderRadius:3,marginTop:3}}>
                           <div style={{width:(u.util*100)+"%",height:"100%",background:u.util>=0.9?C.red:u.util>=0.75?"#f59e0b":C.green,borderRadius:3}}/>
                         </div>
                       </div>
@@ -125,7 +165,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                   ))}
                 </div>
                 <div style={{...sty.card}}>
-                  <div style={{fontWeight:700,marginBottom:10}}>🔴 Sub-Gudang Paling Penuh</div>
+                  <div style={{fontWeight:700,marginBottom:10}}><WarningCircle size={15} weight="fill" aria-hidden style={{verticalAlign:"-0.15em",marginRight:6,color:"#dc2626"}}/>Sub-Gudang Paling Penuh</div>
                   {gudangCapacityList.filter(r=>r.statusKapasitas==="KRITIS").sort((a,b)=>b.persentaseTerpakai-a.persentaseTerpakai).slice(0,8).map((r,i)=>(
                     <div key={i} style={{padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
                       <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -153,9 +193,9 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             </select>
             <select style={{...sty.select,maxWidth:180}} value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
               <option value="ALL">Semua Status</option>
-              <option value="KRITIS">🔴 Penuh</option>
-              <option value="WASPADA">🟡 Terbatas</option>
-              <option value="AMAN">🟢 Cukup</option>
+              <option value="KRITIS">Penuh</option>
+              <option value="WASPADA">Terbatas</option>
+              <option value="AMAN">Cukup</option>
             </select>
             <span style={{color:C.muted,fontSize:12,alignSelf:"center"}}>{filtered.length} record</span>
           </div>
@@ -163,7 +203,7 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:900}}>
               <thead style={{background:C.sidebar,color:"white"}}>
                 <tr>
-                  {["UPT","Gudang","Sub Gudang","Luas Lahan (m²)","Terpakai (m²)","Sisa (m²)","Utilization","Status","Update","Detail"].map(h=>(
+                  {["UPT","Gudang","Sub Gudang","Luas Lahan (m²)","Terpakai (m²)","Sisa (m²)","Utilisasi","Status","Diperbarui","Detail"].map(h=>(
                     <th key={h} style={{padding:"8px 10px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
@@ -179,14 +219,14 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                     <td data-label="Sisa" style={{padding:"6px 10px",textAlign:"right"}}>{fmtNum(Math.round(r.sisaLuasM2))} m²</td>
                     <td data-label="Utilisasi" style={{padding:"6px 10px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div style={{width:60,height:6,background:"#e5e7eb",borderRadius:3}}>
+                        <div style={{width:60,height:6,background:"#e6eaf1",borderRadius:3}}>
                           <div style={{width:Math.min(100,(r.persentaseTerpakai*100))+"%",height:"100%",background:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green,borderRadius:3}}/>
                         </div>
-                        <span style={{fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#f59e0b":C.green}}>{(r.persentaseTerpakai*100).toFixed(1)}%</span>
+                        <span style={{fontWeight:700,color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#b45309":"#15803d",fontVariantNumeric:"tabular-nums"}}>{(r.persentaseTerpakai*100).toFixed(1)}%</span>
                       </div>
                     </td>
                     <td data-label="Status" style={{padding:"6px 10px"}}>
-                      <span style={{padding:"2px 8px",borderRadius:10,fontSize:12,fontWeight:700,background:r.statusKapasitas==="KRITIS"?"#fef2f2":r.statusKapasitas==="WASPADA"?"#fefce8":"#f0fdf4",color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#92400e":C.green}}>{KAPASITAS_LABEL[r.statusKapasitas]||r.statusKapasitas}</span>
+                      <span style={{padding:"2px 8px",borderRadius:10,fontSize:12,fontWeight:700,background:r.statusKapasitas==="KRITIS"?"#fef2f2":r.statusKapasitas==="WASPADA"?"#fefce8":"#f0fdf4",color:r.statusKapasitas==="KRITIS"?C.red:r.statusKapasitas==="WASPADA"?"#b45309":"#15803d"}}>{KAPASITAS_LABEL[r.statusKapasitas]||r.statusKapasitas}</span>
                     </td>
                     <td data-label="Update" style={{padding:"6px 10px",fontSize:12,color:C.muted}}>{r.waktuUpdate||"-"}</td>
                     <td data-label="Aksi" style={{padding:"6px 10px"}}>
@@ -202,7 +242,6 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
       )}
 
 
-      {/* Detail modal */}
       {/* SUB-TAB PETA GUDANG */}
       {subTab==="peta" && (
         <PetaGudangTab
@@ -218,19 +257,21 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
         />
       )}
 
+      </div>
+
       {detailRecord && (
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:20}} onClick={()=>setDetailRecord(null)}>
           <div className="capacity-detail-modal" style={{...sty.card,maxWidth:480,width:"100%",maxHeight:"90dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
               <h3 style={{fontWeight:800}}>{detailRecord.subGudang}</h3>
-              <button style={sty.btn("ghost","sm")} onClick={()=>setDetailRecord(null)}>✕</button>
+              <button style={sty.btn("ghost","sm")} onClick={()=>setDetailRecord(null)} aria-label="Tutup">✕</button>
             </div>
             <div className="capacity-detail-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12,marginBottom:12}}>
-              {[["UPT",detailRecord.upt],["Gudang",detailRecord.gudang],["Type",detailRecord.typeGudang||"-"],["Alamat",detailRecord.alamat||"-"],
+              {[["UPT",detailRecord.upt],["Gudang",detailRecord.gudang],["Tipe",detailRecord.typeGudang||"-"],["Alamat",detailRecord.alamat||"-"],
                 ["Luas Lahan",fmtNum(Math.round(detailRecord.luasLahanM2))+" m²"],["Terpakai",fmtNum(Math.round(detailRecord.luasTerpakaiM2))+" m²"],
-                ["Sisa",fmtNum(Math.round(detailRecord.sisaLuasM2))+" m²"],["Utilization",(detailRecord.persentaseTerpakai*100).toFixed(1)+"%"],
+                ["Sisa",fmtNum(Math.round(detailRecord.sisaLuasM2))+" m²"],["Utilisasi",(detailRecord.persentaseTerpakai*100).toFixed(1)+"%"],
                 ["Komposisi Persediaan",(detailRecord.persediaanPct*100).toFixed(0)+"%"],["Komposisi Cadang",(detailRecord.cadangPct*100).toFixed(0)+"%"],
-                ["Contact Person",detailRecord.contactPerson||"-"],["Waktu Update",detailRecord.waktuUpdate||"-"],
+                ["Narahubung",detailRecord.contactPerson||"-"],["Diperbarui",detailRecord.waktuUpdate||"-"],
               ].map(([k,v])=>(
                 <div key={k} style={{padding:"6px 8px",background:"#f9fafb",borderRadius:6}}>
                   <div style={{fontSize:12,color:C.muted}}>{k}</div>
@@ -238,8 +279,8 @@ export function KapasitasGudangTab({ gudangCapacityList, gudangCapacityImports=[
                 </div>
               ))}
             </div>
-            {detailRecord.keterangan && <div style={{fontSize:12,color:C.muted,marginBottom:8}}>📝 {detailRecord.keterangan}</div>}
-            {detailRecord.linkGudang && <a href={detailRecord.linkGudang} target="_blank" rel="noreferrer" style={{fontSize:12,color:C.accent}}>🔗 Link Gudang</a>}
+            {detailRecord.keterangan && <div style={{fontSize:12,color:C.muted,marginBottom:8}}>{detailRecord.keterangan}</div>}
+            {detailRecord.linkGudang && <a href={detailRecord.linkGudang} target="_blank" rel="noreferrer" style={{fontSize:12,color:C.accent}}>Link Gudang</a>}
           </div>
         </div>
       )}

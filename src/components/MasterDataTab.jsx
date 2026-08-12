@@ -5,11 +5,9 @@
 import { useState } from "react";
 import { can } from "../lib/perms.js";
 import { ROLES, hasRole, roleTier, getScopeUptIds, inScopeUpt } from "../lib/roles.js";
-import { getSAPBadgeStyle } from "../lib/sap.js";
-import { getSAPLabel } from "../lib/ragShared.mjs";
+import { katalogSapLabel, sapBadgeStyleForLabel } from "../lib/sap.js";
 import { uid, fmtDate } from "../lib/utils.js";
 import { subGudangKodeMap } from "../lib/masterSync.js";
-import { KapasitasGudangImportTab } from "./KapasitasGudangImportTab.jsx";
 import { ImportLokasiModal, downloadLokasiTemplate } from "./ImportLokasiModal.jsx";
 import { GudangCoordConfigPanel } from "./GudangCoordConfigPanel.jsx";
 import { MigrasiDataTab } from "./MigrasiDataTab.jsx";
@@ -18,6 +16,8 @@ import { PermMatrixPage } from "./PermMatrixPage.jsx";
 
 export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockSubTab, filteredKatalog, satpamList: rawSatpamList, timMutuList: rawTimMutuList, uitList: rawUitList, uptList: rawUptList, ultgList: rawUltgList, users, gudangList: rawGudangList, lokasiList, subGudangList, visibleGudangList: rawVisibleGudangList, openAddKatalog, openAddSatpam, openAddUIT, openAddGudang, openAddAkun, importGudangOpen, setImportGudangOpen, showGudangMaintenance, setShowGudangMaintenance, importLokasiOpen, setImportLokasiOpen, gudangCapacityImports, setGudangCapacityImports, saveToCloud, showToast, backfillGudangCoordFromCapacity, dedupeGudangDanSubGudang, isKodeDuplicateInSubGudang, setLokasiList, syncLokasi, maraUploadProgress, maraUploadLoading, uploadMaraToDB, katalogList, katalogSearch, setKatalogSearch, katalogFilterBelumMara, setKatalogFilterBelumMara, setBarcodePrintOpen, pagedKatalog, stocks, openEditKatalog, deleteKatalog, katalogPageSize, setKatalogPageSize, katalogPageClamped, setKatalogPage, katalogTotalPages, openEditSatpam, deleteSatpam, openEditTimMutu, orgSearch, setOrgSearch, collapsedUitIds, setCollapsedUitIds, openAddUPT, openEditUIT, deleteUIT, openAddULTG, openEditUPT, deleteUPT, openEditULTG, deleteULTG, expandedGudangId, setExpandedGudangId, openEditGudang, deleteGudang, showGudangDenahTools, setShowGudangDenahTools, uploadDenahGudang, denahLoading, mapConfigGudangId, setMapConfigGudangId, pendingMapLokasi, setPendingMapLokasi, manualAddMode, setManualAddMode, ocrSuggestGudangId, setOcrSuggestGudangId, ocrSuggestSubGudangId, setOcrSuggestSubGudangId, ocrSuggestions, setOcrSuggestions, assignLokasiKoordinat, suggestKodeFromOcr, expandedSubGudangToolsIds, setExpandedSubGudangToolsIds, uploadDenahSubGudang, denahSubLoading, mapConfigSubGudangId, setMapConfigSubGudangId, pendingMapLokasiSub, setPendingMapLokasiSub, manualAddModeSub, setManualAddModeSub, assignLokasiKoordinatSub, openEditLokasi, requestDeleteLokasi, selectedSubGudangId, setSelectedSubGudangId, openEditAkun, txns, migratedTug15History, setMigratedTug15History, migrasiPendingReview, setMigrasiPendingReview, maraReference, setMaraReference, setStocks, setKatalogList, setTxns, reloadRolePerms }) {
   const [akunSearch, setAkunSearch] = useState("");
+  const [akunUptFilter, setAkunUptFilter] = useState("");
+  const [masterUptFilter, setMasterUptFilter] = useState("");
   // UIT dulu dianggap "global" (nasional) — sekarang dibatasi ke semua UPT di UIT-nya lewat
   // getScopeUptIds/inScopeUpt (sumber tunggal 3-tier, lihat src/lib/roles.js).
   const dataScope = getScopeUptIds(currentUser, rawUptList);
@@ -26,18 +26,29 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
   const ultgList = dataScope === null ? rawUltgList : rawUltgList.filter(u => uptList.some(x => x.id === u.parentUptId));
   const gudangList = dataScope === null ? rawGudangList : rawGudangList.filter(g => inScopeUpt(g.uptId, dataScope));
   const visibleGudangList = dataScope === null ? rawVisibleGudangList : rawVisibleGudangList.filter(g => inScopeUpt(g.uptId, dataScope));
-  const satpamList = dataScope === null ? rawSatpamList : rawSatpamList.filter(s => s.gudangId && gudangList.some(g => g.id === s.gudangId));
   const legacySurabayaId = rawUptList.find(u => /surabaya/i.test(u.nama || ""))?.id;
-  const timMutuList = dataScope === null ? rawTimMutuList : rawTimMutuList.filter(t => t.uptId ? inScopeUpt(t.uptId, dataScope) : inScopeUpt(legacySurabayaId, dataScope));
+  // Satpam tak simpan uptId langsung — turunkan dari gudangId lewat rawGudangList.
+  // Record lama tanpa gudang (atau gudang tak dikenal) di-fallback ke UPT legacy Surabaya,
+  // sama pola dgn timMutu di bawah, supaya tidak lenyap dari akun Surabaya setelah isolasi multi-UPT.
+  const satpamUptId = (s) => rawGudangList.find(g => g.id === s.gudangId)?.uptId || legacySurabayaId;
+  const satpamList = (dataScope === null ? rawSatpamList : rawSatpamList.filter(s => inScopeUpt(satpamUptId(s), dataScope))).filter(s => !masterUptFilter || satpamUptId(s) === masterUptFilter);
+  const timMutuList = (dataScope === null ? rawTimMutuList : rawTimMutuList.filter(t => t.uptId ? inScopeUpt(t.uptId, dataScope) : inScopeUpt(legacySurabayaId, dataScope))).filter(t => !masterUptFilter || (t.uptId||legacySurabayaId) === masterUptFilter);
+  const gudangDisplay = visibleGudangList.filter(g => !masterUptFilter || g.uptId === masterUptFilter);
   return (
           <div className={`workspace-page master-page master-page--${stockSubTab}`}>
             <div className="workspace-page-toolbar">
               <div className="workspace-context-row">
                 <span>
-                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangList.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
+                  {stockSubTab==="katalog"?`${filteredKatalog.length} jenis barang terdaftar`:stockSubTab==="satpam"?`${satpamList.length} satpam terdaftar`:stockSubTab==="timmutu"?`${timMutuList.length} paket tim mutu`:stockSubTab==="organisasi"?`${uitList.length} UIT • ${uptList.length} UPT • ${ultgList.length} ULTG`:stockSubTab==="akun"?`${users.length} akun terdaftar`:stockSubTab==="migrasi"?"Cutover terkontrol data stok dari SAP — wajib backup sebelum apply":`${gudangDisplay.length} gudang • ${lokasiList.length} blok lokasi terdaftar`}
                 </span>
               </div>
               <div className="workspace-page-toolbar__actions">
+                {(stockSubTab==="gudang"||stockSubTab==="satpam"||stockSubTab==="timmutu") && uptList.length>1 && (
+                  <select style={sty.select} value={masterUptFilter} onChange={e=>setMasterUptFilter(e.target.value)}>
+                    <option value="">Semua UPT</option>
+                    {uptList.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+                  </select>
+                )}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="katalog" && <button style={sty.btn("primary")} onClick={openAddKatalog}>+ Tambah Katalog Barang</button>}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="satpam" && <button style={sty.btn("primary")} onClick={openAddSatpam}>+ Tambah Satpam</button>}
                 {can(currentUser, "aksi.kelolaMaster", rolePerms) && stockSubTab==="organisasi" && <button style={sty.btn("primary")} onClick={openAddUIT}>+ Tambah UIT</button>}
@@ -46,40 +57,27 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
               </div>
             </div>
             {stockSubTab==="gudang" && (
-              <div style={{...sty.card,marginBottom:12,background:"#eff6ff",borderLeft:"4px solid #0369a1",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
+              <div style={{...sty.card,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",padding:"10px 14px",fontSize:12,color:"#0369a1"}}>
                 ℹ️ Sebagian besar Gudang biasanya <b>otomatis terbentuk sendiri</b> dari import Excel Kapasitas Gudang (tombol di bawah) setelah disetujui Asman. Kalau ada Gudang yang belum tercakup di laporan itu, tambahkan manual lewat tombol "+ Tambah Gudang Baru" di kanan atas.
               </div>
             )}
             {stockSubTab==="gudang" && can(currentUser, "aksi.import", rolePerms) && (
               <div style={{marginBottom:16}}>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-                  <button style={sty.btn(importGudangOpen?"danger":"primary")} onClick={()=>setImportGudangOpen(o=>!o)}>
-                    {importGudangOpen?"✕ Tutup Import Data Gudang":"📥 Import Data Gudang (Excel Kapasitas Gudang)"}
-                  </button>
-                  <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
-                    {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
-                  </button>
+                  {hasRole(currentUser,"ADMIN") && (
+                    <button style={{...sty.btn("ghost","sm")}} onClick={()=>setShowGudangMaintenance(o=>!o)}>
+                      {showGudangMaintenance?"✕ Tutup Alat Perbaikan":"🔧 Alat Perbaikan Data Lanjutan"}
+                    </button>
+                  )}
                   <button style={{...sty.btn("ghost","sm")}} onClick={downloadLokasiTemplate}>⬇️ Download Template Lokasi</button>
                   <button style={{...sty.btn("ghost","sm")}} onClick={()=>setImportLokasiOpen(true)}>📥 Import Excel Lokasi</button>
                 </div>
-                {importGudangOpen && (
-                  <div style={{marginTop:12}}>
-                    <KapasitasGudangImportTab
-                      gudangCapacityImports={gudangCapacityImports}
-                      setGudangCapacityImports={setGudangCapacityImports}
-                      currentUser={currentUser}
-                      sty={sty} C={C}
-                      saveToCloud={saveToCloud}
-                      showToast={showToast}
-                    />
-                  </div>
-                )}
                 {/* Dulu 2 tombol ini sejajar dengan "Import Data Gudang" tanpa penjelasan,
                     keliatan seperti 3 hal setara padahal cuma dipakai kalau ada masalah data
                     spesifik, bukan pemakaian rutin (keluhan user 2026-07-06: "kenapa ada 3
                     inputan"). Sekarang disembunyikan di balik toggle + dikasih penjelasan
                     kapan masing-masing dipakai. */}
-                {showGudangMaintenance && (
+                {hasRole(currentUser,"ADMIN") && showGudangMaintenance && (
                   <div style={{marginTop:12,...sty.card,background:"#fafafa",border:`1px dashed ${C.border}`,padding:14}}>
                     <div style={{fontSize:12,color:C.muted,marginBottom:12}}>
                       Dua alat ini <b>bukan untuk pemakaian rutin</b> — cuma dipakai kalau menemukan masalah data spesifik berikut:
@@ -110,7 +108,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             )}
             {/* ── SUB-TAB: MASTER KATALOG ── */}
             {stockSubTab==="katalog" && hasRole(currentUser, "ADMIN") && (
-              <div style={{...sty.card,marginBottom:12,borderLeft:"4px solid #0369a1",padding:14}}>
+              <div style={{...sty.card,marginBottom:12,border:"1px solid #bfdbfe",padding:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
                   <div>
                     <div style={{fontSize:13,fontWeight:800,color:"#0369a1"}}>📚 Referensi Katalog MARA</div>
@@ -173,9 +171,9 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                   <tbody>
                     {pagedKatalog.map(k=>{
                       const sampleFoto = stocks.find(s=>s.katalogId===k.id && s.img)?.img || null;
-                      const bs = getSAPBadgeStyle(k.katalog);
+                      const bs = sapBadgeStyleForLabel(katalogSapLabel(k));
                       return (
-                        <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`,borderLeft:`3px solid ${C.accent}`}}>
+                        <tr className="mobile-card-table__row" key={k.id} style={{borderBottom:`1px solid ${C.border}`}}>
                           <td className="mobile-card-table__photo" data-label="Foto" style={{padding:"8px 10px",textAlign:"center"}}>
                             {sampleFoto ? <img src={sampleFoto} alt={k.name} style={{width:40,height:40,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                               : <div style={{width:40,height:40,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,border:`1px solid #bfdbfe`,margin:"0 auto"}}>📦</div>}
@@ -192,7 +190,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                             {k.belumDicocokkanMara && <div style={{marginTop:3}}><span style={{padding:"1px 6px",borderRadius:10,fontSize:12,fontWeight:700,background:"#fef3c7",color:"#92400e"}}>⚠️ Belum MARA</span></div>}
                           </td>
                           <td data-label="Satuan" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>{k.satuan}</td>
-                          <td data-label="Status" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(k.katalog)}</span></td>
+                          <td data-label="Status" style={{padding:"8px 10px"}}><span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{katalogSapLabel(k)}</span></td>
                           <td data-label="Aksi" style={{padding:"8px 10px"}}>
                             {hasRole(currentUser, "ADMIN") && (
                               <div style={{display:"flex",gap:4,justifyContent:"center"}}>
@@ -340,7 +338,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                       return next;
                     });
                     return (
-                      <div className="master-organization-card" key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",borderLeft:"4px solid #003087"}}>
+                      <div className="master-organization-card" key={uit.id} style={{...sty.card,padding:0,overflow:"hidden",border:"1px solid #dbe2ea"}}>
                         <div className="master-organization-card__header" style={{background:"#f8fafc"}} onClick={toggleUit}>
                           <div style={{display:"flex",gap:10,alignItems:"flex-start",minWidth:0}}>
                             <div style={{fontSize:22,flexShrink:0}}>🏢</div>
@@ -425,8 +423,8 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
             {stockSubTab==="gudang" && (
               <div className="master-warehouse-page">
                 {/* Notifikasi approval blok lokasi sudah dipindahkan ke menu "✅ Approval" — lihat di sana. */}
-                {gudangList.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
-                {visibleGudangList.map(g=>{
+                {gudangDisplay.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:30}}>Belum ada Master Gudang.</div>}
+                {gudangDisplay.map(g=>{
                   const upt = uptList.find(u=>u.id===g.uptId);
                   const bloklokasi = lokasiList.filter(l=>l.gudangId===g.id);
                   const blokWithCoord = bloklokasi.filter(l=>l.mapX!=null);
@@ -556,7 +554,7 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                             // Gudang yang benar (permintaan user 2026-07-06).
                             const isUnregistered = !grp.sg && subsOfGudang.length>0;
                             return (
-                            <div key={grp.id||"umum"} style={{marginBottom:18,paddingLeft:10,borderLeft:`3px solid ${C.border}`}}>
+                            <div key={grp.id||"umum"} style={{marginBottom:18}}>
                               {grp.sg && <div style={{fontSize:13,fontWeight:800,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>🏢 Sub Gudang: {grp.nama}{subKodeMap[grp.sg.id] && <span title="Kode singkatan Sub Gudang (dipakai sebagai tag di depan kode blok)" style={{fontSize:12,fontWeight:800,color:"#1e3a8a",background:"#dbeafe",border:"1px solid #bfdbfe",padding:"1px 7px",borderRadius:6}}>{subKodeMap[grp.sg.id]}</span>}</div>}
 
                               {/* Denah + Konfigurasi Koordinat level Sub Gudang — collapsed by default,
@@ -718,19 +716,32 @@ export function MasterDataTab({ C, sty, currentUser, isMobile, rolePerms, stockS
                 const tier = roleTier(u.role);
                 return { u, tier, unit: unitLabel(u, tier) };
               }).sort((a,b) => TIER_ORDER[a.tier]-TIER_ORDER[b.tier] || (a.u.name||"").localeCompare(b.u.name||""));
+              // Filter UPT hanya untuk role lintas-UPT (superadmin/Pusat/UIT). Admin UPT lihat
+              // daftar apa adanya (users prop sudah discope RLS), jadi tak perlu filter UPT.
+              const showUptFilter = ["GLOBAL","PUSAT","UIT"].includes(roleTier(currentUser?.role));
               const q = akunSearch.trim().toLowerCase();
-              const filtered = !q ? rows : rows.filter(({u,tier,unit}) =>
-                [u.name, u.username, ROLES[u.role]||u.role, u.jabatan, unit].some(v => (v||"").toLowerCase().includes(q)) || TIER_BADGE[tier].label.toLowerCase().includes(q)
-              );
+              const filtered = rows.filter(({u,tier,unit}) => {
+                const matchUpt = !akunUptFilter || u.uptId === akunUptFilter;
+                const matchQ = !q || [u.name, u.username, ROLES[u.role]||u.role, u.jabatan, unit].some(v => (v||"").toLowerCase().includes(q)) || TIER_BADGE[tier].label.toLowerCase().includes(q);
+                return matchUpt && matchQ;
+              });
               return (
               <div style={sty.card}>
                 {users.length===0 ? (
                   <div style={{textAlign:"center",color:C.muted,padding:30}}>Belum ada akun terdaftar.</div>
                 ) : (
                   <>
-                  <input style={{...sty.input,marginBottom:12,maxWidth:360}} placeholder="Cari nama, username, role, atau unit…" value={akunSearch} onChange={e=>setAkunSearch(e.target.value)}/>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+                    <input style={{...sty.input,maxWidth:360,marginBottom:0}} placeholder="Cari nama, username, role, atau unit…" value={akunSearch} onChange={e=>setAkunSearch(e.target.value)}/>
+                    {showUptFilter && (
+                      <select style={{...sty.select,maxWidth:240}} value={akunUptFilter} onChange={e=>setAkunUptFilter(e.target.value)} aria-label="Filter UPT">
+                        <option value="">Semua UPT</option>
+                        {uptList.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+                      </select>
+                    )}
+                  </div>
                   {filtered.length===0 ? (
-                    <div style={{textAlign:"center",color:C.muted,padding:30}}>Tidak ada akun cocok dengan "{akunSearch}".</div>
+                    <div style={{textAlign:"center",color:C.muted,padding:30}}>Tidak ada akun yang cocok dengan filter.</div>
                   ) : (
                   <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
                   <table style={{width:"100%",minWidth:720,borderCollapse:"collapse",fontSize:12}}>

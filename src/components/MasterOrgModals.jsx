@@ -15,9 +15,9 @@ export function SatpamModal({ satpamModal, setSatpamModal, satpamForm, setSatpam
               <input style={sty.input} value={satpamForm.telp||""} onChange={e=>setSatpamForm(sf=>({...sf,telp:e.target.value}))} placeholder="08xxxxxxxxxx"/>
             </div>
             <div style={{marginBottom:12}}>
-              <label style={sty.label}>Bertugas di Gudang (opsional)</label>
+              <label style={sty.label}>Bertugas di Gudang</label>
               <select style={sty.select} value={satpamForm.gudangId||""} onChange={e=>setSatpamForm(sf=>({...sf,gudangId:e.target.value}))}>
-                <option value="">-- Belum di-assign gudang --</option>
+                <option value="">-- Pilih gudang (wajib) --</option>
                 {visibleGudangList.map(g=>{ const up=uptList.find(u=>u.id===g.uptId); return <option key={g.id} value={g.id}>{g.nama}{up?` — ${up.nama}`:""}</option>; })}
               </select>
               <div style={{fontSize:12,color:C.muted,marginTop:4}}>Nama satpam akan muncul di dokumen TUG-10 sesuai gudang tempat barang disimpan.</div>

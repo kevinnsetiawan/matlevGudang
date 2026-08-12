@@ -141,7 +141,7 @@ export function TUG3Tab({ txns, filterStatus, users, sty, C, currentUser, katalo
               <label style={sty.label}>Paket Tim Mutu</label>
               <select style={sty.select} value={tug4Form.timMutuId||""} onChange={e=>setTug4Form(f=>({...f,timMutuId:e.target.value}))}>
                 <option value="">-- Pilih Paket --</option>
-                {timMutuList.map(tm=><option key={tm.id} value={tm.id}>{tm.label}</option>)}
+                {timMutuList.filter(tm=>!tug4Modal?.uptId||tm.uptId===tug4Modal.uptId).map(tm=><option key={tm.id} value={tm.id}>{tm.label}</option>)}
               </select>
             </div>
             <div style={{marginBottom:12}}>

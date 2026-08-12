@@ -1,53 +1,99 @@
 // Komponen DataStokTab — dipindah dari App.jsx (refactor batch 2a).
-// Murni relokasi tab "Data Stok" (tab==="stock"); JSX/logic tidak berubah.
-import { JENIS_BARANG } from "../constants.js";
+// Batch 1 simplifikasi tampilan (2026-08-11): tabel 5 kolom ringkas, detail
+// lengkap (Kategori/Harga/Status/Gudang/Blok/Lokasi UPT/Edit/Hapus) pindah ke
+// modal detail (App.jsx). Kolom Gudang/Blok pindah ke modal "Pindah Blok".
+import { useState, useRef, useEffect } from "react";
+import { JENIS_BARANG, STATUS_SAP } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
-import { buildAdminStockLocationUpdate } from "../lib/stockLocationApproval.js";
-import { getSAPBadgeStyle } from "../lib/sap.js";
+import { sapBadgeStyleForLabel, stockSapLabel } from "../lib/sap.js";
 import { hasRole } from "../lib/roles.js";
-import { getLokasiPetaInfo } from "../lib/masterSync.js";
-import { fmtNum, getSAPLabel } from "../lib/ragShared.mjs";
-import { Camera, X, ImageSquare, Tag, MapPin } from "@phosphor-icons/react";
+import { getLokasiPetaInfo, sortBlokOptions } from "../lib/masterSync.js";
+import { fmtNum } from "../lib/ragShared.mjs";
+import { Camera, X, ImageSquare, Tag, MapPin, ArrowsLeftRight, CaretUp, CaretDown, Clock, Barcode } from "@phosphor-icons/react";
+import { OperationsHero } from "./OperationsHero.jsx";
+import { PindahBlokModal } from "./PindahBlokModal.jsx";
 import "../styles/stock.css";
-
-// Keep block selectors deterministic without changing the source lokasiList.
-// Numeric-aware locale sorting makes codes such as BLOK-2 come before BLOK-10;
-// the name (then id) provides stable tie-breakers for duplicate/blank codes.
-function sortBlokOptions(options) {
-  return [...options].sort((a, b) => {
-    const byKode = String(a?.kode || "").localeCompare(String(b?.kode || ""), "id", { numeric: true, sensitivity: "base" });
-    if (byKode !== 0) return byKode;
-    const byNama = String(a?.nama || "").localeCompare(String(b?.nama || ""), "id", { numeric: true, sensitivity: "base" });
-    if (byNama !== 0) return byNama;
-    return String(a?.id || "").localeCompare(String(b?.id || ""), "id", { numeric: true, sensitivity: "base" });
-  });
-}
 
 export function DataStokTab({
   C, sty, currentUser, isMobile,
-  search, setSearch,
+  search, setSearch, openScanner,
   setPhotoSearchImg, setPhotoSearchOpen,
   filterJenis, setFilterJenis,
-  stockUptFilter, setStockUptFilter, stockUptFilterOptions,
+  filterStatusSAP, setFilterStatusSAP,
+  stockUptFilter, setStockUptFilter, stockUptFilterOptions, uptNama,
+  stockGudangSelect, setStockGudangSelect, stockBlokSelect, setStockBlokSelect,
+  stockQuickFilter, setStockQuickFilter, stockSort, setStockSort,
+  stockViewMode, setStockViewMode, stockViewCount,
   filteredStocks, stocks, setStocks,
   photoSearchResults, setPhotoSearchResults, photoSearchResultMode, photoSearchOcrText,
   enrichedStocks, pagedStocks,
   setStockDetailId,
-  katalogList, lokasiList, gudangList, subGudangList, visibleGudangList,
+  katalogList, lokasiList, gudangList, uptList, subGudangList, visibleGudangList,
   stockGudangFilter, setStockGudangFilter,
   setPendingFoto, setLightboxImg,
   saveToCloud, showToast,
-  openEditStock, deleteStock,
+  deleteStock,
   setKartuGantungDetail, setPetaMiniDetail,
   stockPageSize, setStockPageSize, stockPageClamped, setStockPage, stockTotalPages,
 }) {
+  const [moveStock, setMoveStock] = useState(null); // {st, lok, gdg} — trigger modal Pindah Blok
+  const searchInputRef = useRef(null);
+
+  // Shortcut "/" fokus ke pencarian — diabaikan kalau sedang mengetik di field lain.
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key !== "/" || e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target;
+      const tag = t?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const kritisCount = enrichedStocks.filter(s => s.jenisBarang !== "Non-Stock" && s.qty <= s.minQty).length;
+  const tanpaLokasiCount = enrichedStocks.filter(s => !s.lokasiId).length;
+  const blokSelectOptions = stockGudangSelect ? sortBlokOptions(lokasiList.filter(l => l.gudangId === stockGudangSelect)) : [];
+  const anyFilterActive = !!(search || filterJenis!=="ALL" || filterStatusSAP!=="ALL" || stockUptFilter || stockGudangSelect || stockBlokSelect || stockQuickFilter);
+  const resetAllFilters = () => { setSearch(""); setFilterJenis("ALL"); setFilterStatusSAP("ALL"); setStockUptFilter(""); setStockGudangSelect(""); setStockBlokSelect(""); setStockQuickFilter(""); };
+  const toggleSort = (key) => setStockSort(prev => prev.key===key ? {key, dir: prev.dir==="asc"?"desc":"asc"} : {key, dir:"asc"});
+  const sortAria = (key) => stockSort.key===key ? (stockSort.dir==="asc"?"ascending":"descending") : "none";
+
+  // Highlight potongan teks yang cocok dengan kata kunci pencarian (Nama Barang / no. katalog).
+  // Substring case-insensitive saja — bukan tokenizer/fuzzy. Escape regex agar "(", "*", dll dari
+  // input user tidak bikin RegExp invalid/crash.
+  const highlightNeedle = search.trim().length >= 2 ? search.trim() : "";
+  function highlightText(text) {
+    const str = String(text ?? "");
+    if (!highlightNeedle) return str;
+    const escaped = highlightNeedle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = str.split(new RegExp(`(${escaped})`, "gi"));
+    if (parts.length === 1) return str;
+    return parts.map((part, i) => part.toLowerCase() === highlightNeedle.toLowerCase()
+      ? <mark key={i} style={{background:"#fef08a",color:"inherit",padding:0,fontSize:"inherit"}}>{part}</mark>
+      : part);
+  }
+
   return (
           <div className="workspace-page stock-page">
+            <OperationsHero
+              eyebrow="Persediaan"
+              title="Data Stok"
+              description="Pantau posisi stok material per lokasi gudang secara ringkas dan akurat."
+              scope={stockUptFilterOptions?.length>0 ? (stockUptFilter ? (stockUptFilterOptions.find(u=>u.id===stockUptFilter)?.nama||"UPT terpilih") : "Semua UPT") : uptNama}
+              metrics={[
+                {label: stockViewMode==="katalog" ? "Total jenis barang" : "Total baris stok", value:stockViewCount},
+                {label:"Stok kritis",value:kritisCount,alert:kritisCount>0},
+                {label:"Belum ada lokasi",value:tanpaLokasiCount,alert:tanpaLokasiCount>0},
+              ]}
+            />
             <div className="workspace-filter-panel">
               <div style={{display:"flex",gap:8,alignItems:"stretch"}}>
                 <div style={{position:"relative",flex:1}}>
                   <label className="stock-search-label" htmlFor="stock-search-input">Cari Data Stok</label>
-                  <input id="stock-search-input" aria-label="Cari Data Stok" style={{...sty.input,paddingRight:32,fontSize:16}} placeholder="Cari nama, kode, keterangan, lokasi..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                  <input ref={searchInputRef} id="stock-search-input" aria-label="Cari Data Stok" style={{...sty.input,paddingRight:32,fontSize:16}} placeholder="Cari nama/no. katalog… (tekan /)" value={search} onChange={e=>setSearch(e.target.value)}/>
                   {search && (
                     <button
                       onClick={()=>setSearch("")}
@@ -56,6 +102,13 @@ export function DataStokTab({
                     ><X size={16} aria-hidden="true" /></button>
                   )}
                 </div>
+                {typeof openScanner === "function" && (
+                  <button type="button" aria-label="Scan barcode" title="Scan barcode" onClick={()=>openScanner({onDetect:(code)=>setSearch(code)})}
+                    style={{...sty.btn("ghost"),whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                    <Barcode size={18} weight="bold" aria-hidden="true" />
+                    {!isMobile && <span>Scan</span>}
+                  </button>
+                )}
                 <button type="button" className="stock-photo-search-button" aria-label="Cari barang berdasarkan foto" title="Cari barang berdasarkan foto" onClick={()=>{setPhotoSearchImg(null);setPhotoSearchOpen(true);}}
                   style={{...sty.btn("primary"),whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
                   <Camera size={18} weight="bold" aria-hidden="true" />
@@ -66,18 +119,42 @@ export function DataStokTab({
                 <select style={{...sty.select,maxWidth:280}} value={filterJenis} onChange={e=>setFilterJenis(e.target.value)}>
                   <option value="ALL">Semua Jenis</option>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}
                 </select>
+                <select style={{...sty.select,maxWidth:280}} value={filterStatusSAP} onChange={e=>setFilterStatusSAP(e.target.value)} aria-label="Filter Status Material">
+                  <option value="ALL">Semua Status</option>{STATUS_SAP.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
                 {/* Filter lokasi material per UPT — hanya muncul utk viewer multi-UPT (UIT/Pusat). */}
                 {stockUptFilterOptions?.length>0 && (
                   <select style={{...sty.select,maxWidth:280}} value={stockUptFilter} onChange={e=>setStockUptFilter(e.target.value)} aria-label="Filter UPT">
                     <option value="">Semua UPT</option>{stockUptFilterOptions.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
                   </select>
                 )}
+                <select style={{...sty.select,maxWidth:280}} value={stockGudangSelect} onChange={e=>{setStockGudangSelect(e.target.value);setStockBlokSelect("");}} aria-label="Filter Gudang">
+                  <option value="">Semua Gudang</option>{visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
+                </select>
+                <select style={{...sty.select,maxWidth:280}} value={stockBlokSelect} disabled={!stockGudangSelect} onChange={e=>setStockBlokSelect(e.target.value)} aria-label="Filter Blok">
+                  <option value="">Semua Blok</option>{blokSelectOptions.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
+                </select>
               </div>
-              <div className="workspace-context-row">
-                <span><strong>{filteredStocks.length}</strong> baris stok</span>
-                <span>Barang × lokasi</span>
-                {stocks.filter(s=>!s.lokasiId).length>0 && <span className="is-warning">{stocks.filter(s=>!s.lokasiId).length} material belum memiliki lokasi</span>}
+              <div className="operations-segments" role="group" aria-label="Filter cepat">
+                <button type="button" className={stockQuickFilter==="kritis"?"is-active":""} style={{"--segment-color":"#dc2626"}} onClick={()=>setStockQuickFilter(f=>f==="kritis"?"":"kritis")}>
+                  <span>⚠️</span> Stok kritis ({kritisCount})
+                </button>
+                <button type="button" className={stockQuickFilter==="tanpaLokasi"?"is-active":""} style={{"--segment-color":"#d97706"}} onClick={()=>setStockQuickFilter(f=>f==="tanpaLokasi"?"":"tanpaLokasi")}>
+                  <span>📍</span> Belum ada lokasi ({tanpaLokasiCount})
+                </button>
               </div>
+              {anyFilterActive && (
+                <div className="workspace-context-row">
+                  {search && <span>Cari: "{search}" <button aria-label="Hapus filter pencarian" onClick={()=>setSearch("")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {filterJenis!=="ALL" && <span>Jenis: {filterJenis} <button aria-label="Hapus filter jenis" onClick={()=>setFilterJenis("ALL")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {filterStatusSAP!=="ALL" && <span>Status: {filterStatusSAP} <button aria-label="Hapus filter status" onClick={()=>setFilterStatusSAP("ALL")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {stockUptFilter && <span>UPT: {stockUptFilterOptions.find(u=>u.id===stockUptFilter)?.nama||"-"} <button aria-label="Hapus filter UPT" onClick={()=>setStockUptFilter("")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {stockGudangSelect && <span>Gudang: {visibleGudangList.find(g=>g.id===stockGudangSelect)?.kode||"-"} <button aria-label="Hapus filter gudang" onClick={()=>{setStockGudangSelect("");setStockBlokSelect("");}} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {stockBlokSelect && <span>Blok: {lokasiList.find(l=>l.id===stockBlokSelect)?.kode||"-"} <button aria-label="Hapus filter blok" onClick={()=>setStockBlokSelect("")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  {stockQuickFilter && <span>{stockQuickFilter==="kritis"?"Stok kritis":"Belum ada lokasi"} <button aria-label="Hapus filter cepat" onClick={()=>setStockQuickFilter("")} style={{background:"transparent",border:"none",cursor:"pointer",marginLeft:5,fontWeight:800}}>×</button></span>}
+                  <button type="button" onClick={resetAllFilters} style={{...sty.btn("ghost","sm"),marginLeft:4}}>Reset semua</button>
+                </div>
+              )}
               {photoSearchResults && (
                 <div style={{...sty.card,padding:12}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -118,22 +195,46 @@ export function DataStokTab({
                 ℹ️ Belum ada Master Katalog. Tambahkan jenis barang dulu di menu "Master Data" → "Master Katalog" sebelum membuat Data Stok.
               </div>
             )}
-            {/* Tampilan tabel horizontal (data & fungsi tidak berubah, cuma cara
-                merendernya — semua handler/state sama persis dengan versi kartu
-                sebelumnya). */}
+            {/* Saklar mode tampilan — pola sama dengan saklar tema di header (.theme-switch):
+                seluruh baris (teks + track) satu tombol, jadi area sentuhnya lega di HP. */}
+            <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",marginBottom:8}}>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={stockViewMode==="katalog"}
+                aria-label="Gabungkan baris per katalog"
+                title={stockViewMode==="katalog" ? "Satu baris per barang, qty dijumlah dari semua lokasi" : "Satu baris per blok penyimpanan"}
+                className={`stock-view-switch${stockViewMode==="katalog"?" is-on":""}`}
+                onClick={()=>setStockViewMode(stockViewMode==="katalog"?"lokasi":"katalog")}
+              >
+                <span className="stock-view-switch__label">Per Lokasi</span>
+                <span className="stock-view-switch__track" aria-hidden="true"><span className="stock-view-switch__knob"/></span>
+                <span className="stock-view-switch__label">Per Katalog</span>
+              </button>
+            </div>
+            {/* Tampilan tabel horizontal ringkas — detail lengkap ada di modal
+                setelah klik baris (App.jsx, stockDetailId). */}
             <div className="mobile-card-table stock-card-table" style={{...sty.card,padding:0,overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:980}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:640}}>
                 <thead>
                   <tr style={{background:C.sidebar,color:"white"}}>
-                    {["Foto","Nama Barang","Kategori","Qty","Gudang","Blok","Harga","Status","Aksi"].map(h=>(
-                      <th key={h} style={{padding:"9px 10px",textAlign:h==="Aksi"||h==="Foto"?"center":"left",whiteSpace:"nowrap",fontSize:12}}>{h}</th>
+                    <th style={{padding:"9px 10px",textAlign:"center",whiteSpace:"nowrap",fontSize:12}}>Foto</th>
+                    {[["nama","Nama Barang"],["qty","Qty"],["lokasi",stockViewMode==="katalog"?"Sebaran":"Lokasi"]].map(([key,label])=>(
+                      <th key={key} aria-sort={sortAria(key)} style={{padding:0,textAlign:"left",whiteSpace:"nowrap",fontSize:12}}>
+                        <button type="button" onClick={()=>toggleSort(key)} style={{background:"transparent",border:"none",color:"white",cursor:"pointer",font:"inherit",fontWeight:700,padding:"9px 10px",display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+                          {label}
+                          {stockSort.key===key && (stockSort.dir==="asc" ? <CaretUp size={12} weight="bold" aria-hidden="true"/> : <CaretDown size={12} weight="bold" aria-hidden="true"/>)}
+                        </button>
+                      </th>
                     ))}
+                    <th style={{padding:"9px 10px",textAlign:"center",whiteSpace:"nowrap",fontSize:12}}>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pagedStocks.map(st=>{
+                    const isAgg = String(st.id).startsWith("AGG-"); // baris sintetis mode "Per Katalog" — bukan stok nyata
                     const isLow = st.jenisBarang!=="Non-Stock" && st.qty<=st.minQty;
-                    const noLokasi = !st.lokasiId;
+                    const noLokasi = !isAgg && !st.lokasiId;
                     const lok = lokasiList.find(l=>l.id===st.lokasiId);
                     // Fallback ke st.gudangId (declared, independen dari Blok) kalau belum ada Blok
                     // tersimpan — ditemukan 2026-07-10 (sama seperti bug ATTB): kalau Gudang yang
@@ -141,15 +242,23 @@ export function DataStokTab({
                     // pilihan Gudang (yang tadinya cuma filter lokal, tidak pernah disimpan) hilang lagi
                     // tiap render ulang. Sekarang gudangId disimpan langsung ke stok begitu dipilih.
                     const gdg = lok?.gudangId ? gudangList.find(g=>g.id===lok.gudangId) : (st.gudangId ? gudangList.find(g=>g.id===st.gudangId) : null);
-                    const effGudangIdForBlok = stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? "";
-                    const blokOptionsForStock = sortBlokOptions(lokasiList.filter(l=>l.gudangId===effGudangIdForBlok));
                     const petaInfo = getLokasiPetaInfo(lok, gdg, subGudangList);
                     const canLihatPeta = !!petaInfo;
                     const hasDenah = !!(gdg?.denahImageData || (lok?.subGudangId && subGudangList.find(s=>s.id===lok.subGudangId)?.denahImageData));
+                    // Baris agregat: bukan stok nyata, tidak ada modal detail — lompat ke mode
+                    // "Per Lokasi" + cari nomor katalog ini, supaya pecahan per-blok langsung terlihat.
+                    const openDetail = ()=>{
+                      if (isAgg) { setStockViewMode("lokasi"); setSearch(st.katalog||""); return; }
+                      setPendingFoto({}); setStockDetailId(st.id);
+                    };
+                    const sapLabel = stockSapLabel(st);
+                    const sapBs = sapBadgeStyleForLabel(sapLabel);
                     return (
-                      <tr className="mobile-card-table__row" key={st.id} onClick={()=>{setPendingFoto({}); setStockDetailId(st.id);}} style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
+                      <tr className="mobile-card-table__row" key={st.id} tabIndex={0} onClick={openDetail}
+                        onKeyDown={e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openDetail(); } }}
+                        style={{cursor:"pointer",background:st.deletePending?"#fef2f2":undefined,borderBottom:`1px solid ${C.border}`,borderLeft:`3px ${st.deletePending?"dashed #dc2626":"solid"} ${st.deletePending?"#dc2626":noLokasi?"#f59e0b":isLow?C.red:st.jenisBarang==="Non-Stock"?"#be185d":C.green}`}}>
                         <td className="mobile-card-table__photo" data-label="Foto" onClick={e=>{ if(st.fotoKeseluruhan){e.stopPropagation(); setLightboxImg(resolveStockPhotoUrl(st.fotoKeseluruhan));} }} style={{padding:"8px 10px",textAlign:"center",cursor:st.fotoKeseluruhan?"zoom-in":"default"}}>
-                          {st.fotoKeseluruhan ? <img src={resolveStockPhotoUrl(st.fotoKeseluruhan)} alt={st.name} style={{width:48,height:48,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
+                          {st.fotoKeseluruhan ? <img src={resolveStockPhotoUrl(st.fotoKeseluruhan)} alt={st.name} width={48} height={48} loading="lazy" style={{width:48,height:48,borderRadius:6,objectFit:"cover",border:`1px solid ${C.border}`}}/>
                             : <div style={{width:48,height:48,background:"#eff6ff",borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,border:`1px solid #bfdbfe`,margin:"0 auto"}}><ImageSquare size={22} color="#1d4ed8" aria-hidden="true"/></div>}
                         </td>
                         <td className="stock-mobile-summary" aria-label={`Ringkasan ${st.name}`}>
@@ -158,16 +267,18 @@ export function DataStokTab({
                           <div className="stock-mobile-summary__meta"><span><MapPin size={14} weight="bold" aria-hidden="true"/> {[gdg?.kode||gdg?.nama, lok?.kode||st.lokasi].filter(Boolean).join(" • ") || "Lokasi belum diisi"}</span><span className={isLow ? "is-critical" : "is-ok"}>{st.jenisBarang==="Non-Stock" ? "Project-Based" : `${fmtNum(st.qty)} ${st.unit}`}</span></div>
                         </td>
                         <td className="mobile-card-table__title" data-label="Nama Barang" style={{padding:"8px 10px",minWidth:200}}>
-                          <div style={{fontWeight:700,color:C.text}}>{st.name}</div>
-                          <div style={{fontSize:12,color:"#0098da",fontWeight:700,marginTop:1}}><Tag size={13} style={{verticalAlign:"-0.15em",marginRight:3}} aria-hidden="true"/> {st.katalog||"-"}</div>
-                          {st.deletePending && <div style={{fontSize:12,color:"#dc2626",fontWeight:700,marginTop:2}}>⏳ Menunggu approval Hapus</div>}
-                          {st.editPending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Ada perubahan menunggu approval TL</div>}
-                        </td>
-                        <td data-label="Kategori" style={{padding:"8px 10px"}}>
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap",maxWidth:160}}>
-                            <span style={sty.jenisBadge(st.jenisBarang)}>{st.jenisBarang}</span>
-                            <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,background:"#f3f4f6",color:C.muted}}>{st.category}</span>
+                          <div title={st.name} style={{fontWeight:700,color:C.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{highlightText(st.name)}</div>
+                          <div style={{fontSize:12,color:C.muted,marginTop:2,display:"flex",alignItems:"center",gap:5,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            <Tag size={13} style={{flexShrink:0}} aria-hidden="true"/> {highlightText(st.katalog||"-")}
+                            <span aria-hidden="true" style={{color:"#cbd5e1"}}>•</span>
+                            <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:"50%",background:sapBs.fg,flexShrink:0}}/> {sapLabel}</span>
                           </div>
+                          {(st.deletePending || st.editPending) && (
+                            <div title={[st.deletePending&&"Menunggu approval Hapus", st.editPending&&"Ada perubahan menunggu approval TL"].filter(Boolean).join(" • ")}
+                              style={{display:"inline-flex",alignItems:"center",gap:4,marginTop:4,padding:"2px 7px",borderRadius:7,fontSize:12,fontWeight:700,background:"#fffbeb",color:"#a16207"}}>
+                              <Clock size={12} weight="bold" aria-hidden="true"/> Menunggu approval
+                            </div>
+                          )}
                         </td>
                         <td data-label="Qty" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>
                           {st.jenisBarang==="Non-Stock"
@@ -178,118 +289,31 @@ export function DataStokTab({
                               </div>}
                           {isLow && <div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:2}}>⚠️ Stok kritis</div>}
                         </td>
-                        <td data-label="Gudang" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:120}}>
-                          {hasRole(currentUser, "ADMIN","TL") ? (
-                            <select
-                              value={stockGudangFilter[st.id] ?? st.gudangId ?? gdg?.id ?? ""}
-                              style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8}}
-                              onChange={async e=>{
-                                const v = e.target.value;
-                                setStockGudangFilter(prev=>({...prev,[st.id]:v}));
-                                // Gudang selector only scopes the target Blok options. The
-                                // canonical stock gudang/location changes together when a
-                                // concrete Blok is selected below; this prevents an approval
-                                // from combining a new gudang with the old lokasi.
-                              }}>
-                              <option value="">-- Pilih Gudang --</option>
-                              {visibleGudangList.map(g=><option key={g.id} value={g.id}>{g.kode||g.nama}</option>)}
-                            </select>
-                          ) : (
-                            <span style={{color:C.text}}>{gdg?.kode||gdg?.nama||"—"}</span>
-                          )}
-                        </td>
-                        <td data-label="Blok" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px",minWidth:150}}>
-                          {hasRole(currentUser, "ADMIN") ? (
-                            <>
-                              <select
-                                value={st.lokasiId||""}
-                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:noLokasi?"#fffbeb":"#f9fafb"}}
-                                onChange={async e=>{
-                                  const newLokasiId = e.target.value;
-                                  const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  const sourceLocation = lokasiList.find(l=>l.id===st.lokasiId) || (st.lokasiId ? { gudangId: st.gudangId } : null);
-                                  const updated = buildAdminStockLocationUpdate(st, sourceLocation, lokSel, currentUser.id);
-                                  const ns = stocks.map(s=>s.id===st.id?updated:s);
-                                  setStocks(ns);
-                                  // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).
-                                  await saveToCloud({stocks:ns}, {stocksChangedRows: [updated]});
-                                  showToast(`📍 Lokasi ${st.name} → ${lokSel?.kode||"-"} disimpan.`);
-                                }}>
-                                <option value="">-- Pilih Blok --</option>
-                                {blokOptionsForStock.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
-                              </select>
-                              {effGudangIdForBlok && blokOptionsForStock.length===0 && <div style={{fontSize:12,color:"#b45309",fontStyle:"italic",marginTop:2}}>⚠️ Belum ada Blok terdaftar di Gudang ini — pilihan Gudang tetap tersimpan.</div>}
-                            </>
-                          ) : hasRole(currentUser, "TL") ? (
-                            <>
-                              <select
-                                value={st.lokasiId||""}
-                                disabled={st.lokasiMovePending}
-                                style={{...sty.select,fontSize:12,paddingTop:5,paddingBottom:5,paddingLeft:8,paddingRight:8,border:`1px solid ${noLokasi?"#f59e0b":C.border}`,background:st.lokasiMovePending?"#f3f4f6":noLokasi?"#fffbeb":"#f9fafb"}}
-                                onChange={async e=>{
-                                  const newLokasiId = e.target.value;
-                                  const lokSel = lokasiList.find(l=>l.id===newLokasiId);
-                                  // TL yang pindahkan stok yang SUDAH punya lokasi ke Gudang lain wajib
-                                  // approval Asman (TL sendiri yang biasanya approve pemindahan Admin,
-                                  // jadi pemindahan lintas Gudang oleh TL butuh persetujuan Asman UPT).
-                                  // Isi lokasi PERTAMA KALI (lok kosong) tetap langsung tanpa approval,
-                                  // sama seperti pindah blok dalam Gudang yang sama.
-                                  const pindahGudang = !!lok && (lokSel?.gudangId||null) !== (lok?.gudangId||null);
-                                  let updated, msg;
-                                  if (pindahGudang) {
-                                    updated = {...st, lokasiMovePending:true, lokasiMoveApprover:"ASMAN", pendingLokasiId:newLokasiId, pendingLokasiKode:lokSel?.kode||"-", moveRequestedBy:currentUser.id, moveRequestedAt:Date.now()};
-                                    msg = `📨 Pemindahan ${st.name} ke Gudang lain (${lokSel?.kode||"-"}) diajukan! Menunggu approval Asman.`;
-                                  } else {
-                                    updated = {...st, lokasiId:newLokasiId, lokasi:lokSel?.kode||"-", lokasiMovePending:false, lokasiMoveApprover:null, pendingLokasiId:null, pendingLokasiKode:null};
-                                    msg = `📍 Blok ${st.name} → ${lokSel?.kode||"-"}`;
-                                  }
-                                  const ns = stocks.map(s=>s.id===st.id?updated:s);
-                                  setStocks(ns);
-                                  // Update lokasi/blok 1 barang — cuma baris ini yang berubah (sync ringan, bukan 212 baris ~18.7MB).
-                                  await saveToCloud({stocks:ns}, {stocksChangedRows: [updated]});
-                                  showToast(msg);
-                                }}>
-                                <option value="">-- Pilih Blok --</option>
-                                {blokOptionsForStock.map(l=><option key={l.id} value={l.id}>{l.kode}{l.nama?" — "+l.nama:""}</option>)}
-                              </select>
-                              {effGudangIdForBlok && blokOptionsForStock.length===0 && <div style={{fontSize:12,color:"#b45309",fontStyle:"italic",marginTop:2}}>⚠️ Belum ada Blok terdaftar di Gudang ini — pilihan Gudang tetap tersimpan.</div>}
-                              {st.lokasiMovePending && <div style={{fontSize:12,color:"#92400e",fontWeight:700,marginTop:2}}>⏳ Menunggu approval {st.lokasiMoveApprover||"Asman"} → {st.pendingLokasiKode}</div>}
-                            </>
-                          ) : (
-                            <span style={{color:noLokasi?"#f59e0b":C.text,fontWeight:noLokasi?700:400}}>{noLokasi?"⚠️ Belum diisi":st.lokasi||"—"}</span>
-                          )}
-                        </td>
-                        <td data-label="Harga" style={{padding:"8px 10px",whiteSpace:"nowrap"}}>Rp {fmtNum(st.price)}</td>
-                        <td data-label="Status" style={{padding:"8px 10px"}}>
-                          {(()=>{const bs=getSAPBadgeStyle(st.katalog);return <span style={{padding:"2px 7px",borderRadius:20,fontSize:12,fontWeight:700,background:bs.bg,color:bs.fg,whiteSpace:"nowrap"}}>{getSAPLabel(st.katalog)}</span>})()}
+                        <td data-label={stockViewMode==="katalog"?"Sebaran":"Lokasi"} style={{padding:"8px 10px",minWidth:130}}>
+                          {isAgg ? <span style={{color:C.text,display:"inline-flex",alignItems:"center",gap:4}}><MapPin size={14} weight="bold" aria-hidden="true"/> {st.lokasiCount} lokasi</span>
+                            : noLokasi ? <span style={{color:"#f59e0b",fontWeight:700}}>⚠️ Belum diisi</span> : <span style={{color:C.text}}>{[gdg?.kode||gdg?.nama, lok?.kode||st.lokasi].filter(Boolean).join(" • ")||"—"}</span>}
                         </td>
                         <td data-label="Aksi" onClick={e=>e.stopPropagation()} style={{padding:"8px 10px"}}>
                           <div className="stock-mobile-direct-actions" onClick={e=>e.stopPropagation()}>
-                            <button
+                            {!isAgg && <button
                               className="table-action-button stock-mobile-action--location"
                               aria-label="Lokasi"
-                              title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data â†’ Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
+                              title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data → Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
                               style={{color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
                               onClick={()=>{
                                 if (canLihatPeta) { setPetaMiniDetail({stock:st, lokasi:lok, gudang:gdg, petaInfo}); return; }
                                 if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
-                                if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data â†’ Master Gudang.`,"error"); return; }
-                                showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data â†’ Master Gudang.`,"error");
-                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>
+                                if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data → Master Gudang.`,"error"); return; }
+                                showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data → Master Gudang.`,"error");
+                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>}
                             <button className="table-action-button stock-mobile-action--card" aria-label="Kartu Gantung Digital" title="Kartu Gantung Digital"
                               onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}><Tag size={16} weight="bold" aria-hidden="true" /> <span>Kartu Gantung</span></button>
                           </div>
                           <div className="stock-desktop-actions" onClick={e=>e.stopPropagation()}>
                             <div className="table-actions">
-                            {hasRole(currentUser, "ADMIN") && (
-                              <>
-                                <button className="table-action-button" title="Edit data stok" disabled={st.deletePending} onClick={()=>openEditStock(st)}>Edit</button>
-                                <button className="table-action-button is-danger" title="Hapus data stok" disabled={st.deletePending} onClick={()=>deleteStock(st.id)}>Hapus</button>
-                              </>
-                            )}
                             <button className="table-action-button is-icon" title="Kartu Gantung TUG-2"
                               onClick={()=>{const k=katalogList.find(x=>x.id===st.katalogId); if(k) setKartuGantungDetail(k);}}><Tag size={16} weight="bold" aria-hidden="true" /></button>
-                            <button
+                            {!isAgg && <button
                               className="table-action-button is-icon"
                               title={canLihatPeta ? "Lihat di Peta Gudang" : !lok ? "Blok belum diisi" : !hasDenah ? "Denah belum diupload (Master Data → Master Gudang)" : "Blok ini belum diplot koordinatnya di denah"}
                               style={{color:canLihatPeta?"#dc2626":C.muted,opacity:canLihatPeta?1:0.5}}
@@ -298,15 +322,25 @@ export function DataStokTab({
                                 if (!lok) { showToast("Blok/Lokasi belum diisi untuk material ini.","error"); return; }
                                 if (!hasDenah) { showToast(`Denah "${gdg?.nama||lok?.kode||"-"}" belum diupload. Upload di Master Data → Master Gudang.`,"error"); return; }
                                 showToast(`Blok ${lok?.kode||"-"} belum diplot koordinatnya di denah. Atur di Master Data → Master Gudang.`,"error");
-                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>
+                              }}><MapPin size={16} weight="bold" aria-hidden="true" /></button>}
+                            {isAgg ? (
+                              <button className="table-action-button is-icon" aria-label="Lihat lokasi" title="Lihat lokasi"
+                                onClick={openDetail}><MapPin size={16} weight="bold" aria-hidden="true" /></button>
+                            ) : hasRole(currentUser, "ADMIN","TL") && (
+                              <button className="table-action-button is-icon" aria-label="Pindah Blok" title="Pindah Blok"
+                                onClick={()=>setMoveStock({st, lok, gdg})}><ArrowsLeftRight size={16} weight="bold" aria-hidden="true" /></button>
+                            )}
                             </div>
                           </div>
                         </td>
                       </tr>
                     );
                   })}
-                  {filteredStocks.length===0 && (
-                    <tr><td colSpan={9} style={{padding:30,textAlign:"center",color:C.muted}}>Tidak ada data stok untuk filter ini.</td></tr>
+                  {stocks.length===0 && (
+                    <tr><td colSpan={5} style={{padding:30,textAlign:"center",color:C.muted}}>Belum ada data stok.</td></tr>
+                  )}
+                  {stocks.length>0 && filteredStocks.length===0 && (
+                    <tr><td colSpan={5} style={{padding:30,textAlign:"center",color:C.muted}}>Tidak ada data stok untuk filter ini.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -318,7 +352,7 @@ export function DataStokTab({
                   <select style={{...sty.select,width:"auto",paddingTop:4,paddingBottom:4,paddingLeft:8,paddingRight:8,minHeight:"unset",fontSize:12}} value={stockPageSize} onChange={e=>setStockPageSize(Number(e.target.value))}>
                     {[10,20,50].map(n=><option key={n} value={n}>{n}</option>)}
                   </select>
-                  item per halaman — {filteredStocks.length} total
+                  item per halaman — {stockViewCount} total
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:6}}>
                   <button style={{...sty.btn("ghost","sm")}} disabled={stockPageClamped<=1} onClick={()=>setStockPage(p=>Math.max(1,p-1))}>← Sebelumnya</button>
@@ -326,6 +360,16 @@ export function DataStokTab({
                   <button style={{...sty.btn("ghost","sm")}} disabled={stockPageClamped>=stockTotalPages} onClick={()=>setStockPage(p=>Math.min(stockTotalPages,p+1))}>Berikutnya →</button>
                 </div>
               </div>
+            )}
+            {moveStock && (
+              <PindahBlokModal
+                C={C} sty={sty} currentUser={currentUser}
+                st={moveStock.st} lok={moveStock.lok} gdg={moveStock.gdg}
+                stocks={stocks} setStocks={setStocks} lokasiList={lokasiList} visibleGudangList={visibleGudangList}
+                stockGudangFilter={stockGudangFilter} setStockGudangFilter={setStockGudangFilter}
+                saveToCloud={saveToCloud} showToast={showToast}
+                onClose={()=>setMoveStock(null)}
+              />
             )}
           </div>
   );

@@ -72,6 +72,7 @@ export function useMasterDataCrud({ currentUser, showToast, stateRef, askConfirm
   function openEditSatpam(sp) { setSatpamForm({...sp}); setSatpamModal("edit"); }
   async function saveSatpam() {
     if (!satpamForm.name?.trim()) { showToast("Nama Satpam tidak boleh kosong!","error"); return; }
+    if (!satpamForm.gudangId) { showToast("Satpam wajib ditugaskan di gudang!","error"); return; }
     const prevList = satpamList;
     let nsp;
     if (satpamModal==="edit") nsp = satpamList.map(s=>s.id===satpamForm.id?{...satpamForm}:s);

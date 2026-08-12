@@ -101,23 +101,9 @@ export function AkunModal({ akunModal, setAkunModal, akunForm, setAkunForm, akun
                     {ultgList.map(u=><option key={u.id} value={u.id}>{u.kode} — {u.nama}</option>)}
                   </select>
                 </div>
-                {/* RBAC per gudang: kosong = semua gudang (perilaku default). Centang untuk
-                    membatasi akun hanya ke gudang tertentu (dropdown/daftar gudang tersaring). */}
-                <div style={{marginBottom:16}}>
-                  <label style={sty.label}>Batasi Akses Gudang <span style={{fontWeight:400,color:C.muted}}>(kosongkan = semua gudang)</span></label>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:8,maxHeight:150,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
-                    {visibleGudangList.length===0 && <span style={{fontSize:12,color:C.muted}}>Belum ada Master Gudang.</span>}
-                    {visibleGudangList.map(g=>{
-                      const sel = (akunForm.gudangIds||[]).includes(g.id);
-                      return (
-                        <label key={g.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,cursor:"pointer",padding:"4px 8px",borderRadius:6,background:sel?"#e0f2fe":"transparent",border:`1px solid ${sel?"#0369a1":C.border}`}}>
-                          <input type="checkbox" checked={sel} onChange={()=>setAkunForm(f=>{ const cur=f.gudangIds||[]; return {...f, gudangIds: cur.includes(g.id)?cur.filter(x=>x!==g.id):[...cur,g.id]}; })}/>
-                          {g.nama}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
+                {/* "Batasi Akses Gudang" dihapus (2026-08-10): akses sudah melekat ke upt_id,
+                    RBAC per-gudang redundan. Logika allowedGudangIds/canAccessGudang tetap ada
+                    (akun tanpa gudangIds = semua gudang di UPT-nya), hanya input manual ditiadakan. */}
                 <div style={{display:"flex",gap:10}}>
                   <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setAkunModal(null)} disabled={akunBusy}>Batal</button>
                   <button style={{...sty.btn("primary"),flex:2,opacity:akunBusy?0.6:1}} onClick={akunModal==="edit"?submitAkunEdit:submitAkunBaru} disabled={akunBusy}>{akunBusy?(akunModal==="edit"?"Menyimpan...":"Mendaftarkan..."):(akunModal==="edit"?"💾 Simpan Perubahan":"💾 Daftarkan")}</button>

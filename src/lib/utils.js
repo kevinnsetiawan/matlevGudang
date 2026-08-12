@@ -416,3 +416,20 @@ export function migrateLegacyStocks(rawStocks) {
 
   return { katalog, lokasi, stocks };
 }
+
+// Origin yang dipakai di QR/barcode cetakan. Kartu yang dicetak dari dev server
+// (localhost / IP LAN) dulu ikut menyimpan URL itu, jadi QR-nya mati begitu kartu
+// dibawa keluar jaringan. Kalau origin saat ini bukan alamat publik, pakai
+// VITE_PUBLIC_APP_URL (atau domain production sebagai default).
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i;
+export const PUBLIC_APP_ORIGIN = (() => {
+  const fromEnv = import.meta.env?.VITE_PUBLIC_APP_URL;
+  if (fromEnv) return String(fromEnv).replace(/\/+$/, "");
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return LOCAL_ORIGIN_RE.test(origin) ? "https://warnoto.vercel.app" : origin;
+})();
+
+// URL halaman scan publik untuk satu katalog — satu-satunya tempat format ini dibentuk.
+export function scanUrlFor(katalogId) {
+  return `${PUBLIC_APP_ORIGIN}/?scan=${encodeURIComponent(katalogId)}`;
+}

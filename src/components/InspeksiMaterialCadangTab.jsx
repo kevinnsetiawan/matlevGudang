@@ -3,7 +3,6 @@ import { can } from "../lib/perms.js";
 import { OperationsHero } from "./OperationsHero.jsx";
 import {
   ClipboardText,
-  Plus,
   MagnifyingGlass,
   CaretDown,
   Camera,
@@ -98,8 +97,9 @@ export function InspeksiMaterialCadangTab({
 }) {
   const [view, setView] = useState("form");
   const [items, setItems] = useState([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedGudangId, setSelectedGudangId] = useState("");
   const [pickerQuery, setPickerQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(true);
   const [expandedItemIndex, setExpandedItemIndex] = useState(null);
   const [pelaksanaLogistik, setPelaksanaLogistik] = useState(currentUser?.name || "");
   const [pelaksaraPemeliharaan, setPelaksaraPemeliharaan] = useState("");
@@ -171,26 +171,29 @@ export function InspeksiMaterialCadangTab({
     [scopedGudangList, lockedGudangId],
   );
 
+  const activeGudangId = lockedGudangId || selectedGudangId;
+
   const pickerResults = useMemo(() => {
+    if (!activeGudangId) return [];
     const q = pickerQuery.trim().toLowerCase();
     const alreadySelected = new Set(items.map(it => it.stockId));
     return cadangStockOptions
       .filter(opt => !alreadySelected.has(opt.stock.id))
-      .filter(opt => !lockedGudangId || opt.lokasi?.gudangId === lockedGudangId)
+      .filter(opt => opt.lokasi?.gudangId === activeGudangId)
       .filter(opt => {
         if (!q) return true;
         const label = `${opt.katalog?.katalog || ""} ${opt.katalog?.name || ""} ${opt.stock.name || ""}`.toLowerCase();
         return label.includes(q);
       })
       .slice(0, 50);
-  }, [cadangStockOptions, items, lockedGudangId, pickerQuery]);
+  }, [cadangStockOptions, items, activeGudangId, pickerQuery]);
 
   const completeCount = items.filter(itemComplete).length;
   const formInvalid = !items.length || items.some(it => !itemComplete(it)) || !pelaksanaLogistik.trim() || !pelaksaraPemeliharaan.trim();
 
   useEffect(() => {
-    if (pickerOpen && pickerSearchRef.current) pickerSearchRef.current.focus();
-  }, [pickerOpen]);
+    if (activeGudangId && pickerSearchRef.current) pickerSearchRef.current.focus();
+  }, [activeGudangId]);
 
   useEffect(() => {
     if (expandedBatchId) {
@@ -207,6 +210,10 @@ export function InspeksiMaterialCadangTab({
   function addItem(stockId) {
     const opt = cadangStockOptions.find(o => o.stock.id === stockId);
     if (!opt) return;
+    if (items.length && opt.lokasi?.gudangId !== lockedGudangId) {
+      showToast("Satu BA hanya untuk satu gudang.", "error");
+      return;
+    }
     const nextIndex = items.length;
     setItems(prev => {
       if (prev.length >= MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH) return prev;
@@ -214,7 +221,6 @@ export function InspeksiMaterialCadangTab({
       return [...prev, emptyItem(opt.stock, opt.katalog, opt.lokasi)];
     });
     setExpandedItemIndex(nextIndex);
-    setPickerOpen(false);
     setPickerQuery("");
   }
 
@@ -261,7 +267,7 @@ export function InspeksiMaterialCadangTab({
     setItems([]);
     setExpandedItemIndex(null);
     setPelaksaraPemeliharaan("");
-    setPickerOpen(false);
+    setSelectedGudangId("");
     setPickerQuery("");
   }
 
@@ -369,7 +375,7 @@ export function InspeksiMaterialCadangTab({
         />
       </div>
 
-      {/* Sub-tab switch — segmented control navy aktif (grid 2 kolom biar rata di HP) */}
+      {/* Sub-tab switch — segmented control navy aktif (grid 2 kolom biar rata di HP), sticky saat scroll */}
       <div className="no-print" style={{
         display: "grid",
         gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -378,17 +384,20 @@ export function InspeksiMaterialCadangTab({
         borderRadius: 12,
         padding: 5,
         border: `1.5px solid ${C.border}`,
+        position: "sticky",
+        top: 0,
+        zIndex: 5,
       }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setView(t.id)} style={{
             padding: isMobile ? "10px 12px" : "10px 16px",
-            minHeight: isMobile ? 44 : undefined,
+            minHeight: 44,
             borderRadius: 8,
             border: "none",
             cursor: "pointer",
             fontSize: isMobile ? 13 : 14,
             fontWeight: 800,
-            background: view === t.id ? "linear-gradient(180deg,#2f6bf0,#1d4ed8)" : "transparent",
+            background: view === t.id ? "#1d4ed8" : "transparent",
             color: view === t.id ? "#ffffff" : C.text,
             boxShadow: view === t.id ? "0 3px 10px rgba(29,78,216,0.35)" : "none",
             whiteSpace: "nowrap",
@@ -410,7 +419,31 @@ export function InspeksiMaterialCadangTab({
           <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
             <ChipReadonly label="Tanggal" value={today} C={C} />
             <ChipReadonly label="UPT" value={inspectionIdentity.namaUpt} C={C} />
-            <ChipReadonly label="Gudang" value={lockedGudang?.nama || "Terkunci otomatis"} muted={!lockedGudang} C={C} />
+            {items.length === 0 ? (
+              <div style={{
+                border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 12px",
+                background: C.surface, display: "grid", gap: 2, minWidth: 0,
+              }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: ".4px" }}>Gudang</span>
+                <select
+                  value={selectedGudangId}
+                  onChange={e => setSelectedGudangId(e.target.value)}
+                  style={{
+                    border: "none", background: "transparent", outline: "none", width: "100%",
+                    padding: 0, cursor: "pointer", fontSize: 13,
+                    fontWeight: 700, color: selectedGudangId ? C.text : C.muted,
+                  }}
+                >
+                  <option value="">— Pilih gudang —</option>
+                  {scopedGudangList.map(g => <option key={g.id} value={g.id}>{g.nama}</option>)}
+                </select>
+              </div>
+            ) : (
+              <ChipReadonly label="Gudang" value={lockedGudang?.nama || "—"} C={C} />
+            )}
+            {items.length > 0 && (
+              <p style={{ margin: 0, fontSize: 11, color: C.muted, gridColumn: "1/-1" }}>Gudang terkunci setelah material pertama ditambahkan.</p>
+            )}
             <ChipReadonly label="Nomor BA" value={lastSavedBa?.nomorBa || "Otomatis saat simpan"} muted={!lastSavedBa} C={C} />
             <ChipReadonly label="Manager UPT" value={inspectionIdentity.managerUpt} C={C} />
           </div>
@@ -433,24 +466,15 @@ export function InspeksiMaterialCadangTab({
             } />
             {items.length > 0 && (
               <div style={{ height: 6, borderRadius: 999, background: C.border, overflow: "hidden" }}>
-                <div style={{ width: `${progressPct}%`, height: "100%", background: "linear-gradient(90deg,#2f6bf0,#1d4ed8)", transition: "width .2s" }} />
+                <div style={{ width: `${progressPct}%`, height: "100%", background: "#1d4ed8", transition: "width .2s" }} />
               </div>
             )}
-            <div className="approval-actions" style={{ justifyContent: "flex-start" }}>
-              <button
-                className="approval-btn--primary"
-                disabled={items.length >= MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH}
-                onClick={() => setPickerOpen(v => !v)}
-                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-              >
-                <Plus size={16} weight="bold" /> {pickerOpen ? "Tutup Pemilihan" : "Tambah Material Cadang"}
-              </button>
-            </div>
+
             {items.length >= MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH && (
               <p style={{ margin: 0, fontSize: 12, color: C.muted }}>Maksimal {MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH} material per BA tercapai.</p>
             )}
 
-            {pickerOpen && (
+            {activeGudangId && items.length < MATERIAL_INSPECTION_MAX_ITEMS_PER_BATCH && (
               <div style={{
                 border: `1.5px solid ${C.accent}40`,
                 borderRadius: 12,
@@ -460,48 +484,73 @@ export function InspeksiMaterialCadangTab({
                 background: C.surface,
                 boxShadow: "0 8px 24px -10px rgba(29,78,216,0.25)",
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${C.border}`, borderRadius: 10, paddingLeft: 12, background: C.bg }}>
+                <button type="button" onClick={() => setSearchOpen(o => !o)} style={{
+                  display: "flex", alignItems: "center", gap: 8, minHeight: 44,
+                  border: "none", background: "transparent", color: C.text, cursor: "pointer", padding: 0,
+                  fontSize: 13, fontWeight: 800, textAlign: "left",
+                }}>
                   <MagnifyingGlass size={16} color={C.muted} />
-                  <input
-                    ref={pickerSearchRef}
-                    style={{ ...sty.input, border: "none", background: "transparent", paddingLeft: 0, flex: 1 }}
-                    placeholder={lockedGudang ? `Cari material Cadang di ${lockedGudang.nama}…` : "Cari material Cadang…"}
-                    value={pickerQuery}
-                    onChange={e => setPickerQuery(e.target.value)}
-                  />
-                </div>
-                {lockedGudang && (
-                  <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
-                    Gudang terkunci: <b style={{ color: C.text }}>{lockedGudang.nama}</b> — material dari gudang lain tidak bisa dipilih.
-                  </p>
-                )}
-                {pickerResults.length === 0 ? (
-                  <div style={{ padding: 24, textAlign: "center", color: C.muted, fontSize: 13 }}>
-                    <Package size={32} weight="thin" style={{ opacity: 0.5 }} />
-                    <p style={{ margin: "8px 0 0" }}>Tidak ada material Cadang tersedia{lockedGudang ? ` di gudang ${lockedGudang.nama}` : ""}.</p>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gap: 6, maxHeight: 320, overflowY: "auto", paddingRight: 4 }}>
-                    {pickerResults.map(opt => (
-                      <button key={opt.stock.id} onClick={() => addItem(opt.stock.id)} style={{
-                        textAlign: "left", padding: "10px 12px", borderRadius: 10,
-                        border: `1px solid ${C.border}`, background: "transparent", color: C.text,
-                        cursor: "pointer", display: "grid", gap: 2, transition: "border-color .12s, background .12s",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = `${C.accent}0d`; }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}
-                      >
-                        <strong style={{ fontSize: 13 }}>{opt.katalog?.katalog || opt.katalog?.noKatalog || "—"}</strong>
-                        <span style={{ fontSize: 12, color: C.muted }}>
-                          {opt.katalog?.name || opt.stock.name || "Material"} · {opt.lokasi?.kode || opt.lokasi?.nama || "—"} · {opt.stock.qty || 0} {opt.katalog?.satuan || opt.stock.satuan || "BH"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <span style={{ flex: 1 }}>Cari Material Cadang</span>
+                  <CaretDown size={18} color={C.muted} style={{ transform: searchOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                </button>
+                {searchOpen && (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${C.border}`, borderRadius: 10, paddingLeft: 12, background: C.bg }}>
+                      <MagnifyingGlass size={16} color={C.muted} />
+                      <input
+                        ref={pickerSearchRef}
+                        style={{ ...sty.input, minHeight: 44, border: "none", background: "transparent", paddingLeft: 0, flex: 1 }}
+                        placeholder={lockedGudang ? `Cari material Cadang di ${lockedGudang.nama}…` : "Cari material Cadang…"}
+                        value={pickerQuery}
+                        onChange={e => setPickerQuery(e.target.value)}
+                      />
+                      {pickerQuery && (
+                        <button type="button" onClick={() => setPickerQuery("")} style={{
+                          border: "none", background: "transparent", color: C.muted, cursor: "pointer",
+                          fontSize: 18, lineHeight: 1, padding: 8,
+                        }}>×</button>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
+                      {pickerResults.length} material Cadang di Gudang {lockedGudang?.nama || scopedGudangList.find(g => g.id === activeGudangId)?.nama || "—"}
+                    </p>
+                    {pickerResults.length === 0 ? (
+                      <div style={{ padding: 24, textAlign: "center", color: C.muted, fontSize: 13 }}>
+                        <Package size={32} weight="thin" style={{ opacity: 0.5 }} />
+                        <p style={{ margin: "8px 0 0" }}>Tidak ada material Cadang di gudang ini.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 6, maxHeight: 320, overflowY: "auto", paddingRight: 4 }}>
+                        {pickerResults.map(opt => (
+                          <button key={opt.stock.id} onClick={() => addItem(opt.stock.id)} style={{
+                            textAlign: "left", padding: "10px 12px", borderRadius: 10,
+                            minHeight: isMobile ? 44 : undefined,
+                            border: `1px solid ${C.border}`, background: "transparent", color: C.text,
+                            cursor: "pointer", display: "grid", gap: 2, transition: "border-color .12s, background .12s",
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = `${C.accent}0d`; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = "transparent"; }}
+                          >
+                            <strong style={{ fontSize: 13 }}>{opt.katalog?.katalog || opt.katalog?.noKatalog || "—"}</strong>
+                            <span style={{ fontSize: 12, color: C.muted }}>
+                              {opt.katalog?.name || opt.stock.name || "Material"} · {opt.lokasi?.kode || opt.lokasi?.nama || "—"} · {opt.stock.qty || 0} {opt.katalog?.satuan || opt.stock.satuan || "BH"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
 
+            <StepHeader n={3} title="Isi Hasil Inspeksi per Material" C={C} trailing={
+              items.length > 0 ? (
+                <span style={{ fontSize: 12, color: C.muted }}>
+                  {completeCount === items.length ? "Semua lengkap" : (completeCount + "/" + items.length + " lengkap — klik material untuk membuka")}
+                </span>
+              ) : null
+            } />
             {items.length === 0 ? (
               <div style={{
                 border: `1.5px dashed ${C.border}`, borderRadius: 14, padding: isMobile ? 28 : 40,
@@ -512,27 +561,19 @@ export function InspeksiMaterialCadangTab({
                 </div>
                 <div>
                   <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>Belum ada material</h3>
-                  <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Pilih material Cadang dari stok untuk mulai inspeksi.</p>
-                </div>
-                <div className="approval-actions" style={{ justifyContent: "center" }}>
-                  <button className="approval-btn--primary" onClick={() => setPickerOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                    <Plus size={16} weight="bold" /> Tambah Material Cadang
-                  </button>
+                  <p style={{ margin: 0, fontSize: 13, color: C.muted }}>
+                    {activeGudangId ? "Cari dan pilih material Cadang di atas untuk mulai inspeksi." : "Pilih gudang dulu untuk mencari material."}
+                  </p>
                 </div>
               </div>
             ) : (
               <div style={{ display: "grid", gap: 12 }}>
-                <StepHeader n={3} title="Isi Hasil Inspeksi per Material" C={C} trailing={
-                  <span style={{ fontSize: 12, color: C.muted }}>
-                    {completeCount === items.length ? "Semua lengkap" : (completeCount + "/" + items.length + " lengkap — klik material untuk membuka")}
-                  </span>
-                } />
                 {items.map((item, index) => (
                   <ItemCard
                     key={item.stockId}
                     item={item}
                     index={index}
-                    expanded={expandedItemIndex === index}
+                    expanded={isMobile || expandedItemIndex === index}
                     isMobile={isMobile}
                     C={C}
                     sty={sty}
@@ -548,8 +589,8 @@ export function InspeksiMaterialCadangTab({
             )}
           </div>
 
-          {/* Langkah 4 — Simpan */}
-          <div style={{
+          {/* Langkah 4 — Simpan (baris aksi compact, in-flow) */}
+          <div className="no-print" style={{
             display: "flex",
             flexDirection: isMobile ? "column" : "row",
             alignItems: isMobile ? "stretch" : "center",
@@ -560,12 +601,11 @@ export function InspeksiMaterialCadangTab({
             borderTop: `1px solid ${C.border}`,
           }}>
             <div style={{ display: "grid", gap: 2, minWidth: 0, flex: "1 1 auto" }}>
-              <StepHeader n={4} title="Simpan Berita Acara" C={C} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: C.text, paddingLeft: 36 }}>
-                {items.length} material · {items.length && completeCount === items.length ? "siap disimpan" : `${completeCount}/${items.length || 0} lengkap`}
-              </span>
-              <span style={{ fontSize: 12, color: C.muted, paddingLeft: 36 }}>
-                {formInvalid ? "Lengkapi pelaksana & dua foto per material sebelum simpan." : "Semua materi lengkap, siap membuat BA."}
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Langkah 4 · Simpan Berita Acara</span>
+              <span style={{ fontSize: 12, color: C.muted }}>
+                {items.length === 0
+                  ? "Tambahkan material dulu"
+                  : (completeCount === items.length && !formInvalid ? "Siap disimpan" : `${completeCount}/${items.length} material lengkap`)}
               </span>
             </div>
             <div className="approval-actions" style={{
@@ -579,6 +619,7 @@ export function InspeksiMaterialCadangTab({
                 className="approval-btn--primary"
                 disabled={saving || formInvalid}
                 onClick={saveBatch}
+                style={{ minHeight: 44 }}
               >
                 <CheckCircle size={16} weight="fill" aria-hidden="true" />
                 {saving ? "Menyimpan…" : "Simpan BA Inspeksi"}
@@ -675,10 +716,10 @@ function StepHeader({ n, title, C, trailing }) {
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{
         width: 26, height: 26, borderRadius: "50%", flex: "0 0 auto",
-        background: "linear-gradient(180deg,#2f6bf0,#1d4ed8)", color: "#fff",
+        background: "#1d4ed8", color: "#fff",
         display: "grid", placeItems: "center", fontSize: 12, fontWeight: 900,
       }}>{n}</span>
-      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 800, color: C.text }}>{title}</h3>
+      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.text }}>{title}</h3>
       {trailing && <span style={{ marginLeft: "auto" }}>{trailing}</span>}
     </div>
   );
@@ -745,7 +786,7 @@ function ItemCard({ item, index, expanded, isMobile, C, sty, onToggle, onUpdate,
               <button
                 className="approval-btn--cancel"
                 onClick={onRemove}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, minHeight: isMobile ? 44 : undefined }}
               >
                 <Trash size={14} /> Hapus material
               </button>
@@ -779,7 +820,7 @@ function ItemCard({ item, index, expanded, isMobile, C, sty, onToggle, onUpdate,
                 return (
                   <button key={key} type="button" onClick={() => onChecklist(key, !on)} style={{
                     display: "inline-flex", alignItems: "center", gap: 6,
-                    padding: "8px 12px", minHeight: 36, borderRadius: 999, cursor: "pointer",
+                    padding: "8px 12px", minHeight: isMobile ? 44 : 36, borderRadius: 999, cursor: "pointer",
                     fontSize: 13, fontWeight: 700, border: `1.5px solid ${on ? C.green : C.border}`,
                     background: on ? "#dcfce7" : "transparent", color: on ? C.green : C.muted,
                     transition: "all .12s",
@@ -837,6 +878,7 @@ function ItemCard({ item, index, expanded, isMobile, C, sty, onToggle, onUpdate,
                         <input
                           type="file"
                           accept="image/jpeg,image/png,image/webp"
+                          capture="environment"
                           style={{ display: "none" }}
                           onChange={e => { onAddPhotos(e.target.files); e.target.value = ""; }}
                         />

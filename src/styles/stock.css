@@ -1,8 +1,24 @@
 /* Data Stok presentation, scoped away from ATTB and shared tables. */
 .stock-search-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.stock-card-table thead th { position: sticky; top: 0; z-index: 2; background: #0b2559; }
+[data-theme="dark"] .stock-card-table thead th { background: #0b1830; }
 .stock-mobile-summary { display: none; }
 .stock-mobile-direct-actions { display: none; }
 .stock-desktop-actions { display: contents; }
+/* Saklar Per Lokasi / Per Katalog. Geometri track menyalin .theme-switch di header,
+   warnanya versi terang karena dipakai di atas kertas putih, bukan header navy. */
+.stock-view-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 6px; border: 0; background: transparent; color: #64748b; font-size: 12px; font-weight: 700; cursor: pointer; }
+.stock-view-switch__track { position: relative; width: 46px; height: 24px; flex-shrink: 0; border: 1px solid #cbd5e1; border-radius: 999px; background: #e2e8f0; transition: background .18s ease, border-color .18s ease; }
+.stock-view-switch__knob { position: absolute; top: 1px; left: 1px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .18s ease; }
+.stock-view-switch.is-on .stock-view-switch__track { border-color: #1d4ed8; background: #1d4ed8; }
+.stock-view-switch.is-on .stock-view-switch__knob { transform: translateX(22px); }
+.stock-view-switch__label:first-of-type { color: #0f172a; }
+.stock-view-switch.is-on .stock-view-switch__label:first-of-type { color: inherit; }
+.stock-view-switch.is-on .stock-view-switch__label:last-of-type { color: #1d4ed8; }
+[data-theme="dark"] .stock-view-switch { color: #94a3b8; }
+[data-theme="dark"] .stock-view-switch__track { border-color: #475569; background: #334155; }
+[data-theme="dark"] .stock-view-switch__label:first-of-type { color: #e2e8f0; }
+[data-theme="dark"] .stock-view-switch.is-on .stock-view-switch__label:last-of-type { color: #93c5fd; }
 .stock-detail-keterangan { grid-column: 1 / -1; line-height: 1.45; }
 
 @media (max-width: 768px) {
@@ -32,12 +48,8 @@
   .stock-mobile-summary__meta .is-critical { color: #dc2626; }
   .stock-mobile-summary__meta .is-ok { color: #15803d; }
   .stock-card-table .mobile-card-table__row > td.mobile-card-table__title,
-  .stock-card-table .mobile-card-table__row > td[data-label="Kategori"],
   .stock-card-table .mobile-card-table__row > td[data-label="Qty"],
-  .stock-card-table .mobile-card-table__row > td[data-label="Gudang"],
-  .stock-card-table .mobile-card-table__row > td[data-label="Blok"],
-  .stock-card-table .mobile-card-table__row > td[data-label="Harga"],
-  .stock-card-table .mobile-card-table__row > td[data-label="Status"] { display: none !important; }
+  .stock-card-table .mobile-card-table__row > td[data-label="Lokasi"] { display: none !important; }
   .stock-card-table .mobile-card-table__row > td[data-label="Aksi"] { display: flex; grid-column: 2; grid-row: 2; justify-content: flex-end; padding: 0 12px 10px !important; border-top: 0; }
   .stock-card-table .mobile-card-table__row > td[data-label="Aksi"]::before { display: none !important; content: none; }
   .stock-mobile-direct-actions { display: flex; justify-content: flex-end; gap: 8px; }

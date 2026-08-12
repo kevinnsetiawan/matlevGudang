@@ -176,7 +176,7 @@ export function useStockOpname({ currentUser, showToast, stateRef, logApprovalHi
     // Foto ke Storage dulu (sama alasannya dengan updateStockFoto/saveStock — JANGAN
     // base64 mentah masuk jsonb stocks.data, insiden 2026-07-23 & 2026-07-28).
     let fotoUrl = null;
-    try { fotoUrl = await uploadStockFoto(newKatalogId, "fotoKeseluruhan", foto); }
+    try { fotoUrl = await uploadStockFoto(newKatalogId, "fotoKeseluruhan", foto, currentUser?.uptId); }
     catch (e) {
       console.warn("Upload foto material baru (opname) gagal:", newKatalogId, e?.message||e);
       showToast("Gagal upload foto ke server, coba lagi.","error"); return null;
@@ -193,6 +193,7 @@ export function useStockOpname({ currentUser, showToast, stateRef, logApprovalHi
     const newStock = {
       id: "STK-OPN-" + code + "-" + now,
       katalogId: newKatalogId, lokasiId: lokasiId || null,
+      uptId: currentUser?.uptId || null,
       qty: Number(qty) || 0, price: 0, minQty: 0, unit: satuan || "-",
       jenisBarang: "Non-Stock", name: nama, katalog: code,
       category: nama.split(";")[0].trim() || "Material",

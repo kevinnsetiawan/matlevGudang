@@ -4,14 +4,14 @@ import { UPT } from "../constants.js";
 import { supabase } from "../supabaseClient.js";
 import { fmtDateOnly, parseSAPNumber, uid } from "../lib/utils.js";
 import { fmtNum } from "../lib/ragShared.mjs";
-import { normalizeKatalog } from "../lib/sap.js";
+import { normalizeKatalog, resolveSapLabel } from "../lib/sap.js";
 import { logAudit } from "../lib/audit.js";
 import { can } from "../lib/perms.js";
 import { keepRemoteStockPhoto } from "../lib/stockCache.js";
 import * as XLSX from "xlsx";
 
 // Jenis Barang enum persis dipakai template migrasi stok (lihat scripts/gen_template_migrasi_stok.mjs).
-const TPL_JENIS_ENUM = new Set(["Persediaan", "Persediaan Bursa", "Pre Memory", "Cadang"]);
+const TPL_JENIS_ENUM = new Set(["Persediaan", "Persediaan Bursa", "Pre Memory", "Cadang", "Non-Stock"]);
 const tplNormUpt = v => String(v||"").trim().toLowerCase().replace(/^upt\s+/,"").replace(/\s+/g," ");
 const tplNormLoose = v => String(v||"").trim().toLowerCase().replace(/\s+/g," ");
 function tplNumOrNull(v) {
@@ -59,6 +59,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
   const [tplGuard, setTplGuard] = useState(null); // {ok, message, badRows}
   const [tplTargetUpt, setTplTargetUpt] = useState(null);
   const [tplBusy, setTplBusy] = useState(false);
+  const [tplSapMode, setTplSapMode] = useState("AUTO"); // "AUTO"|"SAP"|"NONSAP" — verifikasi Admin saat kolom "Status Material" kosong
   const [lastTplImport, setLastTplImport] = useState(null); // {katalogIdsBaru,stockIds,at,uptLabel,file} — undo import terakhir saja (YAGNI)
 
   // Parse CSV SAP format PEMAT
@@ -603,10 +604,10 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
   // ── Import Template Migrasi Stok (WARNOTO) — admin per-UPT memuat stok
   // mandiri via TEMPLATE_MIGRASI_STOK.xlsx (lihat scripts/gen_template_migrasi_stok.mjs). ──
   function downloadTplTemplate() {
-    const headers = ["UPT","No Katalog","Nama Material","Satuan","Jenis Barang","Merk","Type","Kategori","Qty","Harga Satuan","Min Qty","Gudang","Blok/Lokasi","Foto Nameplate","Foto Keseluruhan"];
-    const contoh = ["UPT Gresik","1060011","TRF ACC;NGR 70kV 200 Ohm","U","Persediaan","","","HAR-Transformator",3,15000000,1,"Gudang Ketintang","Rak A-1","",""];
+    const headers = ["UPT","No Katalog","Nama Material","Satuan","Jenis Barang","Status Material","Merk","Type","Kategori","Qty","Harga Satuan","Min Qty","Gudang","Blok/Lokasi","Foto Nameplate","Foto Keseluruhan"];
+    const contoh = ["UPT Gresik","1060011","TRF ACC;NGR 70kV 200 Ohm","U","Persediaan","SAP","","","HAR-Transformator",3,15000000,1,"Gudang Ketintang","Rak A-1","",""];
     const ws = XLSX.utils.aoa_to_sheet([headers, contoh]);
-    ws["!cols"] = [{wch:14},{wch:12},{wch:36},{wch:8},{wch:16},{wch:12},{wch:12},{wch:22},{wch:8},{wch:14},{wch:8},{wch:20},{wch:14},{wch:42},{wch:42}];
+    ws["!cols"] = [{wch:14},{wch:12},{wch:36},{wch:8},{wch:16},{wch:16},{wch:12},{wch:12},{wch:22},{wch:8},{wch:14},{wch:8},{wch:20},{wch:14},{wch:42},{wch:42}];
     const petunjuk = [
       ["PETUNJUK PENGISIAN — TEMPLATE MIGRASI DATA STOK WARNOTO"],
       [""],
@@ -614,6 +615,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
       ["2. Kolom WAJIB: UPT, No Katalog, Nama Material, Satuan, Jenis Barang, Qty."],
       ["   SATU file = SATU UPT — jangan campur data antar-UPT dalam 1 file."],
       ["3. Jenis Barang harus persis: Persediaan | Persediaan Bursa | Pre Memory | Cadang"],
+      ["   Status Material: SAP | Non-SAP (kosongkan = otomatis dari format kode katalog)"],
       ["4. Harga Satuan & Min Qty: angka saja, tanpa titik/koma/\"Rp\"."],
       ["5. Gudang & Blok/Lokasi: harus cocok Master Lokasi UPT tujuan, atau kosongkan (isi manual setelahnya)."],
       ["6. Foto: link URL https:// langsung tampil di aplikasi; boleh dikosongkan."],
@@ -680,6 +682,8 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         const nama = String(r["Nama Material"]||"").trim();
         const satuan = String(r["Satuan"]||"").trim();
         const jenisBarang = String(r["Jenis Barang"]||"").trim();
+        const statusMaterial = String(r["Status Material"]||"").trim().toUpperCase();
+        const sapStatus = statusMaterial === "NON-SAP" ? "Non-SAP" : statusMaterial === "SAP" ? "SAP" : "";
         const qty = tplNumOrNull(r["Qty"]);
         const errors = [];
         if (!noKat) errors.push("No Katalog kosong");
@@ -708,7 +712,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         if (errors.length === 0) { if (isNew) katalogBaru++; else katalogExisting++; }
 
         return {
-          excelRow, noKat, nama, satuan, jenisBarang,
+          excelRow, noKat, nama, satuan, jenisBarang, sapStatus,
           merk: String(r["Merk"]||"").trim(), type: String(r["Type"]||"").trim(), kategori: String(r["Kategori"]||"").trim(),
           qty: qty || 0, harga: tplNumOrNull(r["Harga Satuan"]) || 0, minQty: tplNumOrNull(r["Min Qty"]) || 0,
           gudangNama, blokKode, lokasiId, lokasiLabel,
@@ -757,6 +761,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
       const katalogIdsTouched = new Set();
       const katalogIdsBaru = [];
       validRows.forEach(r => {
+        const sapStatus = r.sapStatus || (tplSapMode==="SAP" ? "SAP" : tplSapMode==="NONSAP" ? "Non-SAP" : "");
         const existing = katalogByKode.get(r.noKat);
         if (existing) {
           katalogByKode.set(r.noKat, { ...existing,
@@ -765,6 +770,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
             merk: r.merk || existing.merk,
             type: r.type || existing.type,
             keterangan: r.kategori || existing.keterangan,
+            ...(sapStatus ? { sapStatus } : {}),
           });
           katalogIdsTouched.add(existing.id);
         } else {
@@ -774,6 +780,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
             category: r.kategori || r.nama.split(";")[0].trim() || "Material",
             jenisBarang: r.jenisBarang, satuan: r.satuan, merk: r.merk, type: r.type,
             keterangan: r.kategori, createdAt: now,
+            ...(sapStatus ? { sapStatus } : {}),
           });
           katalogIdsTouched.add(katId);
           katalogIdsBaru.push(katId);
@@ -786,6 +793,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
       const stockIdsTouched = new Set();
       validRows.forEach(r => {
         const kat = katalogByKode.get(r.noKat);
+        const sapStatus = r.sapStatus || (tplSapMode==="SAP" ? "SAP" : tplSapMode==="NONSAP" ? "Non-SAP" : "");
         const key = `${tplTargetUpt.id}|${kat.id}|${r.lokasiId||""}`;
         const existing = stocksByKey.get(key);
         const row = {
@@ -798,6 +806,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
           fotoNameplate: r.fotoNameplate || existing?.fotoNameplate,
           fotoKeseluruhan: r.fotoKeseluruhan || existing?.fotoKeseluruhan,
           sapBaselineQty: r.qty, sapBaselineAt: now,
+          ...(sapStatus ? { sapStatus } : {}),
           createdAt: existing?.createdAt || now, updatedAt: now,
         };
         stocksByKey.set(key, row);
@@ -823,7 +832,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         `${tplPreview?.lokasiKosong||0} lokasi belum termapping (isi manual), ${tplPreview?.foto||0} baris ada foto.`,
         "success"
       );
-      setTplRows(null); setTplPreview(null); setTplGuard(null); setTplFile(null); setTplTargetUpt(null);
+      setTplRows(null); setTplPreview(null); setTplGuard(null); setTplFile(null); setTplTargetUpt(null); setTplSapMode("AUTO");
     } catch (err) {
       showToast("Import gagal: " + err.message, "error");
     }
@@ -859,6 +868,65 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
     setTplBusy(false);
   }
 
+  // Blok "Import Histori Transaksi (TUG Lama)" — dipakai di 2 tempat: kolom kanan
+  // saat step==="upload" (sebelah Import Stok), dan posisi lama (di bawah, terpisah)
+  // untuk step wizard lain (preview/backup/done). Konten sama, gating sama, cuma posisi beda.
+  const histBlock = can(currentUser, "aksi.import", rolePerms) ? (
+    <div>
+      <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:10}}>Import Histori Transaksi (TUG Lama)</div>
+      <div className="migration-upload-card migration-upload-card--legacy" style={{...sty.card,borderLeft:"4px solid #7c3aed"}}>
+      <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
+      <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
+        Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.
+      </p>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:legacyTugRows?14:0}}>
+        <button style={sty.btn("ghost","sm")} onClick={downloadLegacyTugTemplate}>⬇️ Download Template</button>
+        <label style={{...sty.btn("primary","sm"),cursor:"pointer"}}>
+          📂 Upload File Excel
+          <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleLegacyTugFile}/>
+        </label>
+        {legacyTugRows && <button style={sty.btn("ghost","sm")} onClick={()=>{setLegacyTugRows(null);setLegacyTugChecked(new Set());}}>Upload Ulang</button>}
+      </div>
+      {legacyTugRows && (
+        <>
+          <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10,flexWrap:"wrap"}}>
+            <span>Total Dokumen: <b>{legacyTugRows.length}</b></span>
+            <span style={{color:C.green}}>Valid: <b>{legacyTugRows.filter(g=>g.errors.length===0 && !g.alreadyExists).length}</b></span>
+            <span style={{color:C.red}}>Error: <b>{legacyTugRows.filter(g=>g.errors.length>0).length}</b></span>
+            <span style={{color:"#92400e"}}>Sudah Ada: <b>{legacyTugRows.filter(g=>g.alreadyExists).length}</b></span>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:14}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
+                <tr>{["","No Dokumen","Jenis","Tanggal","Item","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {legacyTugRows.map(g => {
+                  const disabled = g.errors.length>0 || g.alreadyExists;
+                  const statusText = g.alreadyExists ? "Sudah ada, dilewati" : g.errors.length>0 ? g.errors.join("; ") : "OK";
+                  return (
+                    <tr key={g.docNo} style={{borderTop:`1px solid ${C.border}`,background:g.errors.length>0?"#fef2f2":g.alreadyExists?"#fefce8":undefined}}>
+                      <td style={{padding:"4px 8px"}}><input type="checkbox" checked={legacyTugChecked.has(g.docNo)} disabled={disabled} onChange={()=>toggleLegacyTugDoc(g.docNo)}/></td>
+                      <td style={{padding:"4px 8px",fontWeight:700}}>{g.docNo}</td>
+                      <td style={{padding:"4px 8px"}}>{g.docType||"-"}</td>
+                      <td style={{padding:"4px 8px"}}>{g.tanggal||"-"}</td>
+                      <td style={{padding:"4px 8px"}}>{g.items.length}</td>
+                      <td style={{padding:"4px 8px",fontWeight:700,color:g.errors.length>0?C.red:g.alreadyExists?"#92400e":C.green}}>{statusText}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button style={sty.btn("primary")} disabled={legacyTugBusy||legacyTugChecked.size===0} onClick={applyLegacyTugImport}>
+            {legacyTugBusy?"Menyimpan...":`Terapkan (${legacyTugChecked.size} dokumen)`}
+          </button>
+        </>
+      )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="admin-mobile-page migration-data-page">
       {/* Judul "Migrasi Data SAP/Non-SAP" sudah ditampilkan header Master Data
@@ -887,19 +955,23 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         </div>
       )}
 
-      {/* Step indicator */}
-      <div className="migration-stepper" style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
-        {["upload","preview","backup","done"].map((s,i)=>(
-          <div className={`migration-stepper__item${step===s?" is-current":""}`} key={s} style={{display:"flex",alignItems:"center",gap:4}}>
-            <div className="migration-stepper__number" style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
-            <span style={{fontSize:12,fontWeight:step===s?700:400,color:step===s?C.accent:C.muted,textTransform:"capitalize"}}>{s==="backup"?"Backup & Apply":s}</span>
-            {i<3 && <span className="migration-stepper__connector" style={{color:C.border,marginLeft:4}}>→</span>}
-          </div>
-        ))}
-      </div>
+      {/* Step indicator — hanya relevan saat sedang di dalam wizard cutover SAP (preview/backup/done) */}
+      {step!=="upload" && (
+        <div className="migration-stepper" style={{display:"flex",gap:4,marginBottom:20,flexWrap:"wrap"}}>
+          {["upload","preview","backup","done"].map((s,i)=>(
+            <div className={`migration-stepper__item${step===s?" is-current":""}`} key={s} style={{display:"flex",alignItems:"center",gap:4}}>
+              <div className="migration-stepper__number" style={{width:28,height:28,borderRadius:"50%",background:step===s?C.accent:["upload","preview","backup","done"].indexOf(step)>i?"#16a34a":"#e5e7eb",color:step===s?"white":["upload","preview","backup","done"].indexOf(step)>i?"white":"#9ca3af",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{i+1}</div>
+              <span style={{fontSize:12,fontWeight:step===s?700:400,color:step===s?C.accent:C.muted,textTransform:"capitalize"}}>{s==="backup"?"Backup & Apply":s}</span>
+              {i<3 && <span className="migration-stepper__connector" style={{color:C.border,marginLeft:4}}>→</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {step==="upload" && (
+        <div className="migration-upload-grid" style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:16,alignItems:"start"}}>
         <div>
+          <div style={{fontWeight:800,fontSize:13,color:C.text,marginBottom:10}}>Import Stok</div>
           <div className="migration-upload-card migration-upload-card--tpl" style={{...sty.card,marginBottom:12,borderLeft:"4px solid #16a34a"}}>
             <div style={{fontWeight:800,fontSize:16,marginBottom:4,color:"#166534"}}>📦 Import Data Stok (Template WARNOTO)</div>
             <p style={{fontSize:12,color:C.muted,marginBottom:10}}>Migrasi stok per-UPT: katalog, qty, harga, foto, lokasi. Untuk semua UPT.</p>
@@ -945,7 +1017,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
                 <div style={{...sty.card,padding:0,overflowX:"auto",marginBottom:12,maxHeight:300,overflowY:"auto"}}>
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:760}}>
                     <thead style={{background:C.sidebar,color:"white",position:"sticky",top:0}}>
-                      <tr>{["Baris","No Katalog","Nama","Jenis","Qty","Lokasi","Foto","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                      <tr>{["Baris","No Katalog","Nama","Jenis","Status SAP","Qty","Lokasi","Foto","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left",whiteSpace:"nowrap"}}>{h}</th>)}</tr>
                     </thead>
                     <tbody>
                       {tplRows.slice(0,200).map((r,i)=>(
@@ -954,6 +1026,7 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
                           <td style={{padding:"5px 8px",fontWeight:700,color:"#0098da"}}>{r.noKat||"-"}</td>
                           <td style={{padding:"5px 8px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.nama||"-"}</td>
                           <td style={{padding:"5px 8px"}}>{r.jenisBarang||"-"}</td>
+                          <td style={{padding:"5px 8px"}}>{resolveSapLabel(r.noKat, r.sapStatus || (tplSapMode==="SAP"?"SAP":tplSapMode==="NONSAP"?"Non-SAP":""))}</td>
                           <td style={{padding:"5px 8px",textAlign:"right"}}>{r.qty}</td>
                           <td style={{padding:"5px 8px"}}>{r.lokasiId ? r.lokasiLabel : <span style={{color:"#f59e0b"}}>— belum termapping</span>}</td>
                           <td style={{padding:"5px 8px",textAlign:"center"}}>{(r.fotoNameplate||r.fotoKeseluruhan)?"✅":"-"}</td>
@@ -965,18 +1038,27 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
                     </tbody>
                   </table>
                 </div>
+                <div style={{display:"flex",gap:14,alignItems:"center",flexWrap:"wrap",marginBottom:12,fontSize:12,color:C.text}}>
+                  <strong>Verifikasi Status Material:</strong>
+                  {[["AUTO","Otomatis (dari kode)"],["SAP","Semua SAP"],["NONSAP","Semua Non-SAP"]].map(([val,label])=>(
+                    <label key={val} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}>
+                      <input type="radio" name="tplSapMode" checked={tplSapMode===val} onChange={()=>setTplSapMode(val)}/>
+                      {label}
+                    </label>
+                  ))}
+                </div>
                 <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                   <button style={{...sty.btn("primary"),opacity:(!tplGuard?.ok||tplBusy)?0.6:1}} disabled={!tplGuard?.ok||tplBusy} onClick={applyTplImport}>
                     {tplBusy?"⏳ Menerapkan...":"✅ Terapkan Migrasi"}
                   </button>
-                  <button style={sty.btn("ghost")} disabled={tplBusy} onClick={()=>{setTplRows(null);setTplPreview(null);setTplGuard(null);setTplFile(null);setTplTargetUpt(null);}}>Upload Ulang</button>
+                  <button style={sty.btn("ghost")} disabled={tplBusy} onClick={()=>{setTplRows(null);setTplPreview(null);setTplGuard(null);setTplFile(null);setTplTargetUpt(null);setTplSapMode("AUTO");}}>Upload Ulang</button>
                 </div>
               </div>
             )}
           </div>
 
           <details className="migration-upload-card migration-upload-card--sap" style={{...sty.card,marginBottom:12}}>
-            <summary style={{fontWeight:700,cursor:"pointer"}}>Import SAP PEMAT</summary>
+            <summary style={{fontWeight:700,cursor:"pointer"}}>Cara lain / Legacy — Import dari export SAP (setup awal)</summary>
             <p style={{fontSize:12,color:C.muted,margin:"8px 0 10px"}}>Cutover awal dari export SAP (setup awal UPT Surabaya). Format CSV atau XLSX dengan kolom: Material, Material Description, Base Unit of Measure, Unrestricted Use Stock, Valuation Type, Harga Satuan.</p>
             <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
               <label style={{...sty.btn("primary"),cursor:"pointer"}}>
@@ -999,6 +1081,8 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
             )}
           </details>
           <ProgressBar/>
+        </div>
+        {histBlock}
         </div>
       )}
 
@@ -1218,57 +1302,12 @@ export function MigrasiDataTab({ stocks, katalogList, lokasiList, uptList, gudan
         </div>
       )}
 
-      {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas ── */}
-      {can(currentUser, "aksi.import", rolePerms) && (
-        <div className="migration-upload-card migration-upload-card--legacy" style={{...sty.card,marginTop:16,borderLeft:"4px solid #7c3aed"}}>
-          <div style={{fontWeight:800,fontSize:14,marginBottom:6,color:"#6d28d9"}}>🕘 Import Transaksi TUG Lama</div>
-          <p style={{fontSize:12,color:C.muted,marginBottom:12}}>
-            Import histori transaksi TUG lama yang belum tercatat di WARNOTO. Hasilnya <b>histori murni</b> berstatus APPROVED — TIDAK memutasi stok, TIDAK masuk antrian approval. Baris dengan No Dokumen sama digabung jadi 1 transaksi multi-barang.
-          </p>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:legacyTugRows?14:0}}>
-            <button style={sty.btn("ghost","sm")} onClick={downloadLegacyTugTemplate}>⬇️ Download Template</button>
-            <label style={{...sty.btn("primary","sm"),cursor:"pointer"}}>
-              📂 Upload File Excel
-              <input type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleLegacyTugFile}/>
-            </label>
-            {legacyTugRows && <button style={sty.btn("ghost","sm")} onClick={()=>{setLegacyTugRows(null);setLegacyTugChecked(new Set());}}>Upload Ulang</button>}
-          </div>
-          {legacyTugRows && (
-            <>
-              <div style={{display:"flex",gap:14,fontSize:12,marginBottom:10,flexWrap:"wrap"}}>
-                <span>Total Dokumen: <b>{legacyTugRows.length}</b></span>
-                <span style={{color:C.green}}>Valid: <b>{legacyTugRows.filter(g=>g.errors.length===0 && !g.alreadyExists).length}</b></span>
-                <span style={{color:C.red}}>Error: <b>{legacyTugRows.filter(g=>g.errors.length>0).length}</b></span>
-                <span style={{color:"#92400e"}}>Sudah Ada: <b>{legacyTugRows.filter(g=>g.alreadyExists).length}</b></span>
-              </div>
-              <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto",border:`1px solid ${C.border}`,borderRadius:8,marginBottom:14}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead style={{background:"#f9fafb",position:"sticky",top:0}}>
-                    <tr>{["","No Dokumen","Jenis","Tanggal","Item","Status"].map(h=><th key={h} style={{padding:"6px 8px",textAlign:"left"}}>{h}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {legacyTugRows.map(g => {
-                      const disabled = g.errors.length>0 || g.alreadyExists;
-                      const statusText = g.alreadyExists ? "Sudah ada, dilewati" : g.errors.length>0 ? g.errors.join("; ") : "OK";
-                      return (
-                        <tr key={g.docNo} style={{borderTop:`1px solid ${C.border}`,background:g.errors.length>0?"#fef2f2":g.alreadyExists?"#fefce8":undefined}}>
-                          <td style={{padding:"4px 8px"}}><input type="checkbox" checked={legacyTugChecked.has(g.docNo)} disabled={disabled} onChange={()=>toggleLegacyTugDoc(g.docNo)}/></td>
-                          <td style={{padding:"4px 8px",fontWeight:700}}>{g.docNo}</td>
-                          <td style={{padding:"4px 8px"}}>{g.docType||"-"}</td>
-                          <td style={{padding:"4px 8px"}}>{g.tanggal||"-"}</td>
-                          <td style={{padding:"4px 8px"}}>{g.items.length}</td>
-                          <td style={{padding:"4px 8px",fontWeight:700,color:g.errors.length>0?C.red:g.alreadyExists?"#92400e":C.green}}>{statusText}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <button style={sty.btn("primary")} disabled={legacyTugBusy||legacyTugChecked.size===0} onClick={applyLegacyTugImport}>
-                {legacyTugBusy?"Menyimpan...":`Terapkan (${legacyTugChecked.size} dokumen)`}
-              </button>
-            </>
-          )}
+      {/* ── Import Transaksi TUG Lama — histori murni, independen dari wizard cutover SAP di atas.
+           Saat step==="upload" blok ini sudah dirender di kolom kanan (lihat grid di atas),
+           di sini cuma untuk step wizard lain (preview/backup/done). ── */}
+      {step!=="upload" && histBlock && (
+        <div style={{marginTop:24,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+          {histBlock}
         </div>
       )}
     </div>

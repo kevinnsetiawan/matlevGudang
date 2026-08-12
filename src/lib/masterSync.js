@@ -44,10 +44,26 @@ export function subGudangKodeMap(subs) {
     if (map[sg.id]) return;
     const base = subGudangAbbr(sg.nama) || "SGD";
     let kode = base, n = 1;
-    while (used.has(kode)) { n++; kode = (base.slice(0,2) + n).slice(0,3); }
+    // Suffix WAJIB injektif terhadap n (tanpa .slice(0,3)) supaya kode selalu unik & loop
+    // pasti berhenti. Versi lama `(base.slice(0,2)+n).slice(0,3)` jenuh jadi "XY1" untuk n>=10
+    // (10+n→"XY10"→"XY1", 11→"XY1", ...) → kalau "XY1" sudah dipakai, while tak pernah keluar =
+    // freeze. Terjadi nyata: puluhan Sub Gudang "GUDANG TERBUKA/TERTUTUP ..." semua ber-abbr "TR.."
+    // → kolam suffix "TR#" habis → hang saat render ATTB (subGudangKodeMap dipanggil dgn list penuh).
+    while (used.has(kode)) { n++; kode = base.slice(0,2) + n; }
     used.add(kode); map[sg.id] = kode;
   });
   return map;
+}
+
+// Sort opsi Blok (kode -> nama -> id), dipakai PindahBlokModal & DataStokTab.
+export function sortBlokOptions(options) {
+  return [...options].sort((a, b) => {
+    const byKode = String(a?.kode || "").localeCompare(String(b?.kode || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byKode !== 0) return byKode;
+    const byNama = String(a?.nama || "").localeCompare(String(b?.nama || ""), "id", { numeric: true, sensitivity: "base" });
+    if (byNama !== 0) return byNama;
+    return String(a?.id || "").localeCompare(String(b?.id || ""), "id", { numeric: true, sensitivity: "base" });
+  });
 }
 
 export function getLokasiPetaInfo(lok, gdg, subGudangList) {
@@ -409,19 +425,4 @@ export async function seedMasterTableIfEmpty(table, defaults, extraCols) {
   if (existing.length > 0) return existing;
   await syncMasterTable(table, defaults, extraCols);
   return defaults;
-}
-
-// Upsert APPEND-ONLY (tidak pernah delete baris lain) — dipakai untuk domain
-// audit-log seperti Health Index Material Cadang (imports/runs/health_results/
-// ai_insights/apply_audit) yang tumbuh terus, bukan "daftar aktif" seperti
-// katalog/stocks. localStorage/CLOUD tetap sumber utama UI (dibaca saat load),
-// Supabase di sini murni backup/audit-trail — jadi tidak perlu delete-sync
-// simetris seperti syncMasterTable, cukup upsert baris baru saja.
-export async function syncMaterialCadangRows(table, rows, mapFn) {
-  if (isDemoMode()) return true; // mode demo: pura-pura sukses, tidak menulis Supabase
-  if (!supabase || !rows?.length) return false;
-  const mapped = rows.map(mapFn);
-  const { error } = await supabase.from(table).upsert(mapped, { onConflict: "id" });
-  if (error) { console.error(`syncMaterialCadangRows upsert(${table}): ${error.message}`, error); return false; }
-  return true;
 }

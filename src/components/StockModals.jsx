@@ -1,22 +1,31 @@
 // Modal-modal terkait stok & dokumen (dipindah dari App.jsx, refactor batch 1).
 // StockDetailModal (form tambah/edit stok), MaturityAssessmentModal (asesmen manual),
 // DocPreviewModal (preview & unduh dokumen TUG).
-import { JENIS_BARANG } from "../constants.js";
+import { JENIS_BARANG, STATUS_SAP } from "../constants.js";
 import { resolveStockPhotoUrl } from "../lib/stockCache.js";
+import { resolveSapLabel } from "../lib/sap.js";
 import { buildTUG9HTML, buildTUG10HTML, downloadTUG10HTML, buildTUG5HTML, buildTUG7HTML, downloadTUG5HTML, buildTUG3HTML, downloadTUG3HTML, downloadTUG9HTML, downloadTUG7HTML } from "../lib/docBuilders.js";
+import { SearchableSelect } from "./SearchableSelect.jsx";
 
-export function StockDetailModal({ stockModal, setStockModal, stockForm, setStockForm, katalogList, lokasiList, setLightboxImg, handleImg, saveStock, isMobile, sty, C }) {
+// Field-field form edit Data Stok — dipakai INLINE di dalam modal detail (App.jsx,
+// mode stockModal==="edit") supaya view+edit jadi SATU modal (bukan dua pop-up
+// berlapis). Dulunya bagian dari StockDetailModal (form tambah+edit terpisah),
+// tapi jalur "Tambah Data Stok Baru" sudah tidak ada pemanggilnya lagi — jadi ini
+// murni form edit sekarang.
+export function StockEditFields({ stockModal, stockForm, setStockForm, katalogList, lokasiList, setLightboxImg, handleImg, isMobile, sty, C }) {
   return (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:16}}>
-          <div style={{...sty.card,width:520,maxWidth:"100%",maxHeight:"90dvh",overflowY:"auto"}}>
-            <div style={sty.modalHeader}><span style={{fontWeight:800,fontSize:15}}>{stockModal==="edit"?"Edit Data Stok":"Tambah Data Stok Baru"}</span><button onClick={()=>setStockModal(null)} style={{background:"transparent",border:"none",color:"white",fontSize:24,lineHeight:1,cursor:"pointer",padding:0,opacity:0.85}}>×</button></div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:12}}>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Barang (dari Master Katalog)</label>
-                <select style={sty.select} value={stockForm.katalogId||""} onChange={e=>setStockForm(sf=>({...sf,katalogId:e.target.value}))}>
-                  <option value="">-- Pilih Barang --</option>
-                  {katalogList.map(k=><option key={k.id} value={k.id}>{k.name} [{k.katalog}]</option>)}
-                </select>
+                <SearchableSelect
+                  options={katalogList}
+                  value={stockForm.katalogId||""}
+                  onChange={id=>setStockForm(sf=>({...sf,katalogId:id}))}
+                  getLabel={k=>`${k.name} [${k.katalog}]`}
+                  getSearchText={k=>[k.name, k.katalog, k.category, k.jenisBarang, k.keterangan].filter(Boolean).join(" ")}
+                  placeholder="-- Cari nama / no katalog / kategori --"
+                  sty={sty} C={C} isMobile={isMobile}
+                />
                 {katalogList.length===0 && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>Belum ada Master Katalog. Tambahkan dulu di tab "Master Katalog".</div>}
               </div>
               <div style={{gridColumn:"1/-1"}}>
@@ -28,12 +37,28 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
                 {lokasiList.length===0 && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>Belum ada Blok Lokasi. Tambahkan dulu di Master Data → Master Gudang.</div>}
               </div>
               <div><label style={sty.label}>Harga Satuan (Rp)</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.price||0} onChange={e=>setStockForm(sf=>({...sf,price:Number(e.target.value)}))}/></div>
-              <div><label style={sty.label}>Qty di Lokasi Ini</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.qty||0} onChange={e=>setStockForm(sf=>({...sf,qty:Number(e.target.value)}))}/></div>
+              <div>
+                <label style={sty.label}>Qty di Lokasi Ini</label>
+                <input style={{...sty.input, ...(stockModal==="edit"?{background:"#f3f4f6",cursor:"not-allowed"}:{})}} type="number" inputMode="decimal" value={stockForm.qty||0} disabled={stockModal==="edit"} onChange={e=>setStockForm(sf=>({...sf,qty:Number(e.target.value)}))}/>
+                {stockModal==="edit" && <div style={{fontSize:12,color:"#6b7280",marginTop:4}}>Qty berubah lewat transaksi TUG, tidak diedit manual.</div>}
+              </div>
               <div><label style={sty.label}>Min Qty Alert</label><input style={sty.input} type="number" inputMode="decimal" value={stockForm.minQty||0} onChange={e=>setStockForm(sf=>({...sf,minQty:Number(e.target.value)}))}/></div>
               <div>
                 <label style={sty.label}>Jenis Barang</label>
                 <select style={sty.select} value={stockForm.jenisBarang||"Cadang"} onChange={e=>setStockForm(sf=>({...sf,jenisBarang:e.target.value}))}>{JENIS_BARANG.map(j=><option key={j}>{j}</option>)}</select>
                 {stockForm.jenisBarang==="Non-Stock" && <div style={{fontSize:12,color:"#be185d",marginTop:4}}>ℹ️ Barang khusus proyek — tidak dihitung dalam alert stok minimum</div>}
+              </div>
+              <div>
+                <label style={sty.label}>Status Material</label>
+                <select style={sty.select} value={stockForm.sapStatus||""} onChange={e=>setStockForm(sf=>({...sf,sapStatus:e.target.value}))}>
+                  <option value="">Otomatis (ikuti format no. katalog)</option>
+                  {STATUS_SAP.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+                {!stockForm.sapStatus && (
+                  <div style={{fontSize:12,color:C.muted,marginTop:4}}>
+                    Otomatis → {resolveSapLabel(stockForm.katalog || katalogList.find(k=>k.id===stockForm.katalogId)?.katalog, "")}
+                  </div>
+                )}
               </div>
               <div style={{gridColumn:"1/-1"}}>
                 <label style={sty.label}>Foto Kondisi Barang (opsional)</label>
@@ -63,12 +88,6 @@ export function StockDetailModal({ stockModal, setStockModal, stockForm, setStoc
                 <div style={{gridColumn:"1/-1",fontSize:12,color:C.muted}}>ℹ️ Data hasil import SAP (PEMAT) — foto Nameplate/Keseluruhan akan disinkronkan saat import data PEMAT berikutnya, tidak wajib diisi sekarang.</div>
               )}
             </div>
-            <div style={sty.stickyFooter}>
-              <button style={{...sty.btn("ghost"),flex:1}} onClick={()=>setStockModal(null)}>Batal</button>
-              <button style={{...sty.btn("primary"),flex:2}} onClick={saveStock}>💾 Simpan ke Cloud</button>
-            </div>
-          </div>
-        </div>
   );
 }
 

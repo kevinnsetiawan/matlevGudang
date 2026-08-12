@@ -2,6 +2,7 @@
 // App.jsx (refactor Fase 3c). Pure string/data ops, tanpa React/state/supabase.
 // CATEGORY_SYNONYMS/QUERY_SYNONYMS dipakai internal oleh mesin pencarian.
 import { subGudangKodeMap } from "./masterSync.js";
+import { getSAPLabel, resolveSapLabel as resolveSapLabelShared, rowSapLabel } from "./ragShared.mjs";
 
 // ─── PENCARIAN MATERIAL: struktur nama (KATEGORI;SUBTIPE;SPEK...) di katalog
 // TIDAK diubah — hanya cara membandingkannya saat search yang disesuaikan,
@@ -143,23 +144,31 @@ export function queryTokenGroups(query) {
 // memunculkan barang yang salah klasifikasi. Kata yang lebih panjang (>=3
 // huruf) tetap dicocokkan sebagai prefix supaya bisa diketik sebagian
 // ("trans" -> "transformator", "550" -> "550mm2").
-// Untuk pencarian server-side (Supabase `.ilike`, mis. cari referensi MARA) yang
-// tidak bisa memakai expandHaystackSynonyms/queryTokenGroups di sisi klien
-// (haystack-nya ada di database, bukan di memori). Cari padanan tiap kata yang
-// diketik lewat QUERY_SYNONYMS (1:1) DAN CATEGORY_SYNONYMS (reverse lookup: kalau
-// kata yang diketik ada di deskripsi suatu kategori, ikutkan singkatannya juga —
-// mis. "pemutus" -> ikut cari "cb"). Dibatasi 6 istilah biar query `.or()` tidak
-// terlalu panjang.
-export function expandQueryForIlikeSearch(query) {
-  const words = normalizeSearchText(query).split(" ").filter(Boolean);
-  const terms = new Set([query.trim()]);
-  words.forEach(w => {
-    if (QUERY_SYNONYMS[w]) QUERY_SYNONYMS[w].split(" ").forEach(s => terms.add(s));
+// Pencarian MARA per-kata untuk Supabase `.ilike` (menggantikan expandQueryForIlikeSearch
+// yang lama menaruh seluruh FRASA sebagai satu ilike → menuntut substring kontigu sesuai
+// urutan/format). Tiap KATA yang diketik jadi grup alternatif: kata itu sendiri + sinonim
+// 1:1 (QUERY_SYNONYMS) + singkatan kategori reverse (CATEGORY_SYNONYMS, mis. "pemutus"->"cb").
+// AND antar kata, OR dalam grup → order/format-independent, bisa cari per-kata material.
+export function maraQueryGroups(query) {
+  return normalizeSearchText(query).split(" ").filter(Boolean).map(w => {
+    const alts = new Set([w]);
+    if (QUERY_SYNONYMS[w]) QUERY_SYNONYMS[w].split(" ").forEach(s => alts.add(s));
     Object.entries(CATEGORY_SYNONYMS).forEach(([abbr, desc]) => {
-      if (desc.split(" ").includes(w)) terms.add(abbr);
+      if (desc.split(" ").includes(w)) alts.add(abbr);
     });
+    return Array.from(alts);
   });
-  return Array.from(terms).filter(Boolean).slice(0, 6);
+}
+
+// Terapkan maraQueryGroups ke query builder Supabase pada kolom `nama`. Tiap grup jadi
+// satu `.or(...)`; beberapa `.or()` yang dirantai di-AND-kan oleh PostgREST → AND-of-OR.
+// ponytail: ilike %x% seq-scan (tak ada index trigram); cukup utk interaktif limit kecil,
+// upgrade ke pg_trgm/tsvector kalau mara_catalog membesar signifikan.
+export function applyMaraNameSearch(builder, query) {
+  return maraQueryGroups(query).reduce(
+    (b, alts) => b.or(alts.map(t => `nama.ilike.%${t}%`).join(",")),
+    builder
+  );
 }
 
 export function matchesMaterialSearch(fields, query) {
@@ -209,18 +218,44 @@ export function statusMaterialBadgeStyle(status) {
 //   anything else        → Non-SAP
 export function getSAPStatus(katalog) {
   if (!katalog || katalog.trim() === "") return "Non-SAP";
-  const k = katalog.trim();
+  const k = katalog.trim().replace(/^0+/, "");
   if (/^\d{10}$/.test(k)) return "SAP";
   if (/^\d{7,8}$/.test(k)) return "SAP";
   return "Non-SAP";
 }
 
-// getSAPLabel pindah ke src/lib/ragShared.mjs (dipakai bersama nightly_sync.mjs).
-export function getSAPBadgeStyle(katalog) {
-  return getSAPStatus(katalog) === "SAP"
-    ? { bg:"#dbeafe", fg:"#1d4ed8" }
-    : { bg:"#f3f4f6", fg:"#6b7280" };
+// Override eksplisit menang; "SAP" tetap pakai turunan Persediaan/Cadang, fallback generic bila kode non-numerik.
+// STATUS_SAP[0]/[1] ("SAP — Persediaan"/"SAP — Cadang") = user memaksa label spesifik secara
+// eksplisit (mis. dari form Edit), lolos apa pun format kode katalognya. "Non-SAP" dan "SAP"
+// lama TIDAK diubah perilakunya — data hasil import lama memakai keduanya.
+export function resolveSapLabel(code, override) { return resolveSapLabelShared(code, override); }
+export function katalogSapLabel(k) { return resolveSapLabel(k?.katalog, k?.sapStatus); }
+export function katalogSapStatus(k) {
+  if (k?.sapStatus === "Non-SAP") return "Non-SAP";
+  // Nilai apa pun yang diawali "SAP" ("SAP", "SAP — Persediaan", "SAP — Cadang") = status SAP.
+  if (String(k?.sapStatus || "").startsWith("SAP")) return "SAP";
+  return getSAPStatus(k?.katalog);
 }
+
+// getSAPLabel pindah ke src/lib/ragShared.mjs (dipakai bersama nightly_sync.mjs).
+// Badge 3-warna berdasar LABEL (SAP — Persediaan / SAP — Cadang / Non-SAP),
+// bukan cuma SAP vs Non-SAP. Dipakai kolom Status Data Stok agar 3 status
+// terbedakan warnanya; material Non-SAP (input manual) dipaksa lewat label.
+export function sapBadgeStyleForLabel(label) {
+  const l = String(label || "");
+  if (l.includes("Cadang")) return { bg:"#fee2e2", fg:"#b91c1c" };
+  if (l.includes("Persediaan")) return { bg:"#dbeafe", fg:"#1d4ed8" };
+  return { bg:"#f3f4f6", fg:"#6b7280" }; // Non-SAP
+}
+export function getSAPBadgeStyle(katalog) {
+  return sapBadgeStyleForLabel(getSAPLabel(katalog));
+}
+
+// Label status SAP untuk sebuah Data Stok. Override manual (sapStatus terisi, mis. user
+// memilih dari form Edit) SELALU menang. Kalau kosong, baru berlaku heuristik lama: material
+// non-stock yg baru diupload (id STK-PREMEM-*) = Non-SAP (kandidat masuk SAP, belum terdaftar).
+// Perubahan urutan ini DISENGAJA (2026-08-11, keputusan arsitek) — bukan regresi.
+export function stockSapLabel(stock) { return rowSapLabel(stock); }
 
 // Accent color per Jenis Barang, used on the printable QR label
 export function jenisBarangAccentColor(jenisBarang) {
@@ -267,7 +302,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const stockRow = (stocks||[]).find(s=>s.id===si.stockId);
         if (stockRow && stockRow.katalogId === katalogId) {
           const lok = (lokasiList||[]).find(l=>l.id===stockRow.lokasiId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
+          events.push({ docType: t.docType, tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.[t.docType==="TUG9"?"tug9":"tug8"], masuk:0, keluar:si.qty, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG10") {
@@ -275,7 +310,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===t.lokasiTujuanId);
-          events.push({ tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
+          events.push({ docType: "TUG10", tgl: t.approvedAt||t.createdAt, noBon: t.docNumbers?.tug10, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: t.namaPekerjaan||"-" });
         }
       });
     } else if (t.docType === "TUG3" && t.stage === "APPROVED") {
@@ -283,7 +318,7 @@ export function buildKartuGantungHistory(katalog, txns, stocks, lokasiList, subG
         const isMatch = si.katalogMode==="existing" ? si.katalogId===katalogId : si.namaBaru===katalog.name;
         if (isMatch) {
           const lok = (lokasiList||[]).find(l=>l.id===si.lokasiTujuanId);
-          events.push({ tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
+          events.push({ docType: "TUG3", tgl: t.approvedAtAsman||t.createdAt, noBon: t.docNumbers?.tug3, masuk:si.qty, keluar:0, rak: lok?.kode||"-", subGudang: resolveSubGudang(lok), catatan: `Penerimaan dari ${t.dariSupplier||"-"}` });
         }
       });
     }

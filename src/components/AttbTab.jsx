@@ -1,7 +1,7 @@
 // Komponen AttbTab — dipindah dari App.jsx (refactor Fase 5b).
 import { useState, useEffect, Fragment } from "react";
 import { UIT } from "../constants.js";
-import { hasRole, getUserUptScope, roleTier } from "../lib/roles.js";
+import { hasRole, getUserUptScope, roleTier, getScopeUptIds } from "../lib/roles.js";
 import { getLokasiPetaInfo, subGudangKodeMap } from "../lib/masterSync.js";
 import { ATTB_CORE_FIELDS, ATTB_FIELDS_BY_JENIS, ATTB_JENIS_ASET, ATTB_JENIS_ASET_LABEL, ATTB_STAGE2_FIELDS, ATTB_STAGE3_FIELDS, ATTB_STAGE4_FIELDS, ATTB_STAGE5_FIELDS, ATTB_STAGES, attbStageIndex, attbStageLabel, canApproveAttb, isPendingAttbApproval, parseAttbMaterialFile2, parseAttbMaterialFile4 } from "../lib/attb.js";
 import * as XLSX from "xlsx";
@@ -178,7 +178,16 @@ export function AttbTab({ attbList, currentUser, uptList, users, sty, C, createI
     }
   }
 
-  const uptOptions = Array.from(new Set(attbList.map(a=>a.upt).filter(Boolean))).sort();
+  // Opsi filter UPT dari CAKUPAN viewer (semua UPT yang boleh dilihat), bukan cuma UPT yang
+  // sudah punya data ATTB — supaya global/UIT bisa memilih UPT mana pun (termasuk yang datanya
+  // masih kosong). Nama dipangkas prefix "UPT " agar cocok dengan attb.upt (tersimpan terpangkas).
+  const attbScopeIds = getScopeUptIds(currentUser, uptList);
+  const uptOptions = Array.from(new Set(
+    (uptList||[])
+      .filter(u => attbScopeIds === null || attbScopeIds.includes(u.id))
+      .map(u => (u.nama||"").replace(/^UPT\s+/i,"").trim())
+      .filter(Boolean)
+  )).sort();
   const scopedList = attbList.filter(a => !effectiveUptFilter || a.upt===effectiveUptFilter);
   const stageCounts = ATTB_STAGES.reduce((acc,s)=>{ acc[s.code]=scopedList.filter(a=>a.stage===s.code).length; return acc; }, {});
   const belumLanjutCount = scopedList.filter(a=>a.lanjutBelumLanjut).length;

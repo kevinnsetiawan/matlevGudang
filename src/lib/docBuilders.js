@@ -3,8 +3,9 @@
 // kembalikan string HTML / buka window cetak. Tanpa React/state.
 import { PLN_LOGO_DATA_URI } from "../assets/plnLogoBase64.js";
 import QRCode from "qrcode";
-import { fmtNum, getSAPLabel } from "./ragShared.mjs";
-import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari } from "./utils.js";
+import { fmtNum } from "./ragShared.mjs";
+import { katalogSapLabel } from "./sap.js";
+import { fmtDate, fmtDateOnly, fmtRp, generateDocNumbers, terbilangHari, scanUrlFor } from "./utils.js";
 import { COMPANY, UIT, UPT, WAREHOUSE, DOC_CODE } from "../constants.js";
 import { getHeavyEquipmentLoanOwnerUpt, getHeavyEquipmentLoanRequesterUpt } from "./heavyEquipment.js";
 import { buildKartuGantungHistory, resolveLokasiLengkap } from "./sap.js";
@@ -1426,10 +1427,10 @@ export function downloadTUG9HTML(txn, stocks, users, satpamList, showToast, uptL
 export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
   const labels = await Promise.all(katalogItems.map(async (k) => {
-    const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(k.id)}`;
+    const scanUrl = scanUrlFor(k.id);
     const qr = await QRCode.toDataURL(scanUrl, { margin: 1, width: 220 });
     const lok = (lokasiByKatalog[k.id] || []).join("; ") || "-";
-    return `<div class="label"><img src="${qr}" alt="QR"/><div class="nm">${esc(k.name || "-")}</div><div class="kt">No. Kat: ${esc(k.katalog || "-")}</div><div class="meta">${esc(k.jenisBarang || "-")} · ${esc(getSAPLabel(k.katalog))}</div><div class="lk">📍 ${esc(lok)}</div></div>`;
+    return `<div class="label"><img src="${qr}" alt="QR"/><div class="nm">${esc(k.name || "-")}</div><div class="kt">No. Kat: ${esc(k.katalog || "-")}</div><div class="meta">${esc(k.jenisBarang || "-")} · ${esc(katalogSapLabel(k))}</div><div class="lk">📍 ${esc(lok)}</div></div>`;
   }));
   return `<!doctype html><html lang="id"><head><meta charset="utf-8"/><title>Cetak Barcode Kartu Gantung — ${labels.length} label</title>
 <style>
@@ -1457,7 +1458,7 @@ export async function buildBarcodeSheetHTML(katalogItems, lokasiByKatalog) {
 // Halaman 1 (Depan): Header + Metadata + Foto Barang + QR Code
 export async function buildTUG2FrontHTML(katalog, stocks, lokasiList, subGudangList, gudangList, uptNama) {
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
-  const scanUrl = `${window.location.origin}/?scan=${encodeURIComponent(katalog.id)}`;
+  const scanUrl = scanUrlFor(katalog.id);
   const qrDataUrl = await QRCode.toDataURL(scanUrl, { margin: 1, width: 280 });
 
   // "Lokasi :" di header kartu = gabungan Gudang + Sub Gudang + Blok Gudang.

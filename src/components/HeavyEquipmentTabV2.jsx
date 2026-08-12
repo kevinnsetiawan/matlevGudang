@@ -42,6 +42,9 @@ function EquipmentPhotoInput({ foto, nama, handleImg, setForm, sty, C, showToast
 export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList, users, sty, C, handleImg, saveEdit, createEquipment, createLoan, approveLoan, rejectLoan, completeLoan, showToast }) {
   const myUpt = getUserUptScope(currentUser, uptList);
   const isMSB = currentUser?.role === "MSB" || currentUser?.role === "Manager UIT";
+  // SUPERADMIN/Pusat tak punya UPT sendiri (myUpt kosong) → tak bisa dikunci sebagai peminjam.
+  // Mereka (dan MSB) memilih UPT peminjam manual lewat selector; UPT ADMIN/TL biasa tetap terkunci.
+  const canChooseRequesterUpt = isMSB || !myUpt;
   // Dulu 2 sub-tab terpisah ("List Alat" vs "Peminjaman & Histori") dengan filter UPT yang
   // di-reset kontradiktif tiap pindah tab (list pakai UPT sendiri, loans di-reset ke "Semua UPT"
   // padahal unifiedLoans-nya sendiri tidak pernah benar-benar difilter UPT) — digabung jadi 1
@@ -101,7 +104,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
   // Ajukan Peminjaman = "kita mau pinjam alat", jadi alat yang ditawarkan HARUS di luar UPT
   // sendiri (non-MSB) — pinjam alat sendiri lewat form sendiri tidak masuk akal. MSB/Manager UIT
   // memfasilitasi peminjaman UPT mana pun, jadi tetap lihat semua alat.
-  const borrowableEquipment = equipmentList.filter(e => e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat) && (isMSB || e.upt!==myUpt));
+  const borrowableEquipment = equipmentList
+    .filter(e => e.availabilityStatus!=="DIPINJAM" && !["MAINTENANCE","KIR"].includes(e.statusAlat) && (isMSB || e.upt!==myUpt))
+    .sort((a,b) => (a.upt||"").localeCompare(b.upt||"") || (a.nama||"").localeCompare(b.nama||""));
   const selectedEquipment = equipmentList.find(e=>e.id===loanForm.equipmentId);
   const requesterOptions = selectedEquipment ? uptOptions.filter(u=>u!==selectedEquipment.upt) : uptOptions;
   const pendingCount = scopedLoans.filter(isPendingHeavyEquipmentLoan).length;
@@ -277,31 +282,9 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
         ) : null}
       />
 
-      {/* Blok khusus Overdue — sekarang discope ke UPT yang sedang di-scope (dulu tidak difilter
-          UPT sama sekali, jadi overdue milik UPT lain ikut nongol & bisa "Ditandai Kembali" oleh
-          Admin/TL/Asman Surabaya yang tidak ada urusan sama sekali — keluhan user 2026-07-06). */}
-      {overdueCount > 0 && (
-        <div className="operations-alert is-danger" style={{...sty.card,marginBottom:12,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
-          <div style={{fontWeight:800,fontSize:13,marginBottom:10,color:C.red}}>Alat melewati jadwal pengembalian ({overdueCount})</div>
-          {scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").map(l=>{
-            const eq = equipmentList.find(e=>e.id===l.equipmentId);
-            const pemohon = users.find(u=>u.id===l.requestedBy);
-            return (
-              <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10,flexWrap:"wrap"}}>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700}}>{eq?.nama||l.equipmentId} • {l.ownerUpt} → {l.requesterUpt}</div>
-                  <div style={{fontSize:12,color:C.muted}}>Rencana kembali: {l.tanggalKembali||"-"} • {l.namaPekerjaan||"-"} • Diajukan oleh {pemohon?.name||"?"}</div>
-                </div>
-                {hasRole(currentUser, "ADMIN","TL","ASMAN") && (
-                  <button style={sty.btn("success","sm")} onClick={()=>completeLoan(l.id)}>Tandai Kembali</button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Mode switch (pola dashboard) — ringkasan/overdue di atas tetap tampil di kedua mode */}
+      {/* Mode switch (pola dashboard) — "Daftar Alat" murni armada; overdue/approval/histori
+          hanya di channel "Peminjaman & Histori" (blok overdue dipindah ke sana, 2026-08-10:
+          dulu di atas mode-switch jadi bocor di atas Daftar Alat — keluhan super admin). */}
       <div className="dashboard-mode-switch" role="tablist" aria-label="Tampilan alat berat" style={{marginBottom:12}}>
         {[{id:"armada",label:"Daftar Alat",caption:"Registry & kondisi armada"},{id:"peminjaman",label:"Peminjaman & Histori",caption:"Pengajuan, approval, dan riwayat"}].map(item=>(
           <button key={item.id} className={viewMode===item.id?"is-active":""} onClick={()=>setViewMode(item.id)} role="tab" aria-selected={viewMode===item.id}>
@@ -402,7 +385,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
             <div style={{fontSize:13,fontWeight:900,marginBottom:10}}>Ajukan Peminjaman</div>
             <div style={{marginBottom:8}}>
               <label style={sty.label}>Alat {!isMSB && <span style={{fontWeight:400,color:C.muted}}>(di luar UPT {myUpt||"Surabaya"})</span>}</label>
-              <select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:isMSB?"":(myUpt||"")}))}>
+              <select style={sty.select} value={loanForm.equipmentId} onChange={e=>setLoanForm(f=>({...f,equipmentId:e.target.value,requesterUpt:canChooseRequesterUpt?"":(myUpt||"")}))}>
                 <option value="">-- Pilih alat --</option>
                 {borrowableEquipment.map(e=><option key={e.id} value={e.id}>{e.upt} — {e.nama} ({e.kapasitas||"-"})</option>)}
               </select>
@@ -410,7 +393,7 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
             </div>
             <div style={{marginBottom:8}}>
               <label style={sty.label}>UPT Peminjam</label>
-              {isMSB ? (
+              {canChooseRequesterUpt ? (
                 <select style={sty.select} value={loanForm.requesterUpt} onChange={e=>setLoanForm(f=>({...f,requesterUpt:e.target.value}))}>
                   <option value="">-- Pilih UPT --</option>
                   {requesterOptions.map(u=><option key={u} value={u}>{u}</option>)}
@@ -432,6 +415,28 @@ export function HeavyEquipmentTabV2({ equipmentList, loans, currentUser, uptList
           <div style={{fontSize:12,fontWeight:800,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
             {uptFilterControllable && !myUptSelected ? "Peminjaman & Histori — Semua UPT" : `Peminjaman & Histori — UPT ${effectiveUptFilter||myUpt||"Surabaya"}`}
           </div>
+          {/* Blok Overdue disatukan di atas daftar Peminjaman & Histori (discope UPT aktif) — dulu
+              di atas mode-switch jadi bocor ke channel Daftar Alat (keluhan super admin 2026-08-10). */}
+          {overdueCount > 0 && (
+            <div className="operations-alert is-danger" style={{...sty.card,marginBottom:8,borderLeft:`4px solid ${C.red}`,background:"#fef2f2"}}>
+              <div style={{fontWeight:800,fontSize:13,marginBottom:10,color:C.red}}>Alat melewati jadwal pengembalian ({overdueCount})</div>
+              {scopedLoans.filter(l=>l.runtimeStatus==="OVERDUE").map(l=>{
+                const eq = equipmentList.find(e=>e.id===l.equipmentId);
+                const pemohon = users.find(u=>u.id===l.requestedBy);
+                return (
+                  <div key={l.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${C.border}`,gap:10,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700}}>{eq?.nama||l.equipmentId} • {l.ownerUpt} → {l.requesterUpt}</div>
+                      <div style={{fontSize:12,color:C.muted}}>Rencana kembali: {l.tanggalKembali||"-"} • {l.namaPekerjaan||"-"} • Diajukan oleh {pemohon?.name||"?"}</div>
+                    </div>
+                    {hasRole(currentUser, "ADMIN","TL","ASMAN") && (
+                      <button style={sty.btn("success","sm")} onClick={()=>completeLoan(l.id)}>Tandai Kembali</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="equipment-loan-list" style={{display:"flex",flexDirection:"column",gap:8,maxHeight:640,overflowY:"auto"}}>
             {unifiedLoans.length===0 && <div style={{...sty.card,textAlign:"center",color:C.muted,padding:20,fontSize:13}}>Belum ada data peminjaman.</div>}
             {unifiedLoans.map(loan=>{

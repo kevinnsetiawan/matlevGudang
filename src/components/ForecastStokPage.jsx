@@ -283,6 +283,12 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
 
   return (
     <div className="workspace-page forecast-page">
+      <div className="forecast-view-switch" role="tablist" aria-label="Tampilan forecast">
+        <button className={forecastView==="forecast"?"is-active":""} onClick={()=>setForecastView("forecast")} role="tab" aria-selected={forecastView==="forecast"}>Forecast Stok</button>
+        <button className={forecastView==="material_cadang"?"is-active":""} onClick={()=>setForecastView("material_cadang")} role="tab" aria-selected={forecastView==="material_cadang"}>Material Cadang</button>
+        <button className={forecastView==="procurement"?"is-active":""} onClick={()=>setForecastView("procurement")} role="tab" aria-selected={forecastView==="procurement"}>Rekomendasi Pengadaan</button>
+      </div>
+
       {forecastView==="forecast" && (
         <section className="forecast-overview kpi-banner">
           <div className="forecast-overview__copy"><span>Proyeksi persediaan · {WAREHOUSE}</span><strong>Fokus pada material yang paling cepat membutuhkan tindakan</strong><small>Heuristik tersedia untuk seluruh material; prediksi ML muncul saat histori transaksi mencukupi.</small></div>
@@ -295,36 +301,32 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
         </section>
       )}
 
-      <div className="forecast-view-switch" role="tablist" aria-label="Tampilan forecast">
-        <button className={forecastView==="forecast"?"is-active":""} onClick={()=>setForecastView("forecast")} role="tab" aria-selected={forecastView==="forecast"}>Forecast Stok</button>
-        <button className={forecastView==="material_cadang"?"is-active":""} onClick={()=>setForecastView("material_cadang")} role="tab" aria-selected={forecastView==="material_cadang"}>Material Cadang</button>
-        <button className={forecastView==="procurement"?"is-active":""} onClick={()=>setForecastView("procurement")} role="tab" aria-selected={forecastView==="procurement"}>Rekomendasi Pengadaan</button>
-      </div>
+      {forecastView==="procurement" && (
+        <section className="forecast-overview kpi-banner forecast-cockpit-head">
+          <div className="forecast-overview__copy">
+            <span>Cockpit pengadaan</span>
+            <strong>Rekomendasi Pengadaan</strong>
+            <small>Gabungan kesehatan Material Cadang dan usulan beli — read-only, aksi tetap di tab Material Cadang.</small>
+            {showLens && (
+              <select className="forecast-cockpit-lens" value={uptLens} onChange={e=>setUptLens(e.target.value)}>
+                <option value="ALL">Agregat (semua UPT)</option>
+                {uptScopeOptions.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="forecast-overview__metrics">
+            <div><span>Spare Kritis</span><strong>{cockpitHealth.summary.healthCounts.Critical||0}</strong></div>
+            <div><span>Spare Kurang</span><strong>{cockpitHealth.summary.kurang}</strong></div>
+            <div><span>Spare Kosong</span><strong>{cockpitHealth.summary.kosong}</strong></div>
+            <div><span>Butuh tindakan</span><strong>{procurementList.length}</strong></div>
+            <div><span>Total usulan qty</span><strong>{fmtNum(procurementTotalQty)}</strong></div>
+            <div><span>Estimasi nilai</span><strong>{procurementTotalValue>0?`Rp ${procurementTotalValue.toLocaleString("id-ID")}`:"-"}</strong></div>
+          </div>
+        </section>
+      )}
 
       {forecastView==="procurement" ? (
         <>
-          <section className="forecast-overview kpi-banner forecast-cockpit-head">
-            <div className="forecast-overview__copy">
-              <span>Cockpit pengadaan</span>
-              <strong>Rekomendasi Pengadaan</strong>
-              <small>Gabungan kesehatan Material Cadang dan usulan beli — read-only, aksi tetap di tab Material Cadang.</small>
-              {showLens && (
-                <select className="forecast-cockpit-lens" value={uptLens} onChange={e=>setUptLens(e.target.value)}>
-                  <option value="ALL">Agregat (semua UPT)</option>
-                  {uptScopeOptions.map(u=><option key={u.id} value={u.id}>{u.nama}</option>)}
-                </select>
-              )}
-            </div>
-            <div className="forecast-overview__metrics">
-              <div><span>Spare Kritis</span><strong>{cockpitHealth.summary.healthCounts.Critical||0}</strong></div>
-              <div><span>Spare Kurang</span><strong>{cockpitHealth.summary.kurang}</strong></div>
-              <div><span>Spare Kosong</span><strong>{cockpitHealth.summary.kosong}</strong></div>
-              <div><span>Butuh tindakan</span><strong>{procurementList.length}</strong></div>
-              <div><span>Total usulan qty</span><strong>{fmtNum(procurementTotalQty)}</strong></div>
-              <div><span>Estimasi nilai</span><strong>{procurementTotalValue>0?`Rp ${procurementTotalValue.toLocaleString("id-ID")}`:"-"}</strong></div>
-            </div>
-          </section>
-
           {showLens && uptLens==="ALL" && perUptStrip.length>0 && (
             <div className="forecast-cockpit-strip">
               {perUptStrip.map(item=>(
@@ -453,7 +455,7 @@ export function ForecastStokPage({ katalogList, setKatalogList, stocks, allStock
           katalogList={katalogList} setKatalogList={setKatalogList}
           stocks={stocks} allStocks={allStocks} setStocks={setStocks} gudangList={gudangList} lokasiList={lokasiList}
           txns={txns} currentUser={currentUser} sty={sty} C={C}
-          saveToCloud={saveToCloud} showToast={showToast} users={users}
+          saveToCloud={saveToCloud} showToast={showToast} users={users} uptList={uptList}
         />
       ) : (
         <>
