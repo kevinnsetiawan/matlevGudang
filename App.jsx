@@ -526,6 +526,7 @@ export default function PLNWarehouse() {
   const stockFormSnapshotRef = useRef(null); // snapshot stockForm saat masuk mode edit, buat cek isDirty
   const stockDetailTriggerRef = useRef(null); // elemen pemicu, difokuskan balik saat modal detail ditutup
   const stockDetailModalRef = useRef(null);
+  const [stockForm, setStockForm] = useState({});
   const stockFormDirty = stockModal === "edit" && stockFormSnapshotRef.current
     ? JSON.stringify(stockFormSnapshotRef.current) !== JSON.stringify(stockForm)
     : false;
@@ -577,7 +578,6 @@ export default function PLNWarehouse() {
   const [pendingFoto, setPendingFoto] = useState({}); // foto yang baru dipilih tapi belum diklik "Simpan Foto" — {fotoNameplate, fotoKeseluruhan}
   const [lightboxImg, setLightboxImg] = useState(null); // src foto yang sedang di-overview full-screen
   const [scannerTarget, setScannerTarget] = useState(null); // "stockForm" | {index}
-  const [stockForm, setStockForm] = useState({});
   const [toast, setToast] = useState(null);
 
   const [chatHistory, setChatHistory] = useState([{ role:"ai", text:`Halo, saya Pak War — asisten operasional gudang PLN.\n\nSaya siap membantu membaca kondisi stok, transaksi TUG, approval, forecast, dan prioritas pekerjaan. Pilih contoh pertanyaan di atas atau tulis pertanyaan Anda sendiri.` }]);
