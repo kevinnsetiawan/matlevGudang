@@ -2112,3 +2112,59 @@
     flex-wrap: wrap;
   }
 }
+
+/* ── PWA Mobile UX & Corporate Design Polish (web-design-guidelines) ───────
+   Mengoptimalkan pengalaman pengguna di Handphone/PWA:
+   - Menghapus efek tap flash bawaan browser mobile (-webkit-tap-highlight-color).
+   - Menghilangkan delay 300ms saat sentuh tombol (touch-action: manipulation).
+   - Penanganan Safe Area Inset (notch & home indicator di iOS/Android).
+   - Visual corporate navy yang elegan, bersih, dan ringkas. */
+@media (max-width: 768px) {
+  html, body {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overscroll-behavior-y: none;
+  }
+
+  /* Safe area inset untuk PWA fullscreen / standalone mode */
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  /* Tombol & kontrol interaktif seluler yang responsif dan elegan */
+  .app-content button, 
+  .app-content a,
+  .app-content input,
+  .app-content select {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Kartu & Container PWA Mobile - Korporat & Ringkas */
+  .pwa-mobile-card {
+    background: var(--color-surface, #ffffff);
+    border: 1px solid var(--color-border, #e6eaf1);
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 2px 8px -2px rgba(11, 37, 89, 0.06);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+  .pwa-mobile-card:active {
+    transform: scale(0.99);
+  }
+
+  /* Fixed Bottom Action Bar di HP */
+  .pwa-sticky-bottom-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 90;
+    background: var(--color-surface, #ffffff);
+    border-top: 1px solid var(--color-border, #e6eaf1);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 16px rgba(11, 37, 89, 0.08);
+  }
+}
+
